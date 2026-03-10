@@ -98,6 +98,12 @@ export default function GameBoard() {
     }
   };
 
+  const handlePlayAI = (difficulty: number) => {
+    if (socket) {
+      socket.emit('playVsAi', { difficulty });
+    }
+  };
+
   const isMoveLegal = (from: Position, to: Position) => {
     return legalMoves.find(
       (m) => m.from.row === from.row && m.from.col === from.col && m.to.row === to.row && m.to.col === to.col
@@ -136,12 +142,36 @@ export default function GameBoard() {
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
         <p className="text-gray-600">{status}</p>
-        <button
-          onClick={handleFindMatch}
-          className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-        >
-          Find Match
-        </button>
+
+        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+          <button
+            onClick={handleFindMatch}
+            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+          >
+            Play Multiplayer
+          </button>
+
+          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
+
+          <button
+            onClick={() => handlePlayAI(1)}
+            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
+          >
+            Play AI (Easy)
+          </button>
+          <button
+            onClick={() => handlePlayAI(2)}
+            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
+          >
+            Play AI (Medium)
+          </button>
+          <button
+            onClick={() => handlePlayAI(3)}
+            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
+          >
+            Play AI (Hard)
+          </button>
+        </div>
       </div>
     );
   }

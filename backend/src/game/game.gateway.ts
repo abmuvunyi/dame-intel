@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { DraughtsEngine, PieceColor } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
+import { AiService } from './ai/ai/ai.service';
 
 interface GameRoom {
   roomId: string;
@@ -19,10 +20,14 @@ interface GameRoom {
     [PieceColor.DARK]?: string;  // Socket ID
   };
   spectators: string[];
+  aiDifficulty?: number;
+  aiColor?: PieceColor;
 }
 
 @WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  constructor(private readonly aiService: AiService) {}
+
   @WebSocketServer()
   server: Server;
 
@@ -65,6 +70,44 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       this.socketToRoom.delete(client.id);
     }
+  }
+
+  @SubscribeMessage('playVsAi')
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+    // Remove from existing game if any
+    const existingRoom = this.socketToRoom.get(client.id);
+    if(existingRoom) {
+      // (Optional) handle leaving cleanly
+      this.handleDisconnect(client);
+    }
+
+    const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    const room: GameRoom = {
+      roomId,
+      engine: new DraughtsEngine(),
+      players: {
+        [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
+      },
+      spectators: [],
+      aiDifficulty: data.difficulty || 2, // Default to level 2
+      aiColor: PieceColor.DARK,
+    };
+
+    this.activeGames.set(roomId, room);
+    this.socketToRoom.set(client.id, roomId);
+
+    // Join socket.io room
+    this.server.sockets.sockets.get(client.id)?.join(roomId);
+
+    // Notify player
+    this.server.to(client.id).emit('gameStart', {
+      roomId,
+      color: PieceColor.LIGHT,
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      legalMoves: room.engine.getLegalMoves()
+    });
   }
 
   @SubscribeMessage('joinMatchmaking')
@@ -170,9 +213,57 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const winner = room.engine.getWinner();
       if (winner) {
         this.server.to(roomId).emit('gameOver', { winner });
+      } else {
+        // If playing against AI and it's AI's turn
+        if (room.aiColor === currentTurn) {
+          this.triggerAiTurn(roomId, room);
+        }
       }
     } else {
       client.emit('invalidMove');
     }
+  }
+
+  private triggerAiTurn(roomId: string, room: GameRoom) {
+    if (!room.aiDifficulty || !room.aiColor) return;
+
+    // Small delay so the AI doesn't feel instant/robotic
+    setTimeout(() => {
+      // Double check it's still AI's turn
+      if (room.engine.getCurrentTurn() !== room.aiColor) return;
+
+      const bestMove = this.aiService.getBestMove(room.engine, room.aiDifficulty!);
+
+      if (bestMove) {
+        const success = room.engine.makeMove(bestMove);
+        if (success) {
+          const newTurn = room.engine.getCurrentTurn();
+
+          this.server.to(roomId).emit('gameState', {
+            board: room.engine.getBoard(),
+            turn: newTurn,
+          });
+
+          // Send legal moves back to human player
+          if (room.players[PieceColor.LIGHT] && newTurn === PieceColor.LIGHT) {
+             this.server.to(room.players[PieceColor.LIGHT]).emit('legalMoves', room.engine.getLegalMoves());
+          }
+
+          const winner = room.engine.getWinner();
+          if (winner) {
+            this.server.to(roomId).emit('gameOver', { winner });
+          } else if (newTurn === room.aiColor) {
+            // Multi-jump scenarios: If the engine didn't switch turns, AI goes again
+            this.triggerAiTurn(roomId, room);
+          }
+        }
+      } else {
+        // AI has no moves
+        const winner = room.engine.getWinner();
+        if (winner) {
+           this.server.to(roomId).emit('gameOver', { winner });
+        }
+      }
+    }, 500); // 500ms delay
   }
 }
