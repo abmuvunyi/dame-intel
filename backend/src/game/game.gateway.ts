@@ -104,6 +104,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.socketToUser.delete(client.id);
   }
 
+  @SubscribeMessage('getActiveGames')
+  handleGetActiveGames(@ConnectedSocket() client: Socket) {
+    const games = Array.from(this.activeGames.values()).map(room => ({
+      roomId: room.roomId,
+      player1: room.playerProfiles[PieceColor.LIGHT]?.username || 'Player 1',
+      player2: room.aiDifficulty ? 'AI' : (room.playerProfiles[PieceColor.DARK]?.username || 'Player 2'),
+      spectatorsCount: room.spectators.length,
+    }));
+    client.emit('activeGamesList', games);
+  }
+
+  @SubscribeMessage('joinSpectator')
+  handleJoinSpectator(@ConnectedSocket() client: Socket, @MessageBody() data: { roomId: string }) {
+    const room = this.activeGames.get(data.roomId);
+    if (!room) {
+      client.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    room.spectators.push(client.id);
+    this.socketToRoom.set(client.id, room.roomId);
+    client.join(room.roomId);
+
+    // Send current state
+    client.emit('gameStart', {
+      roomId: room.roomId,
+      color: null, // Spectator has no color
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      legalMoves: [] // Spectators can't move
+    });
+
+    this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
+  }
+
   @SubscribeMessage('playVsAi')
   handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
     // Remove from existing game if any

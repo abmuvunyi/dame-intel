@@ -28,6 +28,9 @@ export default function Home() {
         <div className="flex space-x-4">
           {isAuthenticated ? (
             <>
+              <Link href="/puzzles" className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition shadow">
+                Train / Puzzles
+              </Link>
               <Link href="/profile" className="px-4 py-2 text-sm font-medium text-white bg-slate-800 rounded hover:bg-slate-900 transition shadow">
                 My Profile
               </Link>

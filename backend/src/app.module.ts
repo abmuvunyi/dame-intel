@@ -7,6 +7,7 @@ import { GameModule } from './game/game.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { HistoryModule } from './history/history.module';
+import { PuzzlesModule } from './puzzles/puzzles.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { HistoryModule } from './history/history.module';
     UsersModule,
     AuthModule,
     HistoryModule,
+    PuzzlesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

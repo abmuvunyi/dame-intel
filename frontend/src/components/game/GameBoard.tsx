@@ -41,6 +41,8 @@ export default function GameBoard() {
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
   const [selectedPos, setSelectedPos] = useState<Position | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [activeGames, setActiveGames] = useState<any[]>([]);
+  const [spectatorCount, setSpectatorCount] = useState(0);
 
   useEffect(() => {
     // Connect to backend WebSocket
@@ -52,19 +54,28 @@ export default function GameBoard() {
 
     newSocket.on('connect', () => {
       setStatus('Connected to server. Click Find Match to begin.');
+      newSocket.emit('getActiveGames');
+    });
+
+    newSocket.on('activeGamesList', (games: any[]) => {
+      setActiveGames(games);
     });
 
     newSocket.on('waitingForOpponent', () => {
       setStatus('Waiting in matchmaking queue...');
     });
 
-    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor, board: BoardState, turn: PieceColor, legalMoves: Move[] }) => {
+    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor, legalMoves: Move[] }) => {
       setRoomId(data.roomId);
       setMyColor(data.color);
       setBoard(data.board);
       setCurrentTurn(data.turn);
       setLegalMoves(data.legalMoves || []);
-      setStatus(`Game Started! You are ${data.color === PieceColor.LIGHT ? 'Light (Bottom)' : 'Dark (Top)'}.`);
+      if (data.color) {
+         setStatus(`Game Started! You are ${data.color === PieceColor.LIGHT ? 'Light (Bottom)' : 'Dark (Top)'}.`);
+      } else {
+         setStatus('Spectating match...');
+      }
     });
 
     newSocket.on('gameState', (data: { board: BoardState, turn: PieceColor }) => {
@@ -90,6 +101,10 @@ export default function GameBoard() {
       setSelectedPos(null);
     });
 
+    newSocket.on('spectatorJoined', (data: { count: number }) => {
+      setSpectatorCount(data.count);
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -104,6 +119,12 @@ export default function GameBoard() {
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
       socket.emit('playVsAi', { difficulty });
+    }
+  };
+
+  const handleWatchGame = (roomIdToWatch: string) => {
+    if (socket) {
+      socket.emit('joinSpectator', { roomId: roomIdToWatch });
     }
   };
 
@@ -175,6 +196,26 @@ export default function GameBoard() {
             Play AI (Hard)
           </button>
         </div>
+
+        {activeGames.length > 0 && (
+          <div className="mt-8 w-full">
+            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
+            <ul className="space-y-2">
+              {activeGames.map((game, i) => (
+                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
+                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                   <button
+                     onClick={() => handleWatchGame(game.roomId)}
+                     className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                   >
+                     Watch ({game.spectatorsCount} 👀)
+                   </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -185,9 +226,12 @@ export default function GameBoard() {
   return (
     <div className="flex flex-col items-center py-10 space-y-4">
       <h1 className="text-2xl font-bold">Game Room: {roomId}</h1>
+      <div className="flex space-x-4 text-sm text-gray-500">
+         <span>{spectatorCount} Spectator(s)</span>
+      </div>
       <p className="text-lg">Status: {status}</p>
       <p className="text-xl font-semibold">
-        {currentTurn === myColor ? "It's your turn!" : "Waiting for opponent..."}
+        {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
       </p>
 
       <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl">
