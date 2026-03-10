@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { HistoryModule } from './history/history.module';
 import { PuzzlesModule } from './puzzles/puzzles.module';
+import { TournamentsModule } from './tournaments/tournaments.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PuzzlesModule } from './puzzles/puzzles.module';
     AuthModule,
     HistoryModule,
     PuzzlesModule,
+    TournamentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
