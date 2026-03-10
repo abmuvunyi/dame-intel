@@ -44,7 +44,10 @@ export default function GameBoard() {
 
   useEffect(() => {
     // Connect to backend WebSocket
-    const newSocket = io('http://localhost:3001'); // Assume NestJS runs on 3001
+    const token = localStorage.getItem('token');
+    const newSocket = io('http://localhost:3001', {
+      auth: { token }
+    });
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

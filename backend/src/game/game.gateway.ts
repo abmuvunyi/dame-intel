@@ -11,6 +11,10 @@ import { Server, Socket } from 'socket.io';
 import { DraughtsEngine, PieceColor } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
 import { AiService } from './ai/ai/ai.service';
+import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
+import { HistoryService } from '../history/history.service';
+import { jwtConstants } from '../auth/constants';
 
 interface GameRoom {
   roomId: string;
@@ -22,11 +26,21 @@ interface GameRoom {
   spectators: string[];
   aiDifficulty?: number;
   aiColor?: PieceColor;
+  playerProfiles: {
+    [PieceColor.LIGHT]?: any;
+    [PieceColor.DARK]?: any;
+  }
+  moves: Move[];
 }
 
 @WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+    private readonly historyService: HistoryService,
+  ) {}
 
   @WebSocketServer()
   server: Server;
@@ -34,9 +48,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private waitingPlayers: string[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
+  private socketToUser: Map<string, any> = new Map(); // Store authenticated users
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
+
+    // Optional Auth via query or auth payload (socket.io v4 feature)
+    const token = client.handshake.auth.token || client.handshake.query.token;
+    if (token) {
+      try {
+        const payload = await this.jwtService.verifyAsync(token, { secret: jwtConstants.secret });
+        const user = await this.usersService.findOneById(payload.sub);
+        if (user) {
+          const { passwordHash, ...profile } = user;
+          this.socketToUser.set(client.id, profile);
+          console.log(`Authenticated user connected: ${profile.username}`);
+        }
+      } catch (err) {
+        console.warn('Invalid token on websocket connection');
+      }
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -70,6 +101,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       this.socketToRoom.delete(client.id);
     }
+    this.socketToUser.delete(client.id);
   }
 
   @SubscribeMessage('playVsAi')
@@ -92,6 +124,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       spectators: [],
       aiDifficulty: data.difficulty || 2, // Default to level 2
       aiColor: PieceColor.DARK,
+      playerProfiles: {
+        [PieceColor.LIGHT]: this.socketToUser.get(client.id),
+      },
+      moves: []
     };
 
     this.activeGames.set(roomId, room);
@@ -137,6 +173,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           [PieceColor.DARK]: player2Id,
         },
         spectators: [],
+        playerProfiles: {
+          [PieceColor.LIGHT]: this.socketToUser.get(player1Id),
+          [PieceColor.DARK]: this.socketToUser.get(player2Id),
+        },
+        moves: []
       };
 
       this.activeGames.set(roomId, room);
@@ -189,6 +230,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const success = room.engine.makeMove(move);
 
     if (success) {
+      room.moves.push(move);
       const currentTurn = room.engine.getCurrentTurn();
 
       // Broadcast updated state
@@ -212,7 +254,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const winner = room.engine.getWinner();
       if (winner) {
-        this.server.to(roomId).emit('gameOver', { winner });
+        this.handleGameOver(roomId, room, winner);
       } else {
         // If playing against AI and it's AI's turn
         if (room.aiColor === currentTurn) {
@@ -237,6 +279,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (bestMove) {
         const success = room.engine.makeMove(bestMove);
         if (success) {
+          room.moves.push(bestMove);
           const newTurn = room.engine.getCurrentTurn();
 
           this.server.to(roomId).emit('gameState', {
@@ -251,7 +294,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
           const winner = room.engine.getWinner();
           if (winner) {
-            this.server.to(roomId).emit('gameOver', { winner });
+            this.handleGameOver(roomId, room, winner);
           } else if (newTurn === room.aiColor) {
             // Multi-jump scenarios: If the engine didn't switch turns, AI goes again
             this.triggerAiTurn(roomId, room);
@@ -261,9 +304,45 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // AI has no moves
         const winner = room.engine.getWinner();
         if (winner) {
-           this.server.to(roomId).emit('gameOver', { winner });
+           this.handleGameOver(roomId, room, winner);
         }
       }
     }, 500); // 500ms delay
+  }
+
+  private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
+    this.server.to(roomId).emit('gameOver', { winner });
+
+    // Save to database
+    try {
+       await this.historyService.saveGame(
+          room.playerProfiles[PieceColor.LIGHT] || null,
+          room.playerProfiles[PieceColor.DARK] || null,
+          winner as 'L'|'D'|'DRAW',
+          room.moves
+       );
+
+       // Update ELO if both are authenticated real players
+       const p1 = room.playerProfiles[PieceColor.LIGHT];
+       const p2 = room.playerProfiles[PieceColor.DARK];
+
+       if (p1 && p2 && !room.aiDifficulty) {
+          // Simple ELO placeholder
+          if (winner === PieceColor.LIGHT) {
+             await this.usersService.updateRating(p1.id, 15, 'win');
+             await this.usersService.updateRating(p2.id, -15, 'loss');
+          } else if (winner === PieceColor.DARK) {
+             await this.usersService.updateRating(p1.id, -15, 'loss');
+             await this.usersService.updateRating(p2.id, 15, 'win');
+          } else {
+             await this.usersService.updateRating(p1.id, 0, 'draw');
+             await this.usersService.updateRating(p2.id, 0, 'draw');
+          }
+       }
+    } catch(err) {
+       console.error('Failed to save game history:', err);
+    }
+
+    this.activeGames.delete(roomId);
   }
 }
