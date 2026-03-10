@@ -19,6 +19,7 @@ import { jwtConstants } from '../auth/constants';
 interface GameRoom {
   roomId: string;
   engine: DraughtsEngine;
+  variant: '8x8' | '10x10';
   players: {
     [PieceColor.LIGHT]?: string; // Socket ID
     [PieceColor.DARK]?: string;  // Socket ID
@@ -45,7 +46,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: string[] = [];
+  private waitingPlayers: { id: string, variant: '8x8' | '10x10' }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -74,7 +75,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`Client disconnected: ${client.id}`);
 
     // Remove from matchmaking queue
-    this.waitingPlayers = this.waitingPlayers.filter(id => id !== client.id);
+    this.waitingPlayers = this.waitingPlayers.filter(p => p.id !== client.id);
 
     // Handle disconnecting from an active game
     const roomId = this.socketToRoom.get(client.id);
@@ -140,7 +141,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, variant?: '8x8'|'10x10' }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -149,10 +150,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const variant = data.variant || '8x8';
 
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(),
+      variant,
+      engine: new DraughtsEngine(variant),
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -182,8 +185,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket) {
-    if (this.waitingPlayers.includes(client.id)) return;
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data: { variant?: '8x8'|'10x10' } = {}) {
+    if (this.waitingPlayers.some(p => p.id === client.id)) return;
 
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
@@ -191,40 +194,47 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    this.waitingPlayers.push(client.id);
+    const requestedVariant = data.variant || '8x8';
+    this.waitingPlayers.push({ id: client.id, variant: requestedVariant });
 
-    if (this.waitingPlayers.length >= 2) {
+    const matchingPlayers = this.waitingPlayers.filter(p => p.variant === requestedVariant);
+
+    if (matchingPlayers.length >= 2) {
       // Match found
-      const player1Id = this.waitingPlayers.shift()!;
-      const player2Id = this.waitingPlayers.shift()!;
+      const player1 = matchingPlayers[0];
+      const player2 = matchingPlayers[1];
+
+      // Remove from queue
+      this.waitingPlayers = this.waitingPlayers.filter(p => p.id !== player1.id && p.id !== player2.id);
 
       const roomId = `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
       const room: GameRoom = {
         roomId,
-        engine: new DraughtsEngine(),
+        variant: requestedVariant,
+        engine: new DraughtsEngine(requestedVariant),
         players: {
-          [PieceColor.LIGHT]: player1Id,
-          [PieceColor.DARK]: player2Id,
+          [PieceColor.LIGHT]: player1.id,
+          [PieceColor.DARK]: player2.id,
         },
         spectators: [],
         playerProfiles: {
-          [PieceColor.LIGHT]: this.socketToUser.get(player1Id),
-          [PieceColor.DARK]: this.socketToUser.get(player2Id),
+          [PieceColor.LIGHT]: this.socketToUser.get(player1.id),
+          [PieceColor.DARK]: this.socketToUser.get(player2.id),
         },
         moves: []
       };
 
       this.activeGames.set(roomId, room);
-      this.socketToRoom.set(player1Id, roomId);
-      this.socketToRoom.set(player2Id, roomId);
+      this.socketToRoom.set(player1.id, roomId);
+      this.socketToRoom.set(player2.id, roomId);
 
       // Join socket.io rooms
-      this.server.sockets.sockets.get(player1Id)?.join(roomId);
-      this.server.sockets.sockets.get(player2Id)?.join(roomId);
+      this.server.sockets.sockets.get(player1.id)?.join(roomId);
+      this.server.sockets.sockets.get(player2.id)?.join(roomId);
 
       // Notify players
-      this.server.to(player1Id).emit('gameStart', {
+      this.server.to(player1.id).emit('gameStart', {
         roomId,
         color: PieceColor.LIGHT,
         board: room.engine.getBoard(),
@@ -232,7 +242,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         legalMoves: room.engine.getLegalMoves()
       });
 
-      this.server.to(player2Id).emit('gameStart', {
+      this.server.to(player2.id).emit('gameStart', {
         roomId,
         color: PieceColor.DARK,
         board: room.engine.getBoard(),

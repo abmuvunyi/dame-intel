@@ -30,19 +30,24 @@ export interface Move {
 export class DraughtsEngine {
   private board: BoardState;
   private currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  public readonly BOARD_SIZE: number;
+  public readonly variant: '8x8' | '10x10';
 
-  constructor() {
+  constructor(variant: '8x8' | '10x10' = '8x8') {
+    this.variant = variant;
+    this.BOARD_SIZE = variant === '10x10' ? 10 : 8;
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
   }
 
-  // Generate an 8x8 standard Draughts board
+  // Generate standard or international Draughts board
   private createInitialBoard(): BoardState {
     const board: BoardState = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 
-    // Dark pieces (top 3 rows)
-    for (let row = 0; row < 3; row++) {
+    const rowsPerSide = this.variant === '10x10' ? 4 : 3;
+
+    // Dark pieces (top rows)
+    for (let row = 0; row < rowsPerSide; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
@@ -50,8 +55,8 @@ export class DraughtsEngine {
       }
     }
 
-    // Light pieces (bottom 3 rows)
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    // Light pieces (bottom rows)
+    for (let row = this.BOARD_SIZE - rowsPerSide; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
@@ -115,7 +120,15 @@ export class DraughtsEngine {
     }
 
     // Forced capture rule: if any jump is possible, only jumps are legal
-    return jumps.length > 0 ? jumps : normalMoves;
+    if (jumps.length > 0) {
+      if (this.variant === '10x10') {
+        // Majority capture rule
+        const maxCaptures = Math.max(...jumps.map(j => j.captured?.length || 0));
+        return jumps.filter(j => (j.captured?.length || 0) === maxCaptures);
+      }
+      return jumps;
+    }
+    return normalMoves;
   }
 
   private isValidPos(r: number, c: number): boolean {
@@ -136,11 +149,26 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     for (const dir of dirs) {
-      const nr = pos.row + dir.dr;
-      const nc = pos.col + dir.dc;
+      if (piece.type === PieceType.KING && this.variant === '10x10') {
+        // Flying king: can move any number of empty squares
+        let step = 1;
+        while (true) {
+          const nr = pos.row + dir.dr * step;
+          const nc = pos.col + dir.dc * step;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
+          } else {
+            break;
+          }
+        }
+      } else {
+        const nr = pos.row + dir.dr;
+        const nc = pos.col + dir.dc;
 
-      if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
-        moves.push({ from: pos, to: { row: nr, col: nc } });
+        if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+          moves.push({ from: pos, to: { row: nr, col: nc } });
+        }
       }
     }
 
@@ -150,44 +178,108 @@ export class DraughtsEngine {
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     let hasSubJumps = false;
     const jumps: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
+
+    // In 10x10, men can capture backwards
+    let dirs = this.getMoveDirections(piece);
+    if (this.variant === '10x10' && piece.type === PieceType.MAN) {
+       dirs = [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
 
     for (const dir of dirs) {
-      const overR = currentPos.row + dir.dr;
-      const overC = currentPos.col + dir.dc;
-      const landR = currentPos.row + dir.dr * 2;
-      const landC = currentPos.col + dir.dc * 2;
+      if (piece.type === PieceType.KING && this.variant === '10x10') {
+        // Flying King jump logic
+        let step = 1;
+        let foundPieceToJump = false;
+        let overPos: Position | null = null;
 
-      // Check bounds
-      if (!this.isValidPos(landR, landC)) continue;
+        while (true) {
+           const currR = currentPos.row + dir.dr * step;
+           const currC = currentPos.col + dir.dc * step;
 
-      const overPiece = this.board[overR][overC];
-      const landPos = this.board[landR][landC];
+           if (!this.isValidPos(currR, currC)) break;
 
-      // We can jump if there's an opponent piece and the landing spot is empty
-      // Also ensure we haven't already captured this exact piece in the current sequence (multi-jump loop prevention)
-      const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+           const sq = this.board[currR][currC];
 
-      if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
-        hasSubJumps = true;
-        const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+           if (!foundPieceToJump) {
+             if (sq !== null) {
+                if (sq.color === piece.color) break; // Blocked by own piece
+                // Found opponent piece
+                // Check if already captured in sequence
+                const alreadyCaptured = capturedSoFar.some(cap => cap.row === currR && cap.col === currC);
+                if (alreadyCaptured) break; // Can't jump same piece twice
 
-        // Temporarily apply the jump to check for further jumps
-        const originalCurrent = this.board[currentPos.row][currentPos.col];
-        this.board[currentPos.row][currentPos.col] = null;
-        this.board[landR][landC] = piece;
+                foundPieceToJump = true;
+                overPos = { row: currR, col: currC };
+             }
+           } else {
+             // We have passed an opponent piece, looking for landing spots
+             if (sq !== null) {
+                break; // Blocked by another piece
+             }
 
-        const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+             // Valid landing spot!
+             const landR = currR;
+             const landC = currC;
 
-        // Revert board
-        this.board[currentPos.row][currentPos.col] = originalCurrent;
-        this.board[landR][landC] = null;
+             hasSubJumps = true;
+             const newCaptured = [...capturedSoFar, overPos!];
 
-        if (subJumps.length > 0) {
-           jumps.push(...subJumps);
-        } else {
-           // End of a jump sequence
-           jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+             // Temporarily apply the jump
+             const originalCurrent = this.board[currentPos.row][currentPos.col];
+             this.board[currentPos.row][currentPos.col] = null;
+             this.board[landR][landC] = piece;
+
+             const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+             // Revert board
+             this.board[currentPos.row][currentPos.col] = originalCurrent;
+             this.board[landR][landC] = null;
+
+             if (subJumps.length > 0) {
+                jumps.push(...subJumps);
+             } else {
+                jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+             }
+           }
+           step++;
+        }
+      } else {
+        const overR = currentPos.row + dir.dr;
+        const overC = currentPos.col + dir.dc;
+        const landR = currentPos.row + dir.dr * 2;
+        const landC = currentPos.col + dir.dc * 2;
+
+        // Check bounds
+        if (!this.isValidPos(landR, landC)) continue;
+
+        const overPiece = this.board[overR][overC];
+        const landPos = this.board[landR][landC];
+
+        // We can jump if there's an opponent piece and the landing spot is empty
+        // Also ensure we haven't already captured this exact piece in the current sequence
+        const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+        if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+          hasSubJumps = true;
+          const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
+          // Temporarily apply the jump to check for further jumps
+          const originalCurrent = this.board[currentPos.row][currentPos.col];
+          this.board[currentPos.row][currentPos.col] = null;
+          this.board[landR][landC] = piece;
+
+          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+          // Revert board
+          this.board[currentPos.row][currentPos.col] = originalCurrent;
+          this.board[landR][landC] = null;
+
+          if (subJumps.length > 0) {
+             jumps.push(...subJumps);
+          } else {
+             // End of a jump sequence
+             jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+          }
         }
       }
     }

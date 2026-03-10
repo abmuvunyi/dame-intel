@@ -43,6 +43,7 @@ export default function GameBoard() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [activeGames, setActiveGames] = useState<any[]>([]);
   const [spectatorCount, setSpectatorCount] = useState(0);
+  const [selectedVariant, setSelectedVariant] = useState<'8x8' | '10x10'>('8x8');
 
   useEffect(() => {
     // Connect to backend WebSocket
@@ -112,13 +113,13 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking');
+      socket.emit('joinMatchmaking', { variant: selectedVariant });
     }
   };
 
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
-      socket.emit('playVsAi', { difficulty });
+      socket.emit('playVsAi', { difficulty, variant: selectedVariant });
     }
   };
 
@@ -168,6 +169,18 @@ export default function GameBoard() {
         <p className="text-gray-600">{status}</p>
 
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+          <div className="flex flex-col mb-2">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Select Variant:</label>
+            <select
+              value={selectedVariant}
+              onChange={(e) => setSelectedVariant(e.target.value as '8x8' | '10x10')}
+              className="p-2 border rounded bg-white"
+            >
+              <option value="8x8">8x8 Standard</option>
+              <option value="10x10">10x10 International</option>
+            </select>
+          </div>
+
           <button
             onClick={handleFindMatch}
             className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
@@ -246,19 +259,23 @@ export default function GameBoard() {
               if (isSelected) squareBg = 'bg-yellow-400';
               if (isHighlighted) squareBg = 'bg-green-400';
 
+              const is10x10 = board.length === 10;
+              const squareSizeClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-12 h-12 sm:w-16 sm:h-16';
+              const pieceSizeClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
+
               return (
                 <div
                   key={`${r}-${c}`}
                   onClick={() => handleSquareClick(r, c)}
-                  className={`w-16 h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors`}
+                  className={`${squareSizeClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors`}
                 >
                   {cell && (
                     <div className={`
-                      w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                      ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
+                      ${pieceSizeClass} rounded-full shadow-md flex items-center justify-center text-white font-bold
+                      ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-900 text-slate-200'}
                       ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
                     `}>
-                      {cell.type === PieceType.KING && 'K'}
+                      {cell.type === PieceType.KING && (is10x10 ? <span className="text-xs">K</span> : 'K')}
                     </div>
                   )}
                 </div>
