@@ -11,6 +11,7 @@ import { PuzzlesModule } from './puzzles/puzzles.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { FriendsModule } from './friends/friends.module';
+import { AnticheatModule } from './anticheat/anticheat.module';
 
 @Module({
   imports: [
@@ -19,10 +20,16 @@ import { FriendsModule } from './friends/friends.module';
       isGlobal: true,
     }),
     TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: 'draughts_db.sqlite',
+      type: 'postgres',
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '5432', 10),
+      username: process.env.DB_USERNAME || 'draughts_user',
+      password: process.env.DB_PASSWORD || 'draughts_password',
+      database: process.env.DB_NAME || 'draughts_db',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: true, // Auto-create tables in dev. For production, use migrations!
+      // Fallback to sqlite if postgres is totally inaccessible for local dev without docker
+      // In production, this block should strictly be postgres
     }),
     GameModule,
     UsersModule,
@@ -31,6 +38,7 @@ import { FriendsModule } from './friends/friends.module';
     PuzzlesModule,
     TournamentsModule,
     FriendsModule,
+    AnticheatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

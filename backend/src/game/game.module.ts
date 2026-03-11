@@ -6,9 +6,10 @@ import { UsersModule } from '../users/users.module';
 import { HistoryModule } from '../history/history.module';
 import { TournamentsModule } from '../tournaments/tournaments.module';
 import { AnalysisController } from './analysis.controller';
+import { AnticheatModule } from '../anticheat/anticheat.module';
 
 @Module({
-  imports: [UsersModule, HistoryModule, TournamentsModule],
+  imports: [UsersModule, HistoryModule, TournamentsModule, AnticheatModule],
   providers: [DraughtsEngine, GameGateway, AiService],
   controllers: [AnalysisController]
 })

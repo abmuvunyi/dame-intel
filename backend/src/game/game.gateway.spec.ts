@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
 import { TournamentsService } from '../tournaments/tournaments.service';
+import { AnticheatService } from '../anticheat/anticheat.service';
 
 describe('GameGateway', () => {
   let gateway: GameGateway;
@@ -17,7 +18,8 @@ describe('GameGateway', () => {
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: {} },
         { provide: HistoryService, useValue: {} },
-        { provide: TournamentsService, useValue: {} }
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: {} }
       ],
     }).compile();
 

@@ -16,6 +16,7 @@ import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
 import { jwtConstants } from '../auth/constants';
 import { TournamentsService } from '../tournaments/tournaments.service';
+import { AnticheatService } from '../anticheat/anticheat.service';
 
 interface GameRoom {
   roomId: string;
@@ -43,6 +44,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly usersService: UsersService,
     private readonly historyService: HistoryService,
     private readonly tournamentsService: TournamentsService,
+    private readonly anticheatService: AnticheatService,
   ) {}
 
   @WebSocketServer()
@@ -280,10 +282,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { error: 'Not your turn' };
     }
 
+    // Extract exact legal move to ensure 'captured' array and other server-validated data is used
+    // to prevent client data poisoning in the moves history
+    const legalMoves = room.engine.getLegalMoves();
+    const exactLegalMove = legalMoves.find(m =>
+        m.from.row === move.from.row && m.from.col === move.from.col &&
+        m.to.row === move.to.row && m.to.col === move.to.col
+    );
+
     const success = room.engine.makeMove(move);
 
-    if (success) {
-      room.moves.push(move);
+    if (success && exactLegalMove) {
+      room.moves.push(exactLegalMove);
       const currentTurn = room.engine.getCurrentTurn();
 
       // Broadcast updated state
@@ -378,6 +388,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
        // Update ELO if both are authenticated real players
        const p1 = room.playerProfiles[PieceColor.LIGHT];
        const p2 = room.playerProfiles[PieceColor.DARK];
+
+       // Trigger async anti-cheat analysis
+       // We don't await this because it's CPU intensive and we don't want to block the gateway
+       if (!room.aiDifficulty) {
+           this.anticheatService.analyzeGameForCheating(
+              room.playerProfiles[PieceColor.LIGHT] || null,
+              room.playerProfiles[PieceColor.DARK] || null,
+              room.moves
+           ).catch(err => console.error('Anticheat Error:', err));
+       }
 
        if (p1 && p2 && !room.aiDifficulty) {
           if (room.tournamentId) {
