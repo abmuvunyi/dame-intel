@@ -10,25 +10,22 @@ export class AiService {
   private readonly WEIGHT_CENTER = 2; // Bonus for center squares
   private readonly WEIGHT_BACK_ROW = 4; // Bonus for back row defense
 
-  public getBestMove(engine: DraughtsEngine, difficulty: number): Move | null {
+  public analyzePosition(engine: DraughtsEngine, depth: number): { move: Move, evaluation: number }[] {
     const aiColor = engine.getCurrentTurn();
-    const isMaximizingPlayer = true; // AI is always maximizing for its own color in the search root
-    const depth = difficulty * 2; // Level 1: depth 2, Level 2: depth 4... Level 4: depth 8
+    const isMaximizingPlayer = true;
 
-    // Deep clone the board so we don't mess up the real game
+    // Deep clone the board
     const cloneBoard = JSON.parse(JSON.stringify(engine.getBoard()));
     const simEngine = new DraughtsEngine();
     simEngine.loadBoard(cloneBoard, aiColor);
 
-    let bestMove: Move | null = null;
-    let maxEval = -Infinity;
-
     const legalMoves = simEngine.getLegalMoves();
-    if (legalMoves.length === 0) return null;
-    if (legalMoves.length === 1) return legalMoves[0]; // Forced move, no need to search
+    if (legalMoves.length === 0) return [];
 
-    // Sort moves to improve alpha-beta pruning (captures first)
+    // Sort moves to improve alpha-beta pruning
     legalMoves.sort((a, b) => (b.captured?.length || 0) - (a.captured?.length || 0));
+
+    const evaluations: { move: Move, evaluation: number }[] = [];
 
     for (const move of legalMoves) {
       // Simulate move
@@ -42,13 +39,22 @@ export class AiService {
       // Revert move
       simEngine.loadBoard(JSON.parse(originalState), originalTurn);
 
-      if (ev > maxEval) {
-        maxEval = ev;
-        bestMove = move;
-      }
+      evaluations.push({ move, evaluation: ev });
     }
 
-    return bestMove;
+    return evaluations.sort((a, b) => b.evaluation - a.evaluation);
+  }
+
+  public getBestMove(engine: DraughtsEngine, difficulty: number): Move | null {
+    const aiColor = engine.getCurrentTurn();
+    const isMaximizingPlayer = true; // AI is always maximizing for its own color in the search root
+    const depth = difficulty * 2; // Level 1: depth 2, Level 2: depth 4... Level 4: depth 8
+
+    const evaluations = this.analyzePosition(engine, depth);
+    if (evaluations.length === 0) return null;
+
+    // For absolute best move
+    return evaluations[0].move;
   }
 
   private minimax(engine: DraughtsEngine, depth: number, alpha: number, beta: number, maximizingPlayer: boolean, aiColor: PieceColor): number {

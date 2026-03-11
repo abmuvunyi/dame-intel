@@ -131,8 +131,16 @@ export default function Profile() {
                         <span className={`font-bold uppercase ${resultColor}`}>{isWin ? 'WIN' : (isDraw ? 'DRAW' : 'LOSS')}</span>
                         <span className="text-gray-600 ml-3">vs {opponent}</span>
                       </div>
-                      <div className="text-sm text-gray-500">
-                        {new Date(game.playedAt).toLocaleDateString()}
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm text-gray-500">
+                          {new Date(game.playedAt).toLocaleDateString()}
+                        </span>
+                        <button
+                           onClick={() => router.push(`/analysis/${game.id}`)}
+                           className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-medium rounded hover:bg-blue-200"
+                        >
+                           Analyze
+                        </button>
                       </div>
                     </li>
                   );

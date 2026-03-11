@@ -12,9 +12,13 @@ export class HistoryController {
     return this.historyService.getPlayerHistory(req.user.sub);
   }
 
-  // Allow fetching any player's history for profiles
   @Get('player/:id')
   async getPlayerHistory(@Param('id') id: string) {
     return this.historyService.getPlayerHistory(parseInt(id, 10));
+  }
+
+  @Get('game/:id')
+  async getGame(@Param('id') id: string) {
+    return this.historyService.getGame(parseInt(id, 10));
   }
 }

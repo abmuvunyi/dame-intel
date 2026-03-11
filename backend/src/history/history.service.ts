@@ -37,4 +37,11 @@ export class HistoryService {
       take: 20
     });
   }
+
+  async getGame(id: number): Promise<GameHistory | null> {
+    return this.historyRepository.findOne({
+      where: { id },
+      relations: ['lightPlayer', 'darkPlayer']
+    });
+  }
 }
