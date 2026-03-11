@@ -144,6 +144,30 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
   }
 
+  @SubscribeMessage('sendMessage')
+  handleSendMessage(@ConnectedSocket() client: Socket, @MessageBody() data: { roomId: string, message: string }) {
+    const room = this.activeGames.get(data.roomId);
+    if (!room) return;
+
+    // Determine sender identity
+    let senderName = 'Spectator';
+    if (room.players[PieceColor.LIGHT] === client.id) {
+       senderName = room.playerProfiles[PieceColor.LIGHT]?.username || 'Player 1';
+    } else if (room.players[PieceColor.DARK] === client.id) {
+       senderName = room.playerProfiles[PieceColor.DARK]?.username || 'Player 2';
+    } else {
+       // If authenticated spectator, use their username
+       const profile = this.socketToUser.get(client.id);
+       if (profile) senderName = profile.username;
+    }
+
+    this.server.to(data.roomId).emit('receiveMessage', {
+      sender: senderName,
+      message: data.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+
   @SubscribeMessage('playVsAi')
   handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
     // Remove from existing game if any

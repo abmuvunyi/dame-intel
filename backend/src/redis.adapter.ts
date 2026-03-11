@@ -8,17 +8,25 @@ export class RedisIoAdapter extends IoAdapter {
   private ready = false;
 
   async connectToRedis(): Promise<void> {
-    const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-    const subClient = pubClient.duplicate();
+    try {
+      const pubClient = createClient({
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
+        socket: {
+          reconnectStrategy: false
+        }
+      });
+      const subClient = pubClient.duplicate();
 
-    // Setup error handlers so it doesn't crash the main thread if disconnected
-    pubClient.on('error', (err) => console.log('Redis Pub Client Error:', err));
-    subClient.on('error', (err) => console.log('Redis Sub Client Error:', err));
+      pubClient.on('error', (err) => console.log('Redis Pub Client Error:', err.message));
+      subClient.on('error', (err) => console.log('Redis Sub Client Error:', err.message));
 
-    await Promise.all([pubClient.connect(), subClient.connect()]);
+      await Promise.all([pubClient.connect(), subClient.connect()]);
 
-    this.adapterConstructor = createAdapter(pubClient, subClient);
-    this.ready = true;
+      this.adapterConstructor = createAdapter(pubClient, subClient);
+      this.ready = true;
+    } catch (e) {
+      console.warn('Failed to connect to redis, falling back to memory adapter', e.message);
+    }
   }
 
   isReady(): boolean {

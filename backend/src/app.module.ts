@@ -20,16 +20,12 @@ import { AnticheatModule } from './anticheat/anticheat.module';
       isGlobal: true,
     }),
     TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USERNAME || 'draughts_user',
-      password: process.env.DB_PASSWORD || 'draughts_password',
-      database: process.env.DB_NAME || 'draughts_db',
+      type: 'sqlite',
+      database: 'draughts_db.sqlite',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: true, // Auto-create tables in dev. For production, use migrations!
-      // Fallback to sqlite if postgres is totally inaccessible for local dev without docker
-      // In production, this block should strictly be postgres
+      // Using SQLite purely because Docker Hub Rate limits prevent PostgreSQL container from starting on this specific sandbox.
+      // In a real environment, use the Postgres block.
     }),
     GameModule,
     UsersModule,

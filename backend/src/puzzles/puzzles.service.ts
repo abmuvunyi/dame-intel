@@ -79,6 +79,44 @@ export class PuzzlesService implements OnModuleInit {
       correctMove: move2
     });
 
-    await this.puzzlesRepository.save([p1, p2]);
+    // Puzzle 3: King Multi-Jump (Hard)
+    // King at 7,0 jumps backwards over pieces at 6,1 and 4,3 to land at 3,4
+    const board3: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
+    board3[7][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    board3[6][1] = { color: PieceColor.DARK, type: PieceType.MAN };
+    board3[4][3] = { color: PieceColor.DARK, type: PieceType.KING };
+
+    const move3: Move = {
+      from: { row: 7, col: 0 },
+      to: { row: 3, col: 4 },
+      captured: [{ row: 6, col: 1 }, { row: 4, col: 3 }]
+    };
+
+    const p3 = this.puzzlesRepository.create({
+      difficulty: 3,
+      board: board3,
+      turnToMove: 'L',
+      correctMove: move3
+    });
+
+    // Puzzle 4: Dark to Move - simple jump to win
+    const board4: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
+    board4[1][4] = { color: PieceColor.DARK, type: PieceType.MAN };
+    board4[2][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+
+    const move4: Move = {
+      from: { row: 1, col: 4 },
+      to: { row: 3, col: 2 },
+      captured: [{ row: 2, col: 3 }]
+    };
+
+    const p4 = this.puzzlesRepository.create({
+      difficulty: 1,
+      board: board4,
+      turnToMove: 'D',
+      correctMove: move4
+    });
+
+    await this.puzzlesRepository.save([p1, p2, p3, p4]);
   }
 }

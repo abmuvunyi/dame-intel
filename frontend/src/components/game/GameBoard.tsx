@@ -43,6 +43,8 @@ export default function GameBoard() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [activeGames, setActiveGames] = useState<any[]>([]);
   const [spectatorCount, setSpectatorCount] = useState(0);
+  const [chatMessages, setChatMessages] = useState<{sender: string, message: string, timestamp: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -113,6 +115,10 @@ export default function GameBoard() {
       setSpectatorCount(data.count);
     });
 
+    newSocket.on('receiveMessage', (msg: {sender: string, message: string, timestamp: string}) => {
+      setChatMessages(prev => [...prev, msg]);
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -134,6 +140,14 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('joinSpectator', { roomId: roomIdToWatch });
     }
+  };
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!socket || !roomId || !chatInput.trim()) return;
+
+    socket.emit('sendMessage', { roomId, message: chatInput });
+    setChatInput('');
   };
 
   const isMoveLegal = (from: Position, to: Position) => {
@@ -232,49 +246,94 @@ export default function GameBoard() {
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
   return (
-    <div className="flex flex-col items-center py-10 space-y-4">
-      <h1 className="text-2xl font-bold">Game Room: {roomId}</h1>
-      <div className="flex space-x-4 text-sm text-gray-500">
-         <span>{spectatorCount} Spectator(s)</span>
+    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+
+      {/* Board Column */}
+      <div className="flex flex-col items-center space-y-4">
+        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
+        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
+          <span>{spectatorCount} Spectator(s)</span>
+        </div>
+        <p className="text-md text-gray-600">{status}</p>
+        <p className="text-xl font-semibold text-blue-700">
+          {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
+        </p>
+
+        <div className="border-[6px] border-slate-800 p-1 bg-slate-200 shadow-2xl rounded-sm">
+          {board.map((row, r) => (
+            <div key={r} className="flex">
+              {row.map((cell, c) => {
+                const isDarkSquare = (r + c) % 2 !== 0;
+                const isSelected = selectedPos?.row === r && selectedPos?.col === c;
+                const isHighlighted = validDestinations.includes(`${r},${c}`);
+
+                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
+                if (isSelected) squareBg = 'bg-yellow-400';
+                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
+
+                return (
+                  <div
+                    key={`${r}-${c}`}
+                    onClick={() => handleSquareClick(r, c)}
+                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
+                  >
+                    {cell && (
+                      <div className={`
+                        w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
+                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
+                        ${cell.type === PieceType.KING ? 'ring-4 ring-yellow-400' : ''}
+                      `}>
+                        {cell.type === PieceType.KING && 'K'}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
-      <p className="text-lg">Status: {status}</p>
-      <p className="text-xl font-semibold">
-        {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
-      </p>
 
-      <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl">
-        {board.map((row, r) => (
-          <div key={r} className="flex">
-            {row.map((cell, c) => {
-              const isDarkSquare = (r + c) % 2 !== 0;
-              const isSelected = selectedPos?.row === r && selectedPos?.col === c;
-              const isHighlighted = validDestinations.includes(`${r},${c}`);
+      {/* Chat Column */}
+      <div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-[600px]">
+        <div className="bg-slate-800 text-white p-4 rounded-t-lg">
+          <h3 className="font-bold">Live Chat</h3>
+        </div>
 
-              let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
-              if (isSelected) squareBg = 'bg-yellow-400';
-              if (isHighlighted) squareBg = 'bg-green-400';
+        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+          {chatMessages.length === 0 ? (
+             <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
+          ) : (
+            chatMessages.map((msg, i) => (
+              <div key={i} className="flex flex-col">
+                <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
+                <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                  {msg.message}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
 
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  onClick={() => handleSquareClick(r, c)}
-                  className={`w-16 h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors`}
-                >
-                  {cell && (
-                    <div className={`
-                      w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                      ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
-                      ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
-                    `}>
-                      {cell.type === PieceType.KING && 'K'}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
+        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+          <form onSubmit={handleSendMessage} className="flex gap-2">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              placeholder="Type a message..."
+              className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="submit"
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700 transition"
+            >
+              Send
+            </button>
+          </form>
+        </div>
       </div>
+
     </div>
   );
 }
