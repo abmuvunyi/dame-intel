@@ -53,7 +53,7 @@ export default function GameBoard() {
   useEffect(() => {
     // Connect to backend WebSocket
     const token = localStorage.getItem('token');
-    const newSocket = io('http://localhost:3001', {
+    const newSocket = io((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'), {
       auth: { token }
     });
     setSocket(newSocket);

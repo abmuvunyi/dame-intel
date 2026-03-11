@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -19,13 +19,27 @@ import { AnticheatModule } from './anticheat/anticheat.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: 'draughts_db.sqlite',
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: true, // Auto-create tables in dev. For production, use migrations!
-      // Using SQLite purely because Docker Hub Rate limits prevent PostgreSQL container from starting on this specific sandbox.
-      // In a real environment, use the Postgres block.
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const dbUrl = configService.get('DATABASE_URL');
+        if (dbUrl) {
+          return {
+            type: 'postgres',
+            url: dbUrl,
+            entities: [__dirname + '/**/*.entity{.ts,.js}'],
+            synchronize: true, // Auto-create tables in dev. For production, use migrations!
+            ssl: { rejectUnauthorized: false } // Needed for many managed Postgres providers
+          };
+        }
+        return {
+          type: 'sqlite',
+          database: 'draughts_db.sqlite',
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          synchronize: true,
+        };
+      }
     }),
     GameModule,
     UsersModule,

@@ -11,7 +11,7 @@ export default function TournamentsList() {
   useEffect(() => {
     const fetchTournaments = async () => {
       try {
-        const res = await axios.get('http://localhost:3001/tournaments');
+        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tournaments`);
         setTournaments(res.data);
       } catch (err) {
         console.error(err);

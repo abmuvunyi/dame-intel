@@ -21,13 +21,13 @@ export default function Profile() {
 
       try {
         const [profileRes, historyRes, friendsRes] = await Promise.all([
-           axios.get('http://localhost:3001/auth/profile', {
+           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/profile`, {
              headers: { Authorization: `Bearer ${token}` }
            }),
-           axios.get('http://localhost:3001/history/my-games', {
+           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/history/my-games`, {
              headers: { Authorization: `Bearer ${token}` }
            }),
-           axios.get('http://localhost:3001/friends', {
+           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends`, {
              headers: { Authorization: `Bearer ${token}` }
            })
         ]);
@@ -48,7 +48,7 @@ export default function Profile() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:3001/friends/add', { username: newFriendName }, {
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/add`, { username: newFriendName }, {
          headers: { Authorization: `Bearer ${token}` }
       });
       setNewFriendName('');
@@ -61,7 +61,7 @@ export default function Profile() {
   const handleAcceptFriend = async (id: number) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`http://localhost:3001/friends/accept/${id}`, {}, {
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/accept/${id}`, {}, {
          headers: { Authorization: `Bearer ${token}` }
       });
       // Update local state

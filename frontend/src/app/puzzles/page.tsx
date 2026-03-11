@@ -24,7 +24,7 @@ export default function PuzzlesPage() {
       setStatus('Loading puzzle...');
       setSolved(false);
       setSelectedPos(null);
-      const res = await axios.get('http://localhost:3001/puzzles/random');
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/puzzles/random`);
       setPuzzle(res.data);
       setStatus(`Puzzle #${res.data.id} - Difficulty: ${res.data.difficulty} - Find the best move for ${res.data.turnToMove === 'L' ? 'Light' : 'Dark'}`);
     } catch (err) {

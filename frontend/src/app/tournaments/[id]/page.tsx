@@ -17,8 +17,8 @@ export default function TournamentDetails() {
   const fetchDetails = async () => {
     try {
       const [tRes, sRes] = await Promise.all([
-        axios.get(`http://localhost:3001/tournaments/${id}`),
-        axios.get(`http://localhost:3001/tournaments/${id}/standings`)
+        axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tournaments/${id}`),
+        axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tournaments/${id}/standings`)
       ]);
       setTournament(tRes.data);
       setStandings(sRes.data);
@@ -27,7 +27,7 @@ export default function TournamentDetails() {
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          const profile = await axios.get('http://localhost:3001/auth/profile', { headers: { Authorization: `Bearer ${token}` }});
+          const profile = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/profile`, { headers: { Authorization: `Bearer ${token}` }});
           if (sRes.data.some((p: any) => p.user.id === profile.data.id)) {
             setJoined(true);
           }
@@ -52,7 +52,7 @@ export default function TournamentDetails() {
     }
 
     try {
-      await axios.post(`http://localhost:3001/tournaments/${id}/join`, {}, {
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tournaments/${id}/join`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setJoined(true);

@@ -16,7 +16,7 @@ export default function Login() {
 
     try {
       const endpoint = isRegistering ? '/auth/register' : '/auth/login';
-      const res = await axios.post(`http://localhost:3001${endpoint}`, { username, password });
+      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`, { username, password });
 
       if (res.data.access_token) {
         localStorage.setItem('token', res.data.access_token);
