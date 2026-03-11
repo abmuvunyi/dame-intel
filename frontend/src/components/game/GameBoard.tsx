@@ -44,6 +44,10 @@ export default function GameBoard() {
   const [activeGames, setActiveGames] = useState<any[]>([]);
   const [spectatorCount, setSpectatorCount] = useState(0);
 
+  const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const tIdStr = searchParams.get('tournamentId');
+  const tournamentIdToJoin = tIdStr ? parseInt(tIdStr, 10) : null;
+
   useEffect(() => {
     // Connect to backend WebSocket
     const token = localStorage.getItem('token');
@@ -53,7 +57,11 @@ export default function GameBoard() {
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
-      setStatus('Connected to server. Click Find Match to begin.');
+      if (tournamentIdToJoin) {
+         setStatus(`Connected. Click 'Find Tournament Match' to join the Arena.`);
+      } else {
+         setStatus('Connected to server. Click Find Match to begin.');
+      }
       newSocket.emit('getActiveGames');
     });
 
@@ -112,7 +120,7 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking');
+      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin });
     }
   };
 
@@ -172,7 +180,7 @@ export default function GameBoard() {
             onClick={handleFindMatch}
             className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
           >
-            Play Multiplayer
+            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
           </button>
 
           <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>

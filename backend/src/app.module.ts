@@ -9,9 +9,12 @@ import { AuthModule } from './auth/auth.module';
 import { HistoryModule } from './history/history.module';
 import { PuzzlesModule } from './puzzles/puzzles.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { FriendsModule } from './friends/friends.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -27,6 +30,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
     HistoryModule,
     PuzzlesModule,
     TournamentsModule,
+    FriendsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

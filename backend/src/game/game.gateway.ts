@@ -15,6 +15,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
 import { jwtConstants } from '../auth/constants';
+import { TournamentsService } from '../tournaments/tournaments.service';
 
 interface GameRoom {
   roomId: string;
@@ -31,6 +32,7 @@ interface GameRoom {
     [PieceColor.DARK]?: any;
   }
   moves: Move[];
+  tournamentId?: number;
 }
 
 @WebSocketGateway({ cors: true })
@@ -40,12 +42,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
     private readonly historyService: HistoryService,
+    private readonly tournamentsService: TournamentsService,
   ) {}
 
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: string[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -74,7 +77,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`Client disconnected: ${client.id}`);
 
     // Remove from matchmaking queue
-    this.waitingPlayers = this.waitingPlayers.filter(id => id !== client.id);
+    this.waitingPlayers = this.waitingPlayers.filter(p => p.socketId !== client.id);
 
     // Handle disconnecting from an active game
     const roomId = this.socketToRoom.get(client.id);
@@ -182,8 +185,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket) {
-    if (this.waitingPlayers.includes(client.id)) return;
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number }) {
+    if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
@@ -191,14 +194,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    this.waitingPlayers.push(client.id);
+    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId });
 
-    if (this.waitingPlayers.length >= 2) {
+    // Look for a match
+    let matchIdx = -1;
+    for (let i = 0; i < this.waitingPlayers.length; i++) {
+       const p = this.waitingPlayers[i];
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId) {
+          matchIdx = i;
+          break;
+       }
+    }
+
+    if (matchIdx !== -1) {
       // Match found
-      const player1Id = this.waitingPlayers.shift()!;
-      const player2Id = this.waitingPlayers.shift()!;
+      const opponent = this.waitingPlayers.splice(matchIdx, 1)[0];
+      const meIndex = this.waitingPlayers.findIndex(p => p.socketId === client.id);
+      const me = this.waitingPlayers.splice(meIndex, 1)[0];
 
-      const roomId = `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const player1Id = opponent.socketId;
+      const player2Id = me.socketId;
+
+      const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
       const room: GameRoom = {
         roomId,
@@ -212,7 +229,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           [PieceColor.LIGHT]: this.socketToUser.get(player1Id),
           [PieceColor.DARK]: this.socketToUser.get(player2Id),
         },
-        moves: []
+        moves: [],
+        tournamentId: data?.tournamentId,
       };
 
       this.activeGames.set(roomId, room);
@@ -362,16 +380,30 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
        const p2 = room.playerProfiles[PieceColor.DARK];
 
        if (p1 && p2 && !room.aiDifficulty) {
-          // Simple ELO placeholder
-          if (winner === PieceColor.LIGHT) {
-             await this.usersService.updateRating(p1.id, 15, 'win');
-             await this.usersService.updateRating(p2.id, -15, 'loss');
-          } else if (winner === PieceColor.DARK) {
-             await this.usersService.updateRating(p1.id, -15, 'loss');
-             await this.usersService.updateRating(p2.id, 15, 'win');
+          if (room.tournamentId) {
+             // It's a tournament match, update tournament scores instead of raw ELO
+             if (winner === PieceColor.LIGHT) {
+                await this.tournamentsService.updateTournamentScore(p1.id, room.tournamentId, 'WIN');
+                await this.tournamentsService.updateTournamentScore(p2.id, room.tournamentId, 'LOSS');
+             } else if (winner === PieceColor.DARK) {
+                await this.tournamentsService.updateTournamentScore(p1.id, room.tournamentId, 'LOSS');
+                await this.tournamentsService.updateTournamentScore(p2.id, room.tournamentId, 'WIN');
+             } else {
+                await this.tournamentsService.updateTournamentScore(p1.id, room.tournamentId, 'DRAW');
+                await this.tournamentsService.updateTournamentScore(p2.id, room.tournamentId, 'DRAW');
+             }
           } else {
-             await this.usersService.updateRating(p1.id, 0, 'draw');
-             await this.usersService.updateRating(p2.id, 0, 'draw');
+            // Standard ELO match
+            if (winner === PieceColor.LIGHT) {
+               await this.usersService.updateRating(p1.id, 15, 'win');
+               await this.usersService.updateRating(p2.id, -15, 'loss');
+            } else if (winner === PieceColor.DARK) {
+               await this.usersService.updateRating(p1.id, -15, 'loss');
+               await this.usersService.updateRating(p2.id, 15, 'win');
+            } else {
+               await this.usersService.updateRating(p1.id, 0, 'draw');
+               await this.usersService.updateRating(p2.id, 0, 'draw');
+            }
           }
        }
     } catch(err) {

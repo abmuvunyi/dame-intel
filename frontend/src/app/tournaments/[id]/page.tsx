@@ -87,10 +87,18 @@ export default function TournamentDetails() {
               Join Tournament
             </button>
           )}
-          {joined && (
+          {joined && tournament.status === 'UPCOMING' && (
              <span className="px-6 py-2 bg-slate-200 text-slate-700 font-medium rounded border border-slate-300">
-               Registered
+               Registered (Waiting to Start)
              </span>
+          )}
+          {joined && tournament.status === 'IN_PROGRESS' && (
+             <button
+               onClick={() => router.push(`/?tournamentId=${tournament.id}`)}
+               className="px-6 py-2 bg-blue-600 text-white font-medium rounded shadow hover:bg-blue-700"
+             >
+               Play Match
+             </button>
           )}
         </div>
       </div>

@@ -4,9 +4,10 @@ import { GameGateway } from './game.gateway';
 import { AiService } from './ai/ai/ai.service';
 import { UsersModule } from '../users/users.module';
 import { HistoryModule } from '../history/history.module';
+import { TournamentsModule } from '../tournaments/tournaments.module';
 
 @Module({
-  imports: [UsersModule, HistoryModule],
+  imports: [UsersModule, HistoryModule, TournamentsModule],
   providers: [DraughtsEngine, GameGateway, AiService]
 })
 export class GameModule {}

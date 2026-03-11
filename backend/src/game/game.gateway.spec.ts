@@ -4,6 +4,7 @@ import { AiService } from './ai/ai/ai.service';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
+import { TournamentsService } from '../tournaments/tournaments.service';
 
 describe('GameGateway', () => {
   let gateway: GameGateway;
@@ -15,7 +16,8 @@ describe('GameGateway', () => {
         AiService,
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: {} },
-        { provide: HistoryService, useValue: {} }
+        { provide: HistoryService, useValue: {} },
+        { provide: TournamentsService, useValue: {} }
       ],
     }).compile();
 

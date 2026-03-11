@@ -8,10 +8,12 @@ import { jwtConstants } from './constants';
 @Module({
   imports: [
     UsersModule,
-    JwtModule.register({
+    JwtModule.registerAsync({
       global: true,
-      secret: jwtConstants.secret,
-      signOptions: { expiresIn: '7d' },
+      useFactory: () => ({
+        secret: jwtConstants.secret,
+        signOptions: { expiresIn: '7d' },
+      })
     }),
   ],
   providers: [AuthService],

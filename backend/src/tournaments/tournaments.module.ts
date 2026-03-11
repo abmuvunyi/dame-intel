@@ -13,5 +13,6 @@ import { UsersModule } from '../users/users.module';
   ],
   providers: [TournamentsService],
   controllers: [TournamentsController],
+  exports: [TournamentsService],
 })
 export class TournamentsModule {}

@@ -1,3 +1,8 @@
 export const jwtConstants = {
-  secret: process.env.JWT_SECRET || 'DO_NOT_USE_THIS_SECRET_IN_PRODUCTION_DRAUGHTS_12345!',
+  get secret() {
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET environment variable is missing');
+    }
+    return process.env.JWT_SECRET;
+  }
 };

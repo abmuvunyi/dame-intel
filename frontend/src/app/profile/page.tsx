@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation';
 export default function Profile() {
   const [profile, setProfile] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [newFriendName, setNewFriendName] = useState('');
+  const [activeTab, setActiveTab] = useState<'history' | 'friends'>('history');
   const router = useRouter();
 
   useEffect(() => {
@@ -17,17 +20,21 @@ export default function Profile() {
       }
 
       try {
-        const [profileRes, historyRes] = await Promise.all([
+        const [profileRes, historyRes, friendsRes] = await Promise.all([
            axios.get('http://localhost:3001/auth/profile', {
              headers: { Authorization: `Bearer ${token}` }
            }),
            axios.get('http://localhost:3001/history/my-games', {
+             headers: { Authorization: `Bearer ${token}` }
+           }),
+           axios.get('http://localhost:3001/friends', {
              headers: { Authorization: `Bearer ${token}` }
            })
         ]);
 
         setProfile(profileRes.data);
         setHistory(historyRes.data);
+        setFriends(friendsRes.data);
       } catch (err) {
         localStorage.removeItem('token');
         router.push('/login');
@@ -36,6 +43,33 @@ export default function Profile() {
 
     fetchProfile();
   }, [router]);
+
+  const handleAddFriend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post('http://localhost:3001/friends/add', { username: newFriendName }, {
+         headers: { Authorization: `Bearer ${token}` }
+      });
+      setNewFriendName('');
+      alert('Friend request sent!');
+    } catch(err: any) {
+      alert(err.response?.data?.message || 'Error sending request');
+    }
+  };
+
+  const handleAcceptFriend = async (id: number) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`http://localhost:3001/friends/accept/${id}`, {}, {
+         headers: { Authorization: `Bearer ${token}` }
+      });
+      // Update local state
+      setFriends(friends.map(f => f.id === id ? { ...f, status: 'ACCEPTED' } : f));
+    } catch(err: any) {
+      alert('Error accepting request');
+    }
+  };
 
   if (!profile) return <div className="text-center p-10">Loading profile...</div>;
 
@@ -63,32 +97,86 @@ export default function Profile() {
       </div>
 
       <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl p-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6">Match History ({profile.gamesPlayed} games)</h2>
+        <div className="flex space-x-6 border-b border-gray-200 mb-6">
+           <button
+             className={`pb-2 font-semibold ${activeTab === 'history' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+             onClick={() => setActiveTab('history')}
+           >
+             Match History ({profile.gamesPlayed})
+           </button>
+           <button
+             className={`pb-2 font-semibold ${activeTab === 'friends' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+             onClick={() => setActiveTab('friends')}
+           >
+             Friends ({friends.length})
+           </button>
+        </div>
 
-        {history.length === 0 ? (
-          <p className="text-gray-500">No matches played yet.</p>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {history.map((game, i) => {
-              const myColor = game.lightPlayer?.id === profile.id ? 'LIGHT' : (game.darkPlayer?.id === profile.id ? 'DARK' : 'SPECTATOR');
-              const isWin = game.winner === myColor;
-              const isDraw = game.winner === 'DRAW';
-              const resultColor = isWin ? 'text-green-600' : (isDraw ? 'text-gray-600' : 'text-red-600');
-              const opponent = myColor === 'LIGHT' ? (game.darkPlayer?.username || 'AI') : (game.lightPlayer?.username || 'AI');
+        {activeTab === 'history' && (
+          <>
+            {history.length === 0 ? (
+              <p className="text-gray-500">No matches played yet.</p>
+            ) : (
+              <ul className="divide-y divide-gray-200">
+                {history.map((game, i) => {
+                  const myColor = game.lightPlayer?.id === profile.id ? 'LIGHT' : (game.darkPlayer?.id === profile.id ? 'DARK' : 'SPECTATOR');
+                  const isWin = game.winner === myColor;
+                  const isDraw = game.winner === 'DRAW';
+                  const resultColor = isWin ? 'text-green-600' : (isDraw ? 'text-gray-600' : 'text-red-600');
+                  const opponent = myColor === 'LIGHT' ? (game.darkPlayer?.username || 'AI') : (game.lightPlayer?.username || 'AI');
 
-              return (
-                <li key={i} className="py-4 flex justify-between items-center hover:bg-gray-50 px-2 rounded">
-                  <div>
-                    <span className={`font-bold uppercase ${resultColor}`}>{isWin ? 'WIN' : (isDraw ? 'DRAW' : 'LOSS')}</span>
-                    <span className="text-gray-600 ml-3">vs {opponent}</span>
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {new Date(game.playedAt).toLocaleDateString()}
-                  </div>
+                  return (
+                    <li key={i} className="py-4 flex justify-between items-center hover:bg-gray-50 px-2 rounded">
+                      <div>
+                        <span className={`font-bold uppercase ${resultColor}`}>{isWin ? 'WIN' : (isDraw ? 'DRAW' : 'LOSS')}</span>
+                        <span className="text-gray-600 ml-3">vs {opponent}</span>
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {new Date(game.playedAt).toLocaleDateString()}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
+        )}
+
+        {activeTab === 'friends' && (
+          <>
+            <form onSubmit={handleAddFriend} className="mb-6 flex space-x-2">
+              <input
+                type="text"
+                placeholder="Add friend by username..."
+                value={newFriendName}
+                onChange={e => setNewFriendName(e.target.value)}
+                className="border p-2 rounded flex-grow"
+                required
+              />
+              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
+            </form>
+
+            <ul className="divide-y divide-gray-200">
+              {friends.length === 0 && <p className="text-gray-500">No friends added yet.</p>}
+              {friends.map((f, i) => (
+                <li key={i} className="py-3 flex justify-between items-center">
+                  <span className="font-medium">{f.username}</span>
+                  {f.status === 'ACCEPTED' ? (
+                     <span className="text-green-600 text-sm font-semibold">Friend</span>
+                  ) : f.isIncomingRequest ? (
+                     <button
+                       onClick={() => handleAcceptFriend(f.id)}
+                       className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                     >
+                       Accept Request
+                     </button>
+                  ) : (
+                     <span className="text-gray-400 text-sm">Request Sent</span>
+                  )}
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
