@@ -32,10 +32,16 @@ export interface Move {
   captured?: Position[];
 }
 
+export enum GameVariant {
+  STANDARD = 'STANDARD',
+  INTERNATIONAL = 'INTERNATIONAL',
+}
+
 export default function GameBoard() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<GameVariant>(GameVariant.STANDARD);
   const [currentTurn, setCurrentTurn] = useState<PieceColor | null>(null);
   const [status, setStatus] = useState<string>('Disconnected');
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
@@ -126,13 +132,13 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin });
+      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, variant: selectedVariant });
     }
   };
 
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
-      socket.emit('playVsAi', { difficulty });
+      socket.emit('playVsAi', { difficulty, variant: selectedVariant });
     }
   };
 
@@ -190,6 +196,18 @@ export default function GameBoard() {
         <p className="text-gray-600">{status}</p>
 
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+          <div className="flex flex-col mb-2">
+            <label className="text-sm font-semibold text-gray-700 mb-1">Game Variant:</label>
+            <select
+              value={selectedVariant}
+              onChange={(e) => setSelectedVariant(e.target.value as GameVariant)}
+              className="p-2 border border-gray-300 rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={GameVariant.STANDARD}>Standard (8x8)</option>
+              <option value={GameVariant.INTERNATIONAL}>International (10x10)</option>
+            </select>
+          </div>
+
           <button
             onClick={handleFindMatch}
             className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
@@ -224,8 +242,13 @@ export default function GameBoard() {
             <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
             <ul className="space-y-2">
               {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                <li key={i} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50 p-3 rounded border gap-2">
+                   <div>
+                     <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                     <span className="ml-2 text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-800 rounded">
+                       {game.variant === GameVariant.INTERNATIONAL ? '10x10' : '8x8'}
+                     </span>
+                   </div>
                    <button
                      onClick={() => handleWatchGame(game.roomId)}
                      className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
@@ -244,6 +267,10 @@ export default function GameBoard() {
 
   // Calculate valid destinations for highlighting
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
+
+  const isInternational = board.length === 10;
+  const squareSizeClass = isInternational ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
+  const pieceSizeClass = isInternational ? 'w-8 h-8 sm:w-10 sm:h-10 text-sm' : 'w-10 h-10 sm:w-12 sm:h-12 text-base';
 
   return (
     <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
@@ -275,11 +302,11 @@ export default function GameBoard() {
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
+                    className={`${squareSizeClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
                   >
                     {cell && (
                       <div className={`
-                        w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
+                        ${pieceSizeClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
                         ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
                         ${cell.type === PieceType.KING ? 'ring-4 ring-yellow-400' : ''}
                       `}>
