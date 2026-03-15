@@ -1,3 +1,8 @@
+export enum GameVariant {
+  STANDARD_8X8 = 'STANDARD_8X8',
+  INTERNATIONAL_10X10 = 'INTERNATIONAL_10X10'
+}
+
 export enum PieceColor {
   LIGHT = 'L', // Usually White or Red
   DARK = 'D',  // Usually Black
@@ -30,19 +35,23 @@ export interface Move {
 export class DraughtsEngine {
   private board: BoardState;
   private currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  public readonly BOARD_SIZE: number;
+  public readonly variant: GameVariant;
 
-  constructor() {
+  constructor(variant: GameVariant = GameVariant.STANDARD_8X8) {
+    this.variant = variant;
+    this.BOARD_SIZE = variant === GameVariant.INTERNATIONAL_10X10 ? 10 : 8;
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
   }
 
-  // Generate an 8x8 standard Draughts board
+  // Generate a standard Draughts board
   private createInitialBoard(): BoardState {
     const board: BoardState = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
+    const pieceRows = Math.floor(this.BOARD_SIZE / 2) - 1;
 
-    // Dark pieces (top 3 rows)
-    for (let row = 0; row < 3; row++) {
+    // Dark pieces (top rows)
+    for (let row = 0; row < pieceRows; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
@@ -50,8 +59,8 @@ export class DraughtsEngine {
       }
     }
 
-    // Light pieces (bottom 3 rows)
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    // Light pieces (bottom rows)
+    for (let row = this.BOARD_SIZE - pieceRows; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
@@ -115,19 +124,34 @@ export class DraughtsEngine {
     }
 
     // Forced capture rule: if any jump is possible, only jumps are legal
-    return jumps.length > 0 ? jumps : normalMoves;
+    if (jumps.length > 0) {
+      if (this.variant === GameVariant.INTERNATIONAL_10X10) {
+        // Longest capture rule for international
+        const maxCaptured = Math.max(...jumps.map(j => (j.captured ? j.captured.length : 0)));
+        return jumps.filter(j => (j.captured ? j.captured.length : 0) === maxCaptured);
+      }
+      return jumps;
+    }
+    return normalMoves;
   }
 
   private isValidPos(r: number, c: number): boolean {
     return r >= 0 && r < this.BOARD_SIZE && c >= 0 && c < this.BOARD_SIZE;
   }
 
-  private getMoveDirections(piece: Piece): { dr: number, dc: number }[] {
+  private getMoveDirections(piece: Piece, isJump: boolean = false): { dr: number, dc: number }[] {
     if (piece.type === PieceType.KING) {
       return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
     }
+
     // Men: Light moves UP (-1), Dark moves DOWN (+1)
     const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+
+    // International variant men can jump backwards
+    if (isJump && this.variant === GameVariant.INTERNATIONAL_10X10) {
+      return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
+
     return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
   }
 
@@ -136,11 +160,27 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     for (const dir of dirs) {
-      const nr = pos.row + dir.dr;
-      const nc = pos.col + dir.dc;
+      if (this.variant === GameVariant.INTERNATIONAL_10X10 && piece.type === PieceType.KING) {
+        // Flying kings: slide until blocked
+        let nr = pos.row + dir.dr;
+        let nc = pos.col + dir.dc;
+        while (this.isValidPos(nr, nc)) {
+          if (this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          } else {
+            break; // Blocked by any piece
+          }
+          nr += dir.dr;
+          nc += dir.dc;
+        }
+      } else {
+        // Normal 1-step move
+        const nr = pos.row + dir.dr;
+        const nc = pos.col + dir.dc;
 
-      if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
-        moves.push({ from: pos, to: { row: nr, col: nc } });
+        if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+          moves.push({ from: pos, to: { row: nr, col: nc } });
+        }
       }
     }
 
@@ -148,46 +188,97 @@ export class DraughtsEngine {
   }
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
-    let hasSubJumps = false;
     const jumps: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
+    const dirs = this.getMoveDirections(piece, true);
 
     for (const dir of dirs) {
-      const overR = currentPos.row + dir.dr;
-      const overC = currentPos.col + dir.dc;
-      const landR = currentPos.row + dir.dr * 2;
-      const landC = currentPos.col + dir.dc * 2;
+      if (this.variant === GameVariant.INTERNATIONAL_10X10 && piece.type === PieceType.KING) {
+        // Flying king jumps
+        let checkR = currentPos.row + dir.dr;
+        let checkC = currentPos.col + dir.dc;
+        let foundEnemy: Position | null = null;
 
-      // Check bounds
-      if (!this.isValidPos(landR, landC)) continue;
+        // Slide until finding a piece or hitting the edge
+        while (this.isValidPos(checkR, checkC)) {
+          const p = this.board[checkR][checkC];
+          if (p !== null) {
+            if (p.color === piece.color || capturedSoFar.some(c => c.row === checkR && c.col === checkC)) {
+              break; // Blocked by own piece or already captured piece
+            }
+            foundEnemy = { row: checkR, col: checkC };
+            break;
+          }
+          checkR += dir.dr;
+          checkC += dir.dc;
+        }
 
-      const overPiece = this.board[overR][overC];
-      const landPos = this.board[landR][landC];
+        if (foundEnemy) {
+          // Check landing spots after the enemy
+          let landR = foundEnemy.row + dir.dr;
+          let landC = foundEnemy.col + dir.dc;
+          let anySubJumpFound = false;
 
-      // We can jump if there's an opponent piece and the landing spot is empty
-      // Also ensure we haven't already captured this exact piece in the current sequence (multi-jump loop prevention)
-      const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+          while (this.isValidPos(landR, landC)) {
+            if (this.board[landR][landC] !== null) {
+              break; // Cannot land on a piece
+            }
 
-      if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
-        hasSubJumps = true;
-        const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+            const newCaptured = [...capturedSoFar, foundEnemy];
 
-        // Temporarily apply the jump to check for further jumps
-        const originalCurrent = this.board[currentPos.row][currentPos.col];
-        this.board[currentPos.row][currentPos.col] = null;
-        this.board[landR][landC] = piece;
+            // Temporarily apply jump
+            const originalCurrent = this.board[currentPos.row][currentPos.col];
+            this.board[currentPos.row][currentPos.col] = null;
+            this.board[landR][landC] = piece;
 
-        const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+            const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
-        // Revert board
-        this.board[currentPos.row][currentPos.col] = originalCurrent;
-        this.board[landR][landC] = null;
+            // Revert jump
+            this.board[currentPos.row][currentPos.col] = originalCurrent;
+            this.board[landR][landC] = null;
 
-        if (subJumps.length > 0) {
-           jumps.push(...subJumps);
-        } else {
-           // End of a jump sequence
-           jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+            if (subJumps.length > 0) {
+              anySubJumpFound = true;
+              jumps.push(...subJumps);
+            } else if (!anySubJumpFound) {
+               // Only add this specific landing spot as a final jump if no deeper jumps exist
+               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+            }
+
+            landR += dir.dr;
+            landC += dir.dc;
+          }
+        }
+      } else {
+        // Normal piece jumps (or standard king jumps)
+        const overR = currentPos.row + dir.dr;
+        const overC = currentPos.col + dir.dc;
+        const landR = currentPos.row + dir.dr * 2;
+        const landC = currentPos.col + dir.dc * 2;
+
+        if (!this.isValidPos(landR, landC)) continue;
+
+        const overPiece = this.board[overR][overC];
+        const landPos = this.board[landR][landC];
+
+        const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+        if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+          const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
+          const originalCurrent = this.board[currentPos.row][currentPos.col];
+          this.board[currentPos.row][currentPos.col] = null;
+          this.board[landR][landC] = piece;
+
+          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+          this.board[currentPos.row][currentPos.col] = originalCurrent;
+          this.board[landR][landC] = null;
+
+          if (subJumps.length > 0) {
+             jumps.push(...subJumps);
+          } else {
+             jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+          }
         }
       }
     }

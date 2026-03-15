@@ -8,16 +8,19 @@ import { PieceColor, PieceType } from '@/components/game/GameBoard';
 class ReplayEngine {
   public board: any[][];
   public currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  public readonly BOARD_SIZE: number;
 
-  constructor() {
+  constructor(variant: string = 'STANDARD_8X8') {
+    this.BOARD_SIZE = variant === 'INTERNATIONAL_10X10' ? 10 : 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
-    for (let row = 0; row < 3; row++) {
+    const pieceRows = Math.floor(this.BOARD_SIZE / 2) - 1;
+
+    for (let row = 0; row < pieceRows; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
       }
     }
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    for (let row = this.BOARD_SIZE - pieceRows; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
       }
@@ -62,7 +65,8 @@ export default function AnalysisPage() {
         setGame(res.data);
 
         // Pre-compute all states
-        const engine = new ReplayEngine();
+        const variant = res.data.variant || 'STANDARD_8X8';
+        const engine = new ReplayEngine(variant);
         const states = [{ board: JSON.parse(JSON.stringify(engine.board)), turn: engine.currentTurn, moveInfo: null }];
 
         let moveArray = [];
@@ -123,6 +127,9 @@ export default function AnalysisPage() {
   if (!game || boardStates.length === 0) return <div className="p-10 text-center">Loading game data...</div>;
 
   const currentBoard = boardStates[currentMoveIndex].board;
+  const isLargeBoard = currentBoard.length === 10;
+  const squareSizeClass = isLargeBoard ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
+  const pieceSizeClass = isLargeBoard ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-10 h-10 sm:w-12 sm:h-12';
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
@@ -145,7 +152,7 @@ export default function AnalysisPage() {
 
         {/* Left side: Board */}
         <div className="flex flex-col items-center">
-            <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-4">
+            <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-4 overflow-x-auto max-w-[100vw]">
               {currentBoard.map((row: any[], r: number) => (
                 <div key={r} className="flex">
                   {row.map((cell: any, c: number) => {
@@ -155,11 +162,11 @@ export default function AnalysisPage() {
                     return (
                       <div
                         key={`${r}-${c}`}
-                        className={`w-16 h-16 flex items-center justify-center ${squareBg}`}
+                        className={`${squareSizeClass} flex items-center justify-center ${squareBg} shrink-0`}
                       >
                         {cell && (
                           <div className={`
-                            w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
+                            ${pieceSizeClass} rounded-full shadow-md flex items-center justify-center text-white font-bold
                             ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
                             ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
                           `}>

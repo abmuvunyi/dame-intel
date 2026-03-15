@@ -18,6 +18,9 @@ export class GameHistory {
   @Column('simple-json')
   moves: any; // Serialized array of moves
 
+  @Column({ nullable: true, default: 'STANDARD_8X8' })
+  variant: string;
+
   @CreateDateColumn()
   playedAt: Date;
 }

@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, PieceColor, PieceType, GameVariant } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
 
   beforeEach(async () => {
-    engine = new DraughtsEngine();
+    engine = new DraughtsEngine(GameVariant.STANDARD_8X8);
   });
 
   it('should be defined', () => {
@@ -49,4 +49,34 @@ describe('DraughtsEngine', () => {
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
   });
 
+  describe('International 10x10 Variant', () => {
+    let intEngine: DraughtsEngine;
+
+    beforeEach(() => {
+      intEngine = new DraughtsEngine(GameVariant.INTERNATIONAL_10X10);
+    });
+
+    it('should initialize a 10x10 board with 4 rows of pieces', () => {
+      const board = intEngine.getBoard();
+      expect(board.length).toBe(10);
+      expect(board[0].length).toBe(10);
+
+      // Check dark piece on top row
+      expect(board[0][1]?.color).toBe(PieceColor.DARK);
+      expect(board[0][0]).toBeNull();
+
+      // Check dark piece on 4th row (index 3)
+      expect(board[3][0]?.color).toBe(PieceColor.DARK);
+
+      // Empty middle rows
+      expect(board[4][1]).toBeNull();
+      expect(board[5][0]).toBeNull();
+
+      // Check light piece on 7th row (index 6)
+      expect(board[6][1]?.color).toBe(PieceColor.LIGHT);
+
+      // Check light piece on bottom row
+      expect(board[9][0]?.color).toBe(PieceColor.LIGHT);
+    });
+  });
 });
