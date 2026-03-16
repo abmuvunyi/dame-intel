@@ -50,3 +50,23 @@ describe('DraughtsEngine', () => {
   });
 
 });
+
+  describe('International Variant', () => {
+    let intEngine: DraughtsEngine;
+
+    beforeEach(() => {
+      // Assuming GameVariant.INTERNATIONAL is exported
+      const { GameVariant } = require('./engine.service');
+      intEngine = new DraughtsEngine(GameVariant.INTERNATIONAL);
+    });
+
+    it('should initialize a 10x10 board', () => {
+      const board = intEngine.getBoard();
+      expect(board.length).toBe(10);
+      expect(board[0].length).toBe(10);
+
+      // Check light pieces on row 9
+      expect(board[9][0]?.color).toBe(PieceColor.LIGHT);
+      expect(board[9][1]).toBeNull();
+    });
+  });

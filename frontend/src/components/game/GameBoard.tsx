@@ -8,6 +8,11 @@ export enum PieceColor {
   DARK = 'D',
 }
 
+export enum GameVariant {
+  STANDARD = 'STANDARD',
+  INTERNATIONAL = 'INTERNATIONAL'
+}
+
 export enum PieceType {
   MAN = 'M',
   KING = 'K',
@@ -45,6 +50,7 @@ export default function GameBoard() {
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<{sender: string, message: string, timestamp: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [selectedVariant, setSelectedVariant] = useState<GameVariant>(GameVariant.STANDARD);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -126,13 +132,13 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin });
+      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, variant: selectedVariant });
     }
   };
 
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
-      socket.emit('playVsAi', { difficulty });
+      socket.emit('playVsAi', { difficulty, variant: selectedVariant });
     }
   };
 
@@ -190,6 +196,17 @@ export default function GameBoard() {
         <p className="text-gray-600">{status}</p>
 
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+          <div className="flex flex-col space-y-2 mb-2">
+             <label className="text-sm font-semibold text-gray-700">Game Variant</label>
+             <select
+               value={selectedVariant}
+               onChange={(e) => setSelectedVariant(e.target.value as GameVariant)}
+               className="p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+             >
+               <option value={GameVariant.STANDARD}>8x8 Standard</option>
+               <option value={GameVariant.INTERNATIONAL}>10x10 International</option>
+             </select>
+          </div>
           <button
             onClick={handleFindMatch}
             className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
@@ -271,15 +288,20 @@ export default function GameBoard() {
                 if (isSelected) squareBg = 'bg-yellow-400';
                 if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
 
+                const is10x10 = board.length === 10;
+                const squareSizeClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
+                const pieceSizeClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-10 h-10 sm:w-12 sm:h-12';
+                const fontSizeClass = is10x10 ? 'text-sm' : 'text-base';
+
                 return (
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
+                    className={`${squareSizeClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
                   >
                     {cell && (
                       <div className={`
-                        w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
+                        ${pieceSizeClass} ${fontSizeClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
                         ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
                         ${cell.type === PieceType.KING ? 'ring-4 ring-yellow-400' : ''}
                       `}>
