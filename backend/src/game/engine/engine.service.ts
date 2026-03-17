@@ -1,3 +1,8 @@
+export enum GameVariant {
+  STANDARD = 'STANDARD',
+  INTERNATIONAL = 'INTERNATIONAL'
+}
+
 export enum PieceColor {
   LIGHT = 'L', // Usually White or Red
   DARK = 'D',  // Usually Black
@@ -30,19 +35,28 @@ export interface Move {
 export class DraughtsEngine {
   private board: BoardState;
   private currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  private readonly BOARD_SIZE: number;
+  private readonly variant: GameVariant;
 
-  constructor() {
+  constructor(variant: GameVariant = GameVariant.STANDARD) {
+    this.variant = variant;
+    this.BOARD_SIZE = variant === GameVariant.INTERNATIONAL ? 10 : 8;
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
   }
 
-  // Generate an 8x8 standard Draughts board
+  public getVariant(): GameVariant {
+    return this.variant;
+  }
+
+  // Generate standard or international Draughts board
   private createInitialBoard(): BoardState {
     const board: BoardState = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 
-    // Dark pieces (top 3 rows)
-    for (let row = 0; row < 3; row++) {
+    const rowsPerPlayer = this.BOARD_SIZE === 10 ? 4 : 3;
+
+    // Dark pieces
+    for (let row = 0; row < rowsPerPlayer; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
@@ -50,8 +64,8 @@ export class DraughtsEngine {
       }
     }
 
-    // Light pieces (bottom 3 rows)
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    // Light pieces
+    for (let row = this.BOARD_SIZE - rowsPerPlayer; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
@@ -115,7 +129,21 @@ export class DraughtsEngine {
     }
 
     // Forced capture rule: if any jump is possible, only jumps are legal
-    return jumps.length > 0 ? jumps : normalMoves;
+    if (jumps.length > 0) {
+      if (this.variant === GameVariant.INTERNATIONAL) {
+        // Longest jump rule for International
+        let maxJumpLength = 0;
+        for (const jump of jumps) {
+          if (jump.captured && jump.captured.length > maxJumpLength) {
+            maxJumpLength = jump.captured.length;
+          }
+        }
+        return jumps.filter(j => j.captured && j.captured.length === maxJumpLength);
+      }
+      return jumps;
+    }
+
+    return normalMoves;
   }
 
   private isValidPos(r: number, c: number): boolean {
@@ -131,16 +159,45 @@ export class DraughtsEngine {
     return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
   }
 
+  private getCaptureDirections(piece: Piece): { dr: number, dc: number }[] {
+    if (piece.type === PieceType.KING || this.variant === GameVariant.INTERNATIONAL) {
+      // Kings and International Men can capture in all 4 directions
+      return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
+    // Standard Men can only capture forward
+    const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+    return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+  }
+
   private getValidNormalMovesForPiece(pos: Position, piece: Piece): Move[] {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    for (const dir of dirs) {
-      const nr = pos.row + dir.dr;
-      const nc = pos.col + dir.dc;
+    if (piece.type === PieceType.KING && this.variant === GameVariant.INTERNATIONAL) {
+      // Flying King normal moves
+      for (const dir of dirs) {
+        let nr = pos.row + dir.dr;
+        let nc = pos.col + dir.dc;
 
-      if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
-        moves.push({ from: pos, to: { row: nr, col: nc } });
+        while (this.isValidPos(nr, nc)) {
+          if (this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          } else {
+            break; // Blocked by a piece
+          }
+          nr += dir.dr;
+          nc += dir.dc;
+        }
+      }
+    } else {
+      // Standard normal moves
+      for (const dir of dirs) {
+        const nr = pos.row + dir.dr;
+        const nc = pos.col + dir.dc;
+
+        if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+          moves.push({ from: pos, to: { row: nr, col: nc } });
+        }
       }
     }
 
@@ -148,46 +205,115 @@ export class DraughtsEngine {
   }
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
-    let hasSubJumps = false;
     const jumps: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
+    const dirs = this.getCaptureDirections(piece);
 
     for (const dir of dirs) {
-      const overR = currentPos.row + dir.dr;
-      const overC = currentPos.col + dir.dc;
-      const landR = currentPos.row + dir.dr * 2;
-      const landC = currentPos.col + dir.dc * 2;
+      if (piece.type === PieceType.KING && this.variant === GameVariant.INTERNATIONAL) {
+        // Flying King jump
+        let overR = currentPos.row + dir.dr;
+        let overC = currentPos.col + dir.dc;
+        let capturedPos: Position | null = null;
 
-      // Check bounds
-      if (!this.isValidPos(landR, landC)) continue;
+        // Find the first piece in this direction
+        while (this.isValidPos(overR, overC)) {
+          const overPiece = this.board[overR][overC];
 
-      const overPiece = this.board[overR][overC];
-      const landPos = this.board[landR][landC];
+          if (overPiece) {
+            // Found a piece
+            if (overPiece.color === piece.color) {
+              break; // Blocked by own piece
+            }
 
-      // We can jump if there's an opponent piece and the landing spot is empty
-      // Also ensure we haven't already captured this exact piece in the current sequence (multi-jump loop prevention)
-      const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+            const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+            if (alreadyCaptured) {
+              break; // Already captured this piece in sequence
+            }
 
-      if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
-        hasSubJumps = true;
-        const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+            capturedPos = { row: overR, col: overC };
+            break;
+          }
 
-        // Temporarily apply the jump to check for further jumps
-        const originalCurrent = this.board[currentPos.row][currentPos.col];
-        this.board[currentPos.row][currentPos.col] = null;
-        this.board[landR][landC] = piece;
+          overR += dir.dr;
+          overC += dir.dc;
+        }
 
-        const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+        if (capturedPos) {
+          // Check all possible landing spots after the captured piece
+          let landR = capturedPos.row + dir.dr;
+          let landC = capturedPos.col + dir.dc;
 
-        // Revert board
-        this.board[currentPos.row][currentPos.col] = originalCurrent;
-        this.board[landR][landC] = null;
+          let subJumpsFoundForThisDirection = false;
 
-        if (subJumps.length > 0) {
-           jumps.push(...subJumps);
-        } else {
-           // End of a jump sequence
-           jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+          while (this.isValidPos(landR, landC) && this.board[landR][landC] === null) {
+            const newCaptured = [...capturedSoFar, capturedPos];
+
+            // Temporarily apply jump
+            const originalCurrent = this.board[currentPos.row][currentPos.col];
+            this.board[currentPos.row][currentPos.col] = null;
+            this.board[landR][landC] = piece;
+
+            // In international draughts, a king cannot land and change direction immediately *if* there's a jump available
+            // Actually, we must check all sub-jumps
+            const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+            // Revert board
+            this.board[currentPos.row][currentPos.col] = originalCurrent;
+            this.board[landR][landC] = null;
+
+            if (subJumps.length > 0) {
+              jumps.push(...subJumps);
+              subJumpsFoundForThisDirection = true;
+            } else {
+              // Only add this exact landing spot as a terminal jump if no further jumps can be made from it
+              jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+            }
+
+            landR += dir.dr;
+            landC += dir.dc;
+          }
+
+          // Important for International Rules longest jump:
+          // If sub-jumps were found from SOME landing squares in this direction,
+          // those paths must be taken. The single jumps added above (where subJumps.length === 0)
+          // will be filtered out by the longest jump rule if they are sub-optimal.
+        }
+      } else {
+        // Standard Jump (Men, and Standard Kings)
+        const overR = currentPos.row + dir.dr;
+        const overC = currentPos.col + dir.dc;
+        const landR = currentPos.row + dir.dr * 2;
+        const landC = currentPos.col + dir.dc * 2;
+
+        if (!this.isValidPos(landR, landC)) continue;
+
+        const overPiece = this.board[overR][overC];
+        const landPos = this.board[landR][landC];
+
+        const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+        if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+          const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
+          const originalCurrent = this.board[currentPos.row][currentPos.col];
+          this.board[currentPos.row][currentPos.col] = null;
+          this.board[landR][landC] = piece;
+
+          // Note: In some variants, a man cannot be promoted mid-jump and continue jumping as a king.
+          // In international draughts, a man promoting to a king ends the turn, UNLESS it lands on the king row
+          // and can continue jumping backwards *as a man*. We don't implement full complex promotion rules here,
+          // but just basic multi-jumps.
+
+          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+          this.board[currentPos.row][currentPos.col] = originalCurrent;
+          this.board[landR][landC] = null;
+
+          if (subJumps.length > 0) {
+            jumps.push(...subJumps);
+          } else {
+            jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+          }
         }
       }
     }
