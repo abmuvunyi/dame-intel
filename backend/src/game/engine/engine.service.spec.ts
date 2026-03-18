@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, PieceColor, PieceType, GameVariant } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
@@ -49,4 +49,12 @@ describe('DraughtsEngine', () => {
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
   });
 
+  it('should initialize international correctly', () => {
+    const intEngine = new DraughtsEngine(GameVariant.INTERNATIONAL);
+    const board = intEngine.getBoard();
+    expect(board.length).toBe(10);
+    expect(board[0].length).toBe(10);
+    expect(board[3][0]?.color).toBe(PieceColor.DARK); // 4 rows
+    expect(board[6][1]?.color).toBe(PieceColor.LIGHT); // 4 rows
+  });
 });
