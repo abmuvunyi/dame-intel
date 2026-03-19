@@ -1,18 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, GameVariant, PieceColor, PieceType } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
 
   beforeEach(async () => {
-    engine = new DraughtsEngine();
+    engine = new DraughtsEngine(); // Default STANDARD
   });
 
   it('should be defined', () => {
     expect(engine).toBeDefined();
   });
 
-  it('should initialize with correct pieces', () => {
+  it('should initialize STANDARD variant with correct pieces', () => {
     const board = engine.getBoard();
 
     // Check dark pieces on row 0
@@ -24,6 +24,21 @@ describe('DraughtsEngine', () => {
     expect(board[7][1]).toBeNull();
 
     expect(engine.getCurrentTurn()).toBe(PieceColor.LIGHT);
+    expect(engine.getVariant()).toBe(GameVariant.STANDARD);
+  });
+
+  it('should initialize INTERNATIONAL variant with 10x10 board', () => {
+    const intEngine = new DraughtsEngine(GameVariant.INTERNATIONAL);
+    const board = intEngine.getBoard();
+
+    expect(board.length).toBe(10);
+    expect(board[0].length).toBe(10);
+
+    // Light starts on rows 6,7,8,9
+    expect(board[9][0]?.color).toBe(PieceColor.LIGHT);
+    expect(board[9][1]).toBeNull();
+
+    expect(intEngine.getVariant()).toBe(GameVariant.INTERNATIONAL);
   });
 
   it('should prevent invalid moves', () => {
