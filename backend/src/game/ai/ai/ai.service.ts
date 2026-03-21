@@ -7,6 +7,7 @@ export class AiService {
   // Weights for evaluation function
   private readonly WEIGHT_MAN = 10;
   private readonly WEIGHT_KING = 25;
+  private readonly WEIGHT_FLYING_KING = 35; // Flying Kings are even more powerful
   private readonly WEIGHT_CENTER = 2; // Bonus for center squares
   private readonly WEIGHT_BACK_ROW = 4; // Bonus for back row defense
 
@@ -16,7 +17,7 @@ export class AiService {
 
     // Deep clone the board
     const cloneBoard = JSON.parse(JSON.stringify(engine.getBoard()));
-    const simEngine = new DraughtsEngine();
+    const simEngine = new DraughtsEngine(engine.variant);
     simEngine.loadBoard(cloneBoard, aiColor);
 
     const legalMoves = simEngine.getLegalMoves();
@@ -104,6 +105,7 @@ export class AiService {
     const opponentColor = aiColor === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
 
     const size = board.length;
+    const isInternational = size === 10;
 
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
@@ -115,7 +117,7 @@ export class AiService {
           if (piece.type === PieceType.MAN) {
             pieceValue += this.WEIGHT_MAN;
           } else {
-            pieceValue += this.WEIGHT_KING;
+            pieceValue += isInternational ? this.WEIGHT_FLYING_KING : this.WEIGHT_KING;
           }
 
           // Positional value (Center control)
