@@ -15,6 +15,9 @@ export class GameHistory {
   @Column({ nullable: true })
   winner: string; // 'LIGHT', 'DARK', or 'DRAW'
 
+  @Column({ default: 'STANDARD' })
+  variant: string; // 'STANDARD' or 'INTERNATIONAL'
+
   @Column('simple-json')
   moves: any; // Serialized array of moves
 

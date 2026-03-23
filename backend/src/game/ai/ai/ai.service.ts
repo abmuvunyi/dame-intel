@@ -13,10 +13,11 @@ export class AiService {
   public analyzePosition(engine: DraughtsEngine, depth: number): { move: Move, evaluation: number }[] {
     const aiColor = engine.getCurrentTurn();
     const isMaximizingPlayer = true;
+    const variant = engine.getVariant();
 
     // Deep clone the board
     const cloneBoard = JSON.parse(JSON.stringify(engine.getBoard()));
-    const simEngine = new DraughtsEngine();
+    const simEngine = new DraughtsEngine(variant);
     simEngine.loadBoard(cloneBoard, aiColor);
 
     const legalMoves = simEngine.getLegalMoves();

@@ -15,12 +15,14 @@ export class HistoryService {
     lightPlayer: User | null,
     darkPlayer: User | null,
     winner: 'L' | 'D' | 'DRAW',
-    moves: any[]
+    moves: any[],
+    variant: string = 'STANDARD'
   ): Promise<GameHistory> {
     const game = this.historyRepository.create({
       lightPlayer: lightPlayer || undefined,
       darkPlayer: darkPlayer || undefined,
       winner: winner === 'L' ? 'LIGHT' : (winner === 'D' ? 'DARK' : 'DRAW'),
+      variant,
       moves: moves // simple-json handles stringification
     });
     return this.historyRepository.save(game);

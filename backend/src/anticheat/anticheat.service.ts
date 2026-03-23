@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CheatFlag } from './cheat-flag.entity';
 import { AiService } from '../game/ai/ai/ai.service';
-import { DraughtsEngine, PieceColor, Move } from '../game/engine/engine.service';
+import { DraughtsEngine, PieceColor, Move, GameVariant } from '../game/engine/engine.service';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -17,12 +17,13 @@ export class AnticheatService {
   public async analyzeGameForCheating(
     lightPlayer: User | null,
     darkPlayer: User | null,
-    moves: Move[]
+    moves: Move[],
+    variant: GameVariant = GameVariant.STANDARD
   ) {
     if (!lightPlayer && !darkPlayer) return;
     if (moves.length < 10) return; // Too short to analyze accurately
 
-    const engine = new DraughtsEngine();
+    const engine = new DraughtsEngine(variant);
     let lightEngineMatches = 0;
     let darkEngineMatches = 0;
     let lightTotalMoves = 0;
