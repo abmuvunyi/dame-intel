@@ -1,0 +1,68 @@
+
+> backend@0.0.1 start:dev
+> nest start --watch
+
+[2J[3J[H[[90m11:18:24 PM[0m] Starting compilation in watch mode...
+
+[[90m11:18:31 PM[0m] Found 0 errors. Watching for file changes.
+
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+WARNING: JWT_SECRET environment variable is missing. Falling back to default insecure secret.
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +25ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDiscoveryModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mScheduleModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmCoreModule dependencies initialized[39m[38;5;3m +66ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mUsersModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAnticheatModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPuzzlesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mHistoryModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mGameModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTournamentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mFriendsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:33 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +0ms[39m
+Redis Pub Client Error:
+Failed to connect to redis, falling back to memory adapter
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "getActiveGames" message[39m[38;5;3m +48ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "joinSpectator" message[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "sendMessage" message[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "playVsAi" message[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "joinMatchmaking" message[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[WebSocketsController] [39m[32mGameGateway subscribed to the "makeMove" message[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/}:[39m[38;5;3m +2ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAnalysisController {/analysis}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/analysis, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mHistoryController {/history}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/history/my-games, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/history/player/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/history/game/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mTournamentsController {/tournaments}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/tournaments, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/tournaments/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/tournaments/:id/standings, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/tournaments/:id/join, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/login, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/profile, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mPuzzlesController {/puzzles}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/puzzles/random, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mFriendsController {/friends}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/friends, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/friends/add, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/friends/accept/:id, POST} route[39m[38;5;3m +0ms[39m
+Redis Sub Client Error:
+[32m[Nest] 14568  - [39m03/25/2026, 11:18:34 PM [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +65ms[39m
+Client connected: 4N_L1dudSLIpD3InAAAB
+Client disconnected: 4N_L1dudSLIpD3InAAAB

@@ -1,0 +1,69 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.2:3000
+
+✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+✓ Ready in 1085ms
+○ Compiling / ...
+⨯ ./src/components/game/GameBoard.tsx:146:9
+Ecmascript file had an error
+[0m [90m 144 |[39m   }[33m;[39m
+ [90m 145 |[39m
+[31m[1m>[22m[39m[90m 146 |[39m   [36mconst[39m handlePlayAI [33m=[39m (difficulty[33m:[39m number) [33m=>[39m {
+ [90m     |[39m         [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 147 |[39m     [36mif[39m (socket) {
+ [90m 148 |[39m       socket[33m.[39memit([32m'playVsAi'[39m[33m,[39m { difficulty })[33m;[39m
+ [90m 149 |[39m     }[0m
+
+the name `handlePlayAI` is defined multiple times
+
+Import traces:
+  Client Component Browser:
+    ./src/components/game/GameBoard.tsx [Client Component Browser]
+    ./src/app/page.tsx [Client Component Browser]
+    ./src/app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/components/game/GameBoard.tsx [Client Component SSR]
+    ./src/app/page.tsx [Client Component SSR]
+    ./src/app/page.tsx [Server Component]
+
+
+ GET / 500 in 7.1s (compile: 6.8s, render: 289ms)
+⨯ ./src/components/game/GameBoard.tsx:146:9
+Ecmascript file had an error
+[0m [90m 144 |[39m   }[33m;[39m
+ [90m 145 |[39m
+[31m[1m>[22m[39m[90m 146 |[39m   [36mconst[39m handlePlayAI [33m=[39m (difficulty[33m:[39m number) [33m=>[39m {
+ [90m     |[39m         [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 147 |[39m     [36mif[39m (socket) {
+ [90m 148 |[39m       socket[33m.[39memit([32m'playVsAi'[39m[33m,[39m { difficulty })[33m;[39m
+ [90m 149 |[39m     }[0m
+
+the name `handlePlayAI` is defined multiple times
+
+Import traces:
+  Client Component Browser:
+    ./src/components/game/GameBoard.tsx [Client Component Browser]
+    ./src/app/page.tsx [Client Component Browser]
+    ./src/app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/components/game/GameBoard.tsx [Client Component SSR]
+    ./src/app/page.tsx [Client Component SSR]
+    ./src/app/page.tsx [Server Component]
+
+
+ GET / 500 in 35ms (compile: 21ms, render: 14ms)
+✓ Compiled in 45ms
+ GET / 200 in 524ms (compile: 239ms, render: 285ms)
+ GET / 200 in 109ms (compile: 34ms, render: 74ms)

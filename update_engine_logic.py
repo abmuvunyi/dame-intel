@@ -1,52 +1,11 @@
-export enum GameVariant {
-  STANDARD = 'STANDARD', // 8x8
-  INTERNATIONAL = 'INTERNATIONAL', // 10x10
-}
+import re
 
-export enum PieceColor {
-  LIGHT = 'L', // Usually White or Red
-  DARK = 'D',  // Usually Black
-}
+filepath = "backend/src/game/engine/engine.service.ts"
+with open(filepath, "r") as f:
+    content = f.read()
 
-export enum PieceType {
-  MAN = 'M',
-  KING = 'K',
-}
-
-export interface Piece {
-  color: PieceColor;
-  type: PieceType;
-}
-
-export type BoardPosition = Piece | null;
-export type BoardState = BoardPosition[][];
-
-export interface Position {
-  row: number;
-  col: number;
-}
-
-export interface Move {
-  from: Position;
-  to: Position;
-  captured?: Position[]; // Array of captured piece positions in this move sequence
-}
-
-export class DraughtsEngine {
-  private board: BoardState;
-  private currentTurn: PieceColor;
-  public readonly BOARD_SIZE: number;
-  public readonly variant: GameVariant;
-
-  constructor(variant: GameVariant = GameVariant.STANDARD) {
-    this.variant = variant;
-    this.BOARD_SIZE = variant === GameVariant.INTERNATIONAL ? 10 : 8;
-    this.board = this.createInitialBoard();
-    this.currentTurn = PieceColor.LIGHT; // Light always starts
-  }
-
-  // Generate an 8x8 standard Draughts board
-  private createInitialBoard(): BoardState {
+# Update createInitialBoard
+create_board = """  private createInitialBoard(): BoardState {
     const board: BoardState = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 
     const rowsPerSide = this.variant === GameVariant.INTERNATIONAL ? 4 : 3;
@@ -70,42 +29,11 @@ export class DraughtsEngine {
     }
 
     return board;
-  }
+  }"""
+content = re.sub(r"  private createInitialBoard\(\): BoardState \{[\s\S]*?return board;\n  \}", create_board, content)
 
-  public getBoard(): BoardState {
-    return this.board;
-  }
-
-  public getCurrentTurn(): PieceColor {
-    return this.currentTurn;
-  }
-
-  // Standard string representation for debugging/testing
-  public getBoardString(): string {
-    let result = '';
-    for (let r = 0; r < this.BOARD_SIZE; r++) {
-      for (let c = 0; c < this.BOARD_SIZE; c++) {
-        const p = this.board[r][c];
-        if (!p) {
-          result += '.';
-        } else {
-          result += (p.color === PieceColor.LIGHT ? 'l' : 'd') + (p.type === PieceType.KING ? 'K' : 'm');
-        }
-        result += ' ';
-      }
-      result += '\n';
-    }
-    return result;
-  }
-
-  // Load a custom board state (useful for tests and puzzles)
-  public loadBoard(board: BoardState, turn: PieceColor): void {
-    this.board = board;
-    this.currentTurn = turn;
-  }
-
-  // Get all legal moves for the current player
-  public getLegalMoves(): Move[] {
+# Update getLegalMoves to enforce max captures rule for International
+get_legal = """  public getLegalMoves(): Move[] {
     const jumps: Move[] = [];
     const normalMoves: Move[] = [];
 
@@ -137,9 +65,11 @@ export class DraughtsEngine {
       return jumps;
     }
     return normalMoves;
-  }
+  }"""
+content = re.sub(r"  public getLegalMoves\(\): Move\[\] \{[\s\S]*?return jumps\.length > 0 \? jumps : normalMoves;\n  \}", get_legal, content)
 
-  private isValidPos(r: number, c: number): boolean {
+# Update getMoveDirections and movement logic for backward captures / flying kings
+movement_logic = """  private isValidPos(r: number, c: number): boolean {
     return r >= 0 && r < this.BOARD_SIZE && c >= 0 && c < this.BOARD_SIZE;
   }
 
@@ -309,66 +239,10 @@ export class DraughtsEngine {
     }
 
     return jumps;
-  }
+  }"""
+content = re.sub(r"  private isValidPos\([\s\S]*?    return jumps;\n  \}", movement_logic, content)
 
-  public makeMove(move: Move): boolean {
-    const legalMoves = this.getLegalMoves();
+with open(filepath, "w") as f:
+    f.write(content)
 
-    // Check if move is in legal moves (deep compare positions)
-    const isLegal = legalMoves.some(m =>
-      m.from.row === move.from.row && m.from.col === move.from.col &&
-      m.to.row === move.to.row && m.to.col === move.to.col
-    );
-
-    if (!isLegal) {
-      return false; // Illegal move
-    }
-
-    // Find the exact legal move to get the captured pieces
-    const exactLegalMove = legalMoves.find(m =>
-        m.from.row === move.from.row && m.from.col === move.from.col &&
-        m.to.row === move.to.row && m.to.col === move.to.col
-    );
-
-    const piece = this.board[move.from.row][move.from.col];
-    if (!piece) return false;
-
-    // Apply move
-    this.board[move.to.row][move.to.col] = piece;
-    this.board[move.from.row][move.from.col] = null;
-
-    // Remove captured pieces
-    if (exactLegalMove && exactLegalMove.captured) {
-      for (const cap of exactLegalMove.captured) {
-        this.board[cap.row][cap.col] = null;
-      }
-    }
-
-    // King promotion
-    if (piece.type === PieceType.MAN) {
-      if (piece.color === PieceColor.LIGHT && move.to.row === 0) {
-        piece.type = PieceType.KING;
-      } else if (piece.color === PieceColor.DARK && move.to.row === this.BOARD_SIZE - 1) {
-        piece.type = PieceType.KING;
-      }
-    }
-
-    // Switch turns
-    this.currentTurn = this.currentTurn === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
-
-    return true;
-  }
-
-  // Check if game is over (no legal moves for the current player)
-  public isGameOver(): boolean {
-    return this.getLegalMoves().length === 0;
-  }
-
-  public getWinner(): PieceColor | null {
-    if (this.isGameOver()) {
-       // If current player has no moves, the other player wins
-       return this.currentTurn === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
-    }
-    return null;
-  }
-}
+print("Updated DraughtsEngine rules for 10x10 and International variant.")

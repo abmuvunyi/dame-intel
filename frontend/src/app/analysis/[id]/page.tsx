@@ -8,16 +8,22 @@ import { PieceColor, PieceType } from '@/components/game/GameBoard';
 class ReplayEngine {
   public board: any[][];
   public currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  private readonly BOARD_SIZE: number;
+  public variant: string;
 
-  constructor() {
+  constructor(variant: string = 'STANDARD') {
+    this.variant = variant;
+    this.BOARD_SIZE = variant === 'INTERNATIONAL' ? 10 : 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
-    for (let row = 0; row < 3; row++) {
+
+    const rowsPerSide = variant === 'INTERNATIONAL' ? 4 : 3;
+
+    for (let row = 0; row < rowsPerSide; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
       }
     }
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    for (let row = this.BOARD_SIZE - rowsPerSide; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
       }
@@ -62,7 +68,7 @@ export default function AnalysisPage() {
         setGame(res.data);
 
         // Pre-compute all states
-        const engine = new ReplayEngine();
+        const engine = new ReplayEngine(res.data.variant || 'STANDARD');
         const states = [{ board: JSON.parse(JSON.stringify(engine.board)), turn: engine.currentTurn, moveInfo: null }];
 
         let moveArray = [];
@@ -151,20 +157,30 @@ export default function AnalysisPage() {
                   {row.map((cell: any, c: number) => {
                     const isDarkSquare = (r + c) % 2 !== 0;
                     let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
+                    const is10x10 = currentBoard.length === 10;
+                    const squareSize = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
+                    const pieceSize = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 text-sm border-[3px]' : 'w-12 h-12 border-4';
 
                     return (
                       <div
                         key={`${r}-${c}`}
-                        className={`w-16 h-16 flex items-center justify-center ${squareBg}`}
+                        className={`${squareSize} flex items-center justify-center ${squareBg}`}
                       >
                         {cell && (
                           <div className={`
-                            w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
+                            ${pieceSize} rounded-full shadow-md flex items-center justify-center text-white font-bold
+                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-900 text-slate-200'}
                             ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
                           `}>
                             {cell.type === PieceType.KING && 'K'}
                           </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
                         )}
                       </div>
                     );
