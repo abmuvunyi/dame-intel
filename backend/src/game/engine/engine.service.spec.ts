@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, PieceColor, PieceType, GameVariant } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
 
   beforeEach(async () => {
-    engine = new DraughtsEngine();
+    engine = new DraughtsEngine(GameVariant.STANDARD);
   });
 
   it('should be defined', () => {
@@ -44,6 +44,49 @@ describe('DraughtsEngine', () => {
     // Piece moved
     expect(engine.getBoard()[4][1]?.color).toBe(PieceColor.LIGHT);
     expect(engine.getBoard()[5][0]).toBeNull();
+
+    // Turn changed
+    expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
+  });
+
+});
+
+describe('DraughtsEngine - International Variant', () => {
+  let engine: DraughtsEngine;
+
+  beforeEach(async () => {
+    engine = new DraughtsEngine(GameVariant.INTERNATIONAL);
+  });
+
+  it('should initialize with correct pieces for 10x10 board', () => {
+    const board = engine.getBoard();
+
+    // Check size
+    expect(board.length).toBe(10);
+    expect(board[0].length).toBe(10);
+
+    // Check dark pieces on row 0
+    expect(board[0][1]?.color).toBe(PieceColor.DARK);
+    expect(board[0][0]).toBeNull();
+
+    // Check light pieces on row 9
+    expect(board[9][0]?.color).toBe(PieceColor.LIGHT);
+    expect(board[9][1]).toBeNull();
+
+    expect(engine.getCurrentTurn()).toBe(PieceColor.LIGHT);
+  });
+
+  it('should allow valid opening move for light', () => {
+    const legalMoves = engine.getLegalMoves();
+    expect(legalMoves.length).toBeGreaterThan(0);
+
+    const move = { from: { row: 6, col: 1 }, to: { row: 5, col: 0 } };
+    const moved = engine.makeMove(move);
+    expect(moved).toBe(true);
+
+    // Piece moved
+    expect(engine.getBoard()[5][0]?.color).toBe(PieceColor.LIGHT);
+    expect(engine.getBoard()[6][1]).toBeNull();
 
     // Turn changed
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);

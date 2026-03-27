@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiService } from './ai.service';
-import { DraughtsEngine, PieceColor } from '../../engine/engine.service';
+import { DraughtsEngine, PieceColor, GameVariant } from '../../engine/engine.service';
 
 describe('AiService', () => {
   let service: AiService;
   let engine: DraughtsEngine;
+  let internationalEngine: DraughtsEngine;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -12,7 +13,8 @@ describe('AiService', () => {
     }).compile();
 
     service = module.get<AiService>(AiService);
-    engine = new DraughtsEngine();
+    engine = new DraughtsEngine(GameVariant.STANDARD);
+    internationalEngine = new DraughtsEngine(GameVariant.INTERNATIONAL);
   });
 
   it('should be defined', () => {
@@ -39,6 +41,13 @@ describe('AiService', () => {
     // Since Light moves first, the AI will evaluate moving a light piece
     expect(engine.getCurrentTurn()).toBe(PieceColor.LIGHT);
     expect(bestMove?.from.row).toBe(5); // Must be a light piece starting from bottom
+  });
+
+  it('evaluates board correctly for international variant', () => {
+    const scoreLight = service.evaluateBoard(internationalEngine.getBoard(), PieceColor.LIGHT);
+    const scoreDark = service.evaluateBoard(internationalEngine.getBoard(), PieceColor.DARK);
+    expect(scoreLight).toBe(0);
+    expect(scoreDark).toBe(0);
   });
 
 });

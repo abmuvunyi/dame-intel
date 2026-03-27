@@ -8,7 +8,7 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { DraughtsEngine, PieceColor } from './engine/engine.service';
+import { DraughtsEngine, PieceColor, GameVariant } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
 import { AiService } from './ai/ai/ai.service';
 import { JwtService } from '@nestjs/jwt';
@@ -34,6 +34,7 @@ interface GameRoom {
   }
   moves: Move[];
   tournamentId?: number;
+  variant: GameVariant;
 }
 
 @WebSocketGateway({ cors: true })
@@ -50,7 +51,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number }[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number, variant: GameVariant }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -138,7 +139,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: null, // Spectator has no color
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: [] // Spectators can't move
+      legalMoves: [], // Spectators can't move
+      variant: room.variant
     });
 
     this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
@@ -169,7 +171,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, variant?: GameVariant }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -178,10 +180,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const gameVariant = data.variant || GameVariant.STANDARD;
 
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(),
+      engine: new DraughtsEngine(gameVariant),
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -191,7 +194,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),
       },
-      moves: []
+      moves: [],
+      variant: gameVariant
     };
 
     this.activeGames.set(roomId, room);
@@ -206,12 +210,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: PieceColor.LIGHT,
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: room.engine.getLegalMoves()
+      legalMoves: room.engine.getLegalMoves(),
+      variant: gameVariant
     });
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, variant?: GameVariant }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -220,13 +225,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId });
+    const gameVariant = data?.variant || GameVariant.STANDARD;
+
+    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, variant: gameVariant });
 
     // Look for a match
     let matchIdx = -1;
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId) {
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && p.variant === gameVariant) {
           matchIdx = i;
           break;
        }
@@ -245,7 +252,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const room: GameRoom = {
         roomId,
-        engine: new DraughtsEngine(),
+        engine: new DraughtsEngine(gameVariant),
         players: {
           [PieceColor.LIGHT]: player1Id,
           [PieceColor.DARK]: player2Id,
@@ -257,6 +264,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         moves: [],
         tournamentId: data?.tournamentId,
+        variant: gameVariant
       };
 
       this.activeGames.set(roomId, room);
@@ -273,7 +281,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         color: PieceColor.LIGHT,
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
-        legalMoves: room.engine.getLegalMoves()
+        legalMoves: room.engine.getLegalMoves(),
+        variant: gameVariant
       });
 
       this.server.to(player2Id).emit('gameStart', {
@@ -282,7 +291,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
         // Only send legal moves to the player whose turn it is
-        legalMoves: []
+        legalMoves: [],
+        variant: gameVariant
       });
     } else {
       client.emit('waitingForOpponent');
@@ -419,7 +429,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
            this.anticheatService.analyzeGameForCheating(
               room.playerProfiles[PieceColor.LIGHT] || null,
               room.playerProfiles[PieceColor.DARK] || null,
-              room.moves
+              room.moves,
+              room.variant
            ).catch(err => console.error('Anticheat Error:', err));
        }
 
