@@ -1,0 +1,30 @@
+I need to add support for a 10x10 International variant of draughts. The existing engine is hardcoded to 8x8.
+
+1. **Backend Engine Changes**:
+   - `DraughtsEngine` needs to support both standard (8x8) and international (10x10) variants.
+   - Introduce an enum `GameVariant` (STANDARD, INTERNATIONAL).
+   - The constructor of `DraughtsEngine` should take a `GameVariant` argument, defaulting to `STANDARD`.
+   - Update `BOARD_SIZE` dynamically based on the variant.
+   - Standard board setup: 8x8, 12 pieces per player.
+   - International board setup: 10x10, 20 pieces per player.
+   - International Rules Differences to Implement:
+     - Kings can move and jump any number of squares along a diagonal (Flying Kings).
+     - Men can capture backwards.
+     - Kings must land on any empty square behind the captured piece, and can continue jumping from there.
+     - Promotion to King only happens if a man *ends* its move on the promotion rank. If it touches the promotion rank during a multi-jump but must continue jumping backwards, it does not promote.
+     - Forced maximum capture rule: If there are multiple capture sequences available, the player *must* choose the one that captures the most pieces. (Standard rules might not require the *maximum* number, just *any* capture, but we need to check how standard is implemented currently. Currently standard just says "any jump is possible, only jumps are legal". We need to refine `getLegalMoves` to pick max jumps if international).
+
+2. **Backend Gateway & Matchmaking**:
+   - Update `joinMatchmaking`, `playVsAi`, etc. to accept a `variant` parameter.
+   - Matchmaking queue needs to segregate players by `variant`.
+   - Pass the `variant` to the `DraughtsEngine` constructor when creating a game room.
+
+3. **Frontend Changes**:
+   - `GameBoard` component needs to handle dynamic board sizes (8x8 and 10x10).
+   - The board rendering logic should map over the rows/cols based on the `board` state returned by the server, which already handles it fine `board.map(...)`.
+   - UI controls to select the variant when joining a match or playing AI.
+   - Update square sizes for 10x10 so it fits on screen (e.g., `w-12 h-12 sm:w-14 sm:h-14` instead of 14/16 if it's 10x10).
+
+4. **Testing & Validation**:
+   - Write tests for 10x10 international rules (flying kings, backward captures, max capture rule).
+   - Pre-commit checks.
