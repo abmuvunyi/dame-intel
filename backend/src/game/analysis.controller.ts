@@ -1,14 +1,14 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { AiService } from './ai/ai/ai.service';
-import { DraughtsEngine, BoardState, PieceColor } from './engine/engine.service';
+import { DraughtsEngine, BoardState, PieceColor, GameVariant } from './engine/engine.service';
 
 @Controller('analysis')
 export class AnalysisController {
   constructor(private readonly aiService: AiService) {}
 
   @Post()
-  analyze(@Body() body: { board: BoardState, turn: PieceColor, depth: number }) {
-    const engine = new DraughtsEngine();
+  analyze(@Body() body: { board: BoardState, turn: PieceColor, depth: number, variant?: GameVariant }) {
+    const engine = new DraughtsEngine(body.variant || GameVariant.STANDARD);
     engine.loadBoard(body.board, body.turn);
 
     // Default to depth 4 for quick analysis

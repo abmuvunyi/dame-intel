@@ -8,7 +8,7 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { DraughtsEngine, PieceColor } from './engine/engine.service';
+import { DraughtsEngine, PieceColor, GameVariant } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
 import { AiService } from './ai/ai/ai.service';
 import { JwtService } from '@nestjs/jwt';
@@ -34,6 +34,7 @@ interface GameRoom {
   }
   moves: Move[];
   tournamentId?: number;
+  variant: GameVariant;
 }
 
 @WebSocketGateway({ cors: true })
@@ -138,7 +139,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: null, // Spectator has no color
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: [] // Spectators can't move
+      legalMoves: [], // Spectators can't move
+      variant: room.variant
     });
 
     this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
@@ -169,7 +171,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, variant?: GameVariant }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -178,10 +180,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const variant = data.variant || GameVariant.STANDARD;
 
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(),
+      engine: new DraughtsEngine(variant),
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -191,7 +194,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),
       },
-      moves: []
+      moves: [],
+      variant
     };
 
     this.activeGames.set(roomId, room);
@@ -206,12 +210,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: PieceColor.LIGHT,
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: room.engine.getLegalMoves()
+      legalMoves: room.engine.getLegalMoves(),
+      variant: room.variant
     });
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, variant?: GameVariant }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -222,11 +227,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId });
 
+    // Wait list logic
+    const variant = data?.variant || GameVariant.STANDARD;
+    (client as any).waitingVariant = variant; // Store preference temporarily on socket for matchmaking
+
     // Look for a match
     let matchIdx = -1;
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId) {
+       // Match if tournament ID matches (or both lack it) AND variant preference matches
+       const pVariant = (this.server.sockets.sockets.get(p.socketId) as any)?.waitingVariant || GameVariant.STANDARD;
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && pVariant === variant) {
           matchIdx = i;
           break;
        }
@@ -245,7 +256,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const room: GameRoom = {
         roomId,
-        engine: new DraughtsEngine(),
+        engine: new DraughtsEngine(variant),
         players: {
           [PieceColor.LIGHT]: player1Id,
           [PieceColor.DARK]: player2Id,
@@ -257,6 +268,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         moves: [],
         tournamentId: data?.tournamentId,
+        variant
       };
 
       this.activeGames.set(roomId, room);
@@ -273,7 +285,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         color: PieceColor.LIGHT,
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
-        legalMoves: room.engine.getLegalMoves()
+        legalMoves: room.engine.getLegalMoves(),
+        variant: room.variant
       });
 
       this.server.to(player2Id).emit('gameStart', {
@@ -282,7 +295,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
         // Only send legal moves to the player whose turn it is
-        legalMoves: []
+        legalMoves: [],
+        variant: room.variant
       });
     } else {
       client.emit('waitingForOpponent');
