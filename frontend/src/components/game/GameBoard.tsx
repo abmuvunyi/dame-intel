@@ -26,6 +26,11 @@ export interface Position {
   col: number;
 }
 
+export enum GameVariant {
+  STANDARD = 'STANDARD',
+  INTERNATIONAL = 'INTERNATIONAL',
+}
+
 export interface Move {
   from: Position;
   to: Position;
@@ -34,6 +39,7 @@ export interface Move {
 
 export default function GameBoard() {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<GameVariant>(GameVariant.STANDARD);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
   const [currentTurn, setCurrentTurn] = useState<PieceColor | null>(null);
@@ -75,8 +81,11 @@ export default function GameBoard() {
       setStatus('Waiting in matchmaking queue...');
     });
 
-    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor, legalMoves: Move[] }) => {
+    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor, legalMoves: Move[], variant?: GameVariant }) => {
       setRoomId(data.roomId);
+      if (data.variant) {
+        setSelectedVariant(data.variant);
+      }
       setMyColor(data.color);
       setBoard(data.board);
       setCurrentTurn(data.turn);
@@ -126,13 +135,13 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin });
+      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, variant: selectedVariant });
     }
   };
 
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
-      socket.emit('playVsAi', { difficulty });
+      socket.emit('playVsAi', { difficulty, variant: selectedVariant });
     }
   };
 
@@ -188,6 +197,21 @@ export default function GameBoard() {
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
         <p className="text-gray-600">{status}</p>
+
+        <div className="flex justify-center space-x-4 pt-4 border-t border-gray-200 w-64">
+           <button
+             onClick={() => setSelectedVariant(GameVariant.STANDARD)}
+             className={`px-4 py-2 rounded font-semibold transition ${selectedVariant === GameVariant.STANDARD ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+           >
+             8x8 Standard
+           </button>
+           <button
+             onClick={() => setSelectedVariant(GameVariant.INTERNATIONAL)}
+             className={`px-4 py-2 rounded font-semibold transition ${selectedVariant === GameVariant.INTERNATIONAL ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+           >
+             10x10 International
+           </button>
+        </div>
 
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
           <button
@@ -271,15 +295,20 @@ export default function GameBoard() {
                 if (isSelected) squareBg = 'bg-yellow-400';
                 if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
 
+                // Adjust sizing based on board size (10x10 vs 8x8) to fit screen
+                const isLargeBoard = board.length === 10;
+                const squareSizeClass = isLargeBoard ? 'w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14' : 'w-14 h-14 sm:w-16 sm:h-16';
+                const pieceSizeClass = isLargeBoard ? 'w-7 h-7 sm:w-9 sm:h-9 md:w-10 md:h-10 text-sm' : 'w-10 h-10 sm:w-12 sm:h-12';
+
                 return (
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
+                    className={`${squareSizeClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
                   >
                     {cell && (
                       <div className={`
-                        w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
+                        ${pieceSizeClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
                         ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
                         ${cell.type === PieceType.KING ? 'ring-4 ring-yellow-400' : ''}
                       `}>
