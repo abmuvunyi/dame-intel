@@ -8,7 +8,7 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { DraughtsEngine, PieceColor } from './engine/engine.service';
+import { DraughtsEngine, PieceColor, GameVariant } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
 import { AiService } from './ai/ai/ai.service';
 import { JwtService } from '@nestjs/jwt';
@@ -169,7 +169,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, variant?: GameVariant }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -179,9 +179,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
+    const variant = data.variant || GameVariant.STANDARD;
+
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(),
+      engine: new DraughtsEngine(variant),
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -211,7 +213,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, variant?: GameVariant }) {
+    const variant = data?.variant || GameVariant.STANDARD;
+
+    // waitingPlayers could be updated to include variant if we match strictly on variant
+    // For simplicity, we can assume users just join matchmaking with a given variant and we match them with same variant.
+    // We need to modify waitingPlayers to store variant.
+
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -220,13 +228,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
+    // Temporarily cast waitingPlayers, or we can just redefine it.
+    // Let's attach variant dynamically to objects inside waitingPlayers array since JS allows it.
+    (client as any).requestedVariant = variant;
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId });
 
     // Look for a match
     let matchIdx = -1;
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId) {
+
+       // get the opponent's socket instance to check variant
+       const opponentSocket = this.server.sockets.sockets.get(p.socketId);
+       const opponentVariant = opponentSocket ? (opponentSocket as any).requestedVariant : GameVariant.STANDARD;
+
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && opponentVariant === variant) {
           matchIdx = i;
           break;
        }
@@ -245,7 +261,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const room: GameRoom = {
         roomId,
-        engine: new DraughtsEngine(),
+        engine: new DraughtsEngine(variant),
         players: {
           [PieceColor.LIGHT]: player1Id,
           [PieceColor.DARK]: player2Id,
