@@ -47,6 +47,10 @@ export default function GameBoard() {
   const [chatInput, setChatInput] = useState('');
   const [drawOfferPending, setDrawOfferPending] = useState(false);
 
+  // Settings
+  const [boardSize, setBoardSize] = useState(8);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
   const tournamentIdToJoin = tIdStr ? parseInt(tIdStr, 10) : null;
@@ -135,13 +139,19 @@ export default function GameBoard() {
 
   const handleFindMatch = () => {
     if (socket) {
-      socket.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin });
+      socket.emit('joinMatchmaking', {
+         tournamentId: tournamentIdToJoin,
+         rules: { boardSize, forceMajorityCapture }
+      });
     }
   };
 
   const handlePlayAI = (difficulty: number) => {
     if (socket) {
-      socket.emit('playVsAi', { difficulty });
+      socket.emit('playVsAi', {
+         difficulty,
+         rules: { boardSize, forceMajorityCapture }
+      });
     }
   };
 
@@ -220,6 +230,31 @@ export default function GameBoard() {
         <p className="text-gray-600">{status}</p>
 
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+
+          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
+            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
+            <label className="text-sm flex justify-between items-center text-gray-600">
+               Board Size:
+               <select
+                  value={boardSize}
+                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  className="ml-2 border rounded p-1 text-sm bg-white"
+               >
+                 <option value={8}>8x8 (Standard)</option>
+                 <option value={10}>10x10 (International)</option>
+               </select>
+            </label>
+            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+               <input
+                  type="checkbox"
+                  checked={forceMajorityCapture}
+                  onChange={e => setForceMajorityCapture(e.target.checked)}
+                  className="rounded"
+               />
+               Force Majority Capture
+            </label>
+          </div>
+
           <button
             onClick={handleFindMatch}
             className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
@@ -323,22 +358,29 @@ export default function GameBoard() {
                 if (isSelected) squareBg = 'bg-yellow-400';
                 if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
 
+                // Dynamically adjust sizes for 10x10 boards so they don't break the layout
+                const is10x10 = board.length === 10;
+                const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
+                const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
+                const stackClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1' : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
+                const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
+
                 return (
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150 relative`}
+                    className={`${cellClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150 relative`}
                   >
                     {cell && (
                       <div className={`
-                        w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300' : 'bg-slate-800 border-4 border-slate-900'}
-                        ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2' : ''}
+                        ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
+                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
+                        ${cell.type === PieceType.KING ? kingOffset : ''}
                       `}>
                         {/* Stacked piece visual for King */}
                         {cell.type === PieceType.KING && (
                           <div className={`
-                            absolute -top-1.5 -left-1.5 w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md border-4
+                            ${stackClass} rounded-full shadow-md
                             ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
                           `} />
                         )}

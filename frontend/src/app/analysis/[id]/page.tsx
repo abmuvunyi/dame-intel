@@ -8,16 +8,20 @@ import { PieceColor, PieceType } from '@/components/game/GameBoard';
 class ReplayEngine {
   public board: any[][];
   public currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  private readonly BOARD_SIZE: number;
 
-  constructor() {
+  constructor(rules: { boardSize?: number } = {}) {
+    this.BOARD_SIZE = rules.boardSize || 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
-    for (let row = 0; row < 3; row++) {
+
+    const rowsOfPieces = this.BOARD_SIZE === 10 ? 4 : 3;
+
+    for (let row = 0; row < rowsOfPieces; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
       }
     }
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
+    for (let row = this.BOARD_SIZE - rowsOfPieces; row < this.BOARD_SIZE; row++) {
       for (let col = 0; col < this.BOARD_SIZE; col++) {
         if ((row + col) % 2 !== 0) this.board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
       }
@@ -62,7 +66,8 @@ export default function AnalysisPage() {
         setGame(res.data);
 
         // Pre-compute all states
-        const engine = new ReplayEngine();
+        const rules = typeof res.data.rules === 'string' ? JSON.parse(res.data.rules) : (res.data.rules || {});
+        const engine = new ReplayEngine(rules);
         const states = [{ board: JSON.parse(JSON.stringify(engine.board)), turn: engine.currentTurn, moveInfo: null }];
 
         let moveArray = [];
@@ -165,21 +170,27 @@ export default function AnalysisPage() {
                     if (isBestMoveFrom) squareBg = 'bg-blue-400';
                     if (isBestMoveTo) squareBg = 'bg-green-400 opacity-90';
 
+                    // Dynamically adjust sizes for 10x10 boards
+                    const is10x10 = currentBoard.length === 10;
+                    const cellClass = is10x10 ? 'w-12 h-12' : 'w-16 h-16';
+                    const pieceClass = is10x10 ? 'w-10 h-10 border-2' : 'w-12 h-12 border-4';
+                    const stackClass = is10x10 ? 'w-10 h-10 border-2 absolute -top-1 -left-1' : 'w-12 h-12 border-4 absolute -top-1.5 -left-1.5';
+
                     return (
                       <div
                         key={`${r}-${c}`}
-                        className={`w-16 h-16 flex items-center justify-center ${squareBg} relative`}
+                        className={`${cellClass} flex items-center justify-center ${squareBg} relative`}
                       >
                         {cell && (
                           <div className={`
-                            w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300' : 'bg-slate-800 border-4 border-slate-900'}
-                            ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2' : ''}
+                            ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold
+                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
+                            ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1' : ''}
                           `}>
                             {/* Stacked piece visual for King */}
                             {cell.type === PieceType.KING && (
                               <div className={`
-                                absolute -top-1.5 -left-1.5 w-12 h-12 rounded-full shadow-md border-4
+                                ${stackClass} rounded-full shadow-md
                                 ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
                               `} />
                             )}

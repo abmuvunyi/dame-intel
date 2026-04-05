@@ -16,7 +16,7 @@ export class AiService {
 
     // Deep clone the board
     const cloneBoard = JSON.parse(JSON.stringify(engine.getBoard()));
-    const simEngine = new DraughtsEngine();
+    const simEngine = new DraughtsEngine(engine.getRules());
     simEngine.loadBoard(cloneBoard, aiColor);
 
     const legalMoves = simEngine.getLegalMoves();

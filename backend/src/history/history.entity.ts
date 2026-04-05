@@ -18,6 +18,9 @@ export class GameHistory {
   @Column('simple-json')
   moves: any; // Serialized array of moves
 
+  @Column('simple-json', { nullable: true })
+  rules: any; // Serialized GameRules object (boardSize, forceMajorityCapture)
+
   @CreateDateColumn()
   playedAt: Date;
 }

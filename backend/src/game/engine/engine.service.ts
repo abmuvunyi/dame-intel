@@ -27,32 +27,44 @@ export interface Move {
   captured?: Position[]; // Array of captured piece positions in this move sequence
 }
 
+export interface GameRules {
+  boardSize: number; // 8 or 10
+  forceMajorityCapture: boolean;
+}
+
 export class DraughtsEngine {
   private board: BoardState;
   private currentTurn: PieceColor;
-  private readonly BOARD_SIZE = 8;
+  private rules: GameRules;
 
-  constructor() {
+  constructor(rules: Partial<GameRules> = {}) {
+    this.rules = {
+      boardSize: rules.boardSize || 8,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+    };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
   }
 
-  // Generate an 8x8 standard Draughts board
+  // Generate the Draughts board
   private createInitialBoard(): BoardState {
-    const board: BoardState = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
+    const size = this.rules.boardSize;
+    const board: BoardState = Array(size).fill(null).map(() => Array(size).fill(null));
 
-    // Dark pieces (top 3 rows)
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < this.BOARD_SIZE; col++) {
+    const rowsOfPieces = size === 10 ? 4 : 3;
+
+    // Dark pieces (top rows)
+    for (let row = 0; row < rowsOfPieces; row++) {
+      for (let col = 0; col < size; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.DARK, type: PieceType.MAN };
         }
       }
     }
 
-    // Light pieces (bottom 3 rows)
-    for (let row = 5; row < this.BOARD_SIZE; row++) {
-      for (let col = 0; col < this.BOARD_SIZE; col++) {
+    // Light pieces (bottom rows)
+    for (let row = size - rowsOfPieces; row < size; row++) {
+      for (let col = 0; col < size; col++) {
         if ((row + col) % 2 !== 0) {
           board[row][col] = { color: PieceColor.LIGHT, type: PieceType.MAN };
         }
@@ -71,10 +83,15 @@ export class DraughtsEngine {
   }
 
   // Standard string representation for debugging/testing
+  public getRules(): GameRules {
+      return this.rules;
+  }
+
   public getBoardString(): string {
     let result = '';
-    for (let r = 0; r < this.BOARD_SIZE; r++) {
-      for (let c = 0; c < this.BOARD_SIZE; c++) {
+    const size = this.rules.boardSize;
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
         const p = this.board[r][c];
         if (!p) {
           result += '.';
@@ -98,9 +115,10 @@ export class DraughtsEngine {
   public getLegalMoves(): Move[] {
     const jumps: Move[] = [];
     const normalMoves: Move[] = [];
+    const size = this.rules.boardSize;
 
-    for (let row = 0; row < this.BOARD_SIZE; row++) {
-      for (let col = 0; col < this.BOARD_SIZE; col++) {
+    for (let row = 0; row < size; row++) {
+      for (let col = 0; col < size; col++) {
         const piece = this.board[row][col];
         if (piece && piece.color === this.currentTurn) {
           const pos = { row, col };
@@ -115,11 +133,26 @@ export class DraughtsEngine {
     }
 
     // Forced capture rule: if any jump is possible, only jumps are legal
-    return jumps.length > 0 ? jumps : normalMoves;
+    if (jumps.length > 0) {
+        if (this.rules.forceMajorityCapture) {
+            // Find the maximum number of captures in any sequence
+            let maxCaptures = 0;
+            for (const jump of jumps) {
+                const numCaps = jump.captured ? jump.captured.length : 0;
+                if (numCaps > maxCaptures) maxCaptures = numCaps;
+            }
+            // Filter legal jumps to only those that capture the maximum amount
+            return jumps.filter(j => j.captured && j.captured.length === maxCaptures);
+        }
+        return jumps;
+    }
+
+    return normalMoves;
   }
 
   private isValidPos(r: number, c: number): boolean {
-    return r >= 0 && r < this.BOARD_SIZE && c >= 0 && c < this.BOARD_SIZE;
+    const size = this.rules.boardSize;
+    return r >= 0 && r < size && c >= 0 && c < size;
   }
 
   private getMoveDirections(piece: Piece): { dr: number, dc: number }[] {
@@ -238,7 +271,7 @@ export class DraughtsEngine {
     if (piece.type === PieceType.MAN) {
       if (piece.color === PieceColor.LIGHT && move.to.row === 0) {
         piece.type = PieceType.KING;
-      } else if (piece.color === PieceColor.DARK && move.to.row === this.BOARD_SIZE - 1) {
+      } else if (piece.color === PieceColor.DARK && move.to.row === this.rules.boardSize - 1) {
         piece.type = PieceType.KING;
       }
     }

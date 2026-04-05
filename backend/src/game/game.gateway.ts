@@ -18,9 +18,12 @@ import { jwtConstants } from '../auth/constants';
 import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
 
+import { GameRules } from './engine/engine.service';
+
 interface GameRoom {
   roomId: string;
   engine: DraughtsEngine;
+  rules: GameRules;
   players: {
     [PieceColor.LIGHT]?: string; // Socket ID
     [PieceColor.DARK]?: string;  // Socket ID
@@ -50,7 +53,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number }[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -234,7 +237,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: GameRules }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -243,10 +246,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
 
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(),
+      engine: new DraughtsEngine(rules),
+      rules,
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -276,7 +281,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -285,13 +290,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId });
+    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+
+    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
 
     // Look for a match
     let matchIdx = -1;
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId) {
+       // Match if tournament ID matches, AND if the requested rulesets match
+       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
           matchIdx = i;
           break;
        }
@@ -310,7 +320,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const room: GameRoom = {
         roomId,
-        engine: new DraughtsEngine(),
+        engine: new DraughtsEngine(rules),
+        rules,
         players: {
           [PieceColor.LIGHT]: player1Id,
           [PieceColor.DARK]: player2Id,
@@ -471,7 +482,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           room.playerProfiles[PieceColor.LIGHT] || null,
           room.playerProfiles[PieceColor.DARK] || null,
           winner as 'L'|'D'|'DRAW',
-          room.moves
+          room.moves,
+          room.rules
        );
 
        // Update ELO if both are authenticated real players
