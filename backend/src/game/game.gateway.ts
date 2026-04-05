@@ -514,16 +514,33 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 await this.tournamentsService.updateTournamentScore(p2.id, room.tournamentId, 'DRAW');
              }
           } else {
-            // Standard ELO match
-            if (winner === PieceColor.LIGHT) {
-               await this.usersService.updateRating(p1.id, 15, 'win');
-               await this.usersService.updateRating(p2.id, -15, 'loss');
-            } else if (winner === PieceColor.DARK) {
-               await this.usersService.updateRating(p1.id, -15, 'loss');
-               await this.usersService.updateRating(p2.id, 15, 'win');
-            } else {
-               await this.usersService.updateRating(p1.id, 0, 'draw');
-               await this.usersService.updateRating(p2.id, 0, 'draw');
+            // Standard ELO Match using Chess.com-style formula
+            // We fetch the fresh user objects because player profiles in memory might be outdated
+            const freshP1 = await this.usersService.findOneById(p1.id);
+            const freshP2 = await this.usersService.findOneById(p2.id);
+
+            if (freshP1 && freshP2) {
+              const r1 = freshP1.rating;
+              const r2 = freshP2.rating;
+              const gp1 = freshP1.gamesPlayed;
+              const gp2 = freshP2.gamesPlayed;
+
+              let p1Result: 'win' | 'loss' | 'draw' = 'draw';
+              let p2Result: 'win' | 'loss' | 'draw' = 'draw';
+
+              if (winner === PieceColor.LIGHT) {
+                p1Result = 'win';
+                p2Result = 'loss';
+              } else if (winner === PieceColor.DARK) {
+                p1Result = 'loss';
+                p2Result = 'win';
+              }
+
+              const deltaP1 = this.usersService.calculateEloChange(r1, r2, p1Result, gp1);
+              const deltaP2 = this.usersService.calculateEloChange(r2, r1, p2Result, gp2);
+
+              await this.usersService.updateRating(p1.id, deltaP1, p1Result);
+              await this.usersService.updateRating(p2.id, deltaP2, p2Result);
             }
           }
        }

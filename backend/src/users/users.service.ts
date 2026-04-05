@@ -27,12 +27,34 @@ export class UsersService {
       const user = await this.usersRepository.findOneBy({ id });
       if (!user) return null;
 
-      user.rating += ratingDelta;
+      user.rating = Math.max(100, user.rating + ratingDelta); // Rating floor of 100
       user.gamesPlayed += 1;
       if (result === 'win') user.wins += 1;
       else if (result === 'loss') user.losses += 1;
       else if (result === 'draw') user.draws += 1;
 
       return this.usersRepository.save(user);
+  }
+
+  // Calculates the standard ELO rating change
+  calculateEloChange(ratingA: number, ratingB: number, result: 'win' | 'loss' | 'draw', gamesPlayed: number): number {
+    // Determine K-Factor (How volatile the rating is)
+    let k = 20; // Standard
+    if (gamesPlayed < 30) {
+      k = 40; // High volatility for new players (Provisional)
+    } else if (ratingA > 2400) {
+      k = 10; // Low volatility for Grandmasters
+    }
+
+    // Expected win probability (0.0 to 1.0)
+    const expectedScore = 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+
+    // Actual score
+    let actualScore = 0.5; // Draw
+    if (result === 'win') actualScore = 1.0;
+    if (result === 'loss') actualScore = 0.0;
+
+    // Calculate rating delta
+    return Math.round(k * (actualScore - expectedScore));
   }
 }

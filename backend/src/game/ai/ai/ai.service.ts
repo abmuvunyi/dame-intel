@@ -48,7 +48,21 @@ export class AiService {
   public getBestMove(engine: DraughtsEngine, difficulty: number): Move | null {
     const aiColor = engine.getCurrentTurn();
     const isMaximizingPlayer = true; // AI is always maximizing for its own color in the search root
-    const depth = difficulty * 2; // Level 1: depth 2, Level 2: depth 4... Level 4: depth 8
+
+    // Map the 7 difficulty levels to search depths
+    // Levels 1-4 scale normally. Levels 5-7 scale deeply.
+    // Level 7 uses depth 9 (extremely hard, high ELO equivalent)
+    const depthMap: Record<number, number> = {
+       1: 2, // ~800 ELO
+       2: 3, // ~1200 ELO
+       3: 4, // ~1600 ELO
+       4: 5, // ~2000 ELO
+       5: 6, // ~2400 ELO
+       6: 7, // ~2800 ELO
+       7: 9  // ~3500+ ELO
+    };
+
+    const depth = depthMap[difficulty] || 3;
 
     const evaluations = this.analyzePosition(engine, depth);
     if (evaluations.length === 0) return null;

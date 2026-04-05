@@ -264,24 +264,17 @@ export default function GameBoard() {
 
           <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
 
-          <button
-            onClick={() => handlePlayAI(1)}
-            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
-          >
-            Play AI (Easy)
-          </button>
-          <button
-            onClick={() => handlePlayAI(2)}
-            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
-          >
-            Play AI (Medium)
-          </button>
-          <button
-            onClick={() => handlePlayAI(3)}
-            className="w-full px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 transition"
-          >
-            Play AI (Hard)
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            {[1, 2, 3, 4, 5, 6, 7].map(level => (
+              <button
+                key={level}
+                onClick={() => handlePlayAI(level)}
+                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+              >
+                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+              </button>
+            ))}
+          </div>
         </div>
 
         {activeGames.length > 0 && (
