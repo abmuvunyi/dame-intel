@@ -150,7 +150,13 @@ export class DraughtsEngine {
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     let hasSubJumps = false;
     const jumps: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
+
+    // In many Draughts variants (like International Draughts and some rulesets),
+    // Men are allowed to capture backwards, even if they can only move forwards normally.
+    const dirs = [
+      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+    ];
 
     for (const dir of dirs) {
       const overR = currentPos.row + dir.dr;

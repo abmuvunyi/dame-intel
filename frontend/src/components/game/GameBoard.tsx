@@ -45,6 +45,7 @@ export default function GameBoard() {
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<{sender: string, message: string, timestamp: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [drawOfferPending, setDrawOfferPending] = useState(false);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -119,6 +120,14 @@ export default function GameBoard() {
       setChatMessages(prev => [...prev, msg]);
     });
 
+    newSocket.on('drawOffered', () => {
+      setDrawOfferPending(true);
+    });
+
+    newSocket.on('drawDeclined', () => {
+      alert("Your opponent declined the draw offer.");
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -148,6 +157,27 @@ export default function GameBoard() {
 
     socket.emit('sendMessage', { roomId, message: chatInput });
     setChatInput('');
+  };
+
+  const handleResign = () => {
+    if (confirm("Are you sure you want to resign?")) {
+      socket?.emit('resignGame');
+    }
+  };
+
+  const handleOfferDraw = () => {
+    socket?.emit('offerDraw');
+    alert("Draw offer sent.");
+  };
+
+  const handleAcceptDraw = () => {
+    socket?.emit('acceptDraw');
+    setDrawOfferPending(false);
+  };
+
+  const handleDeclineDraw = () => {
+    socket?.emit('declineDraw');
+    setDrawOfferPending(false);
   };
 
   const isMoveLegal = (from: Position, to: Position) => {
@@ -259,6 +289,28 @@ export default function GameBoard() {
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
         </p>
 
+        {myColor && !status.includes('Game Over') && (
+          <div className="flex gap-4">
+            <button onClick={handleOfferDraw} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-sm font-semibold transition">
+              Offer Draw
+            </button>
+            <button onClick={handleResign} className="px-4 py-2 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-sm font-semibold transition">
+              Resign
+            </button>
+          </div>
+        )}
+
+        {drawOfferPending && (
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded relative shadow-md mt-2">
+            <p className="font-bold">Draw Offered</p>
+            <p className="text-sm">Your opponent has offered a draw.</p>
+            <div className="mt-2 flex gap-2">
+              <button onClick={handleAcceptDraw} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
+              <button onClick={handleDeclineDraw} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
+            </div>
+          </div>
+        )}
+
         <div className="border-[6px] border-slate-800 p-1 bg-slate-200 shadow-2xl rounded-sm">
           {board.map((row, r) => (
             <div key={r} className="flex">
@@ -275,15 +327,21 @@ export default function GameBoard() {
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150`}
+                    className={`w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150 relative`}
                   >
                     {cell && (
                       <div className={`
                         w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
-                        ${cell.type === PieceType.KING ? 'ring-4 ring-yellow-400' : ''}
+                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300' : 'bg-slate-800 border-4 border-slate-900'}
+                        ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2' : ''}
                       `}>
-                        {cell.type === PieceType.KING && 'K'}
+                        {/* Stacked piece visual for King */}
+                        {cell.type === PieceType.KING && (
+                          <div className={`
+                            absolute -top-1.5 -left-1.5 w-10 h-10 sm:w-12 sm:h-12 rounded-full shadow-md border-4
+                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
+                          `} />
+                        )}
                       </div>
                     )}
                   </div>

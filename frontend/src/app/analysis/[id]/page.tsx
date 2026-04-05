@@ -120,6 +120,11 @@ export default function AnalysisPage() {
       }
   };
 
+  // Automatically analyze the new board state whenever the move index changes
+  useEffect(() => {
+      handleAnalyze();
+  }, [currentMoveIndex]);
+
   if (!game || boardStates.length === 0) return <div className="p-10 text-center">Loading game data...</div>;
 
   const currentBoard = boardStates[currentMoveIndex].board;
@@ -152,18 +157,32 @@ export default function AnalysisPage() {
                     const isDarkSquare = (r + c) % 2 !== 0;
                     let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
 
+                    // Highlight the best move calculated by the engine if available
+                    const bestMove = evaluations.length > 0 ? evaluations[0].move : null;
+                    const isBestMoveFrom = bestMove && bestMove.from.row === r && bestMove.from.col === c;
+                    const isBestMoveTo = bestMove && bestMove.to.row === r && bestMove.to.col === c;
+
+                    if (isBestMoveFrom) squareBg = 'bg-blue-400';
+                    if (isBestMoveTo) squareBg = 'bg-green-400 opacity-90';
+
                     return (
                       <div
                         key={`${r}-${c}`}
-                        className={`w-16 h-16 flex items-center justify-center ${squareBg}`}
+                        className={`w-16 h-16 flex items-center justify-center ${squareBg} relative`}
                       >
                         {cell && (
                           <div className={`
                             w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
-                            ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
+                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300' : 'bg-slate-800 border-4 border-slate-900'}
+                            ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2' : ''}
                           `}>
-                            {cell.type === PieceType.KING && 'K'}
+                            {/* Stacked piece visual for King */}
+                            {cell.type === PieceType.KING && (
+                              <div className={`
+                                absolute -top-1.5 -left-1.5 w-12 h-12 rounded-full shadow-md border-4
+                                ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
+                              `} />
+                            )}
                           </div>
                         )}
                       </div>

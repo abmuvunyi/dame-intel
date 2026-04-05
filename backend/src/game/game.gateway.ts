@@ -168,6 +168,71 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('resignGame')
+  handleResignGame(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    if (room.players[PieceColor.LIGHT] === client.id) {
+       this.handleGameOver(roomId, room, PieceColor.DARK);
+    } else if (room.players[PieceColor.DARK] === client.id) {
+       this.handleGameOver(roomId, room, PieceColor.LIGHT);
+    }
+  }
+
+  @SubscribeMessage('offerDraw')
+  handleOfferDraw(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    // AI automatically rejects draws for simplicity, or we just don't support it vs AI
+    if (room.aiDifficulty) {
+       client.emit('drawDeclined');
+       return;
+    }
+
+    const opponentSocketId = room.players[PieceColor.LIGHT] === client.id
+      ? room.players[PieceColor.DARK]
+      : room.players[PieceColor.LIGHT];
+
+    if (opponentSocketId) {
+       this.server.to(opponentSocketId).emit('drawOffered');
+    }
+  }
+
+  @SubscribeMessage('acceptDraw')
+  handleAcceptDraw(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    // Validate client is actually a player
+    if (room.players[PieceColor.LIGHT] === client.id || room.players[PieceColor.DARK] === client.id) {
+       this.handleGameOver(roomId, room, 'DRAW');
+    }
+  }
+
+  @SubscribeMessage('declineDraw')
+  handleDeclineDraw(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    const opponentSocketId = room.players[PieceColor.LIGHT] === client.id
+      ? room.players[PieceColor.DARK]
+      : room.players[PieceColor.LIGHT];
+
+    if (opponentSocketId) {
+       this.server.to(opponentSocketId).emit('drawDeclined');
+    }
+  }
+
   @SubscribeMessage('playVsAi')
   handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number }) {
     // Remove from existing game if any
