@@ -50,6 +50,18 @@ export default function GameBoard() {
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [variant, setVariant] = useState<'STANDARD' | 'INTERNATIONAL'>('STANDARD');
+
+  const handleVariantChange = (selectedVariant: 'STANDARD' | 'INTERNATIONAL') => {
+     setVariant(selectedVariant);
+     if (selectedVariant === 'INTERNATIONAL') {
+        setBoardSize(10);
+        setForceMajorityCapture(true);
+     } else {
+        setBoardSize(8);
+        setForceMajorityCapture(true);
+     }
+  };
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -141,7 +153,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('joinMatchmaking', {
          tournamentId: tournamentIdToJoin,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture, variant }
       });
     }
   };
@@ -150,7 +162,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('playVsAi', {
          difficulty,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture, variant }
       });
     }
   };
@@ -234,24 +246,15 @@ export default function GameBoard() {
           <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
             <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
             <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
+               Game Variant:
                <select
-                  value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  value={variant}
+                  onChange={e => handleVariantChange(e.target.value as 'STANDARD' | 'INTERNATIONAL')}
                   className="ml-2 border rounded p-1 text-sm bg-white"
                >
-                 <option value={8}>8x8 (Standard)</option>
-                 <option value={10}>10x10 (International)</option>
+                 <option value="STANDARD">Standard (8x8)</option>
+                 <option value="INTERNATIONAL">International (10x10)</option>
                </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
             </label>
           </div>
 

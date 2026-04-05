@@ -10,7 +10,7 @@ class ReplayEngine {
   public currentTurn: PieceColor;
   private readonly BOARD_SIZE: number;
 
-  constructor(rules: { boardSize?: number } = {}) {
+  constructor(rules: { boardSize?: number; variant?: string } = {}) {
     this.BOARD_SIZE = rules.boardSize || 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 

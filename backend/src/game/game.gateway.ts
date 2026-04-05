@@ -246,7 +246,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
+    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true, variant: 'STANDARD' as any };
 
     const room: GameRoom = {
       roomId,
@@ -290,7 +290,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true, variant: 'STANDARD' as any };
 
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
 
