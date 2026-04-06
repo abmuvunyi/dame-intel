@@ -27,9 +27,13 @@ export interface Move {
   captured?: Position[]; // Array of captured piece positions in this move sequence
 }
 
+export enum GameVariant {
+  STANDARD = 'STANDARD', // 8x8, no flying kings, no backward men captures
+  INTERNATIONAL = 'INTERNATIONAL' // 10x10, flying kings, backward men captures, majority capture
+}
+
 export interface GameRules {
-  boardSize: number; // 8 or 10
-  forceMajorityCapture: boolean;
+  variant: GameVariant;
 }
 
 export class DraughtsEngine {
@@ -39,8 +43,7 @@ export class DraughtsEngine {
 
   constructor(rules: Partial<GameRules> = {}) {
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      variant: rules.variant || GameVariant.STANDARD
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -48,7 +51,7 @@ export class DraughtsEngine {
 
   // Generate the Draughts board
   private createInitialBoard(): BoardState {
-    const size = this.rules.boardSize;
+    const size = this.rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
     const board: BoardState = Array(size).fill(null).map(() => Array(size).fill(null));
 
     const rowsOfPieces = size === 10 ? 4 : 3;
@@ -89,7 +92,7 @@ export class DraughtsEngine {
 
   public getBoardString(): string {
     let result = '';
-    const size = this.rules.boardSize;
+    const size = this.rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
         const p = this.board[r][c];
@@ -115,7 +118,7 @@ export class DraughtsEngine {
   public getLegalMoves(): Move[] {
     const jumps: Move[] = [];
     const normalMoves: Move[] = [];
-    const size = this.rules.boardSize;
+    const size = this.rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
 
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
@@ -134,7 +137,7 @@ export class DraughtsEngine {
 
     // Forced capture rule: if any jump is possible, only jumps are legal
     if (jumps.length > 0) {
-        if (this.rules.forceMajorityCapture) {
+        if (this.rules.variant === GameVariant.INTERNATIONAL) {
             // Find the maximum number of captures in any sequence
             let maxCaptures = 0;
             for (const jump of jumps) {
@@ -151,7 +154,7 @@ export class DraughtsEngine {
   }
 
   private isValidPos(r: number, c: number): boolean {
-    const size = this.rules.boardSize;
+    const size = this.rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
     return r >= 0 && r < size && c >= 0 && c < size;
   }
 
@@ -164,11 +167,20 @@ export class DraughtsEngine {
     return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
   }
 
+  private getCaptureDirections(piece: Piece): { dr: number, dc: number }[] {
+    if (piece.type === PieceType.KING || this.rules.variant === GameVariant.INTERNATIONAL) {
+      return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
+    // Standard Men: Light captures UP (-1), Dark captures DOWN (+1)
+    const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+    return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+  }
+
   private getValidNormalMovesForPiece(pos: Position, piece: Piece): Move[] {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.variant === GameVariant.INTERNATIONAL) {
       // Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
@@ -198,12 +210,9 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
-      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
-    ];
+    const dirs = this.getCaptureDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.variant === GameVariant.INTERNATIONAL) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -267,7 +276,7 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
+      // Men and Standard King captures (non-flying)
       for (const dir of dirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
@@ -288,10 +297,20 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
+          const originalCaptured = this.board[overR][overC];
+          // In Standard variant, pieces are removed immediately and cannot block subsequent jumps
+          if (this.rules.variant === GameVariant.STANDARD) {
+             this.board[overR][overC] = null;
+          }
+
           const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
+
+          if (this.rules.variant === GameVariant.STANDARD) {
+             this.board[overR][overC] = originalCaptured;
+          }
 
           if (subJumps.length > 0) {
              jumps.push(...subJumps);
@@ -340,9 +359,12 @@ export class DraughtsEngine {
 
     // King promotion
     if (piece.type === PieceType.MAN) {
+      const size = this.rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
+      // In International draughts, you only promote if you end the turn on the promotion row.
+      // But standard draughts is the same, so this logic stands.
       if (piece.color === PieceColor.LIGHT && move.to.row === 0) {
         piece.type = PieceType.KING;
-      } else if (piece.color === PieceColor.DARK && move.to.row === this.rules.boardSize - 1) {
+      } else if (piece.color === PieceColor.DARK && move.to.row === size - 1) {
         piece.type = PieceType.KING;
       }
     }

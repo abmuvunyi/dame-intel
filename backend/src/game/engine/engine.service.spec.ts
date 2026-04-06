@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, PieceColor, PieceType, GameVariant } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
 
   beforeEach(async () => {
-    engine = new DraughtsEngine();
+    engine = new DraughtsEngine({ variant: GameVariant.STANDARD });
   });
 
   it('should be defined', () => {
