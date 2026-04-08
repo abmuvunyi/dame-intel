@@ -13,6 +13,11 @@ export enum PieceType {
   KING = 'K',
 }
 
+export enum GameVariant {
+  STANDARD = 'STANDARD',
+  INTERNATIONAL = 'INTERNATIONAL'
+}
+
 export interface Piece {
   color: PieceColor;
   type: PieceType;
@@ -48,8 +53,7 @@ export default function GameBoard() {
   const [drawOfferPending, setDrawOfferPending] = useState(false);
 
   // Settings
-  const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [variant, setVariant] = useState<GameVariant>(GameVariant.STANDARD);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -141,7 +145,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('joinMatchmaking', {
          tournamentId: tournamentIdToJoin,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { variant }
       });
     }
   };
@@ -150,7 +154,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('playVsAi', {
          difficulty,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { variant }
       });
     }
   };
@@ -232,26 +236,17 @@ export default function GameBoard() {
         <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
 
           <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
+            <h4 className="text-sm font-bold text-gray-700">Game Variant</h4>
             <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
+               Variant:
                <select
-                  value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
+                  value={variant}
+                  onChange={e => setVariant(e.target.value as GameVariant)}
+                  className="ml-2 border rounded p-1 text-sm bg-white w-full max-w-[140px]"
                >
-                 <option value={8}>8x8 (Standard)</option>
-                 <option value={10}>10x10 (International)</option>
+                 <option value={GameVariant.STANDARD}>Standard (8x8)</option>
+                 <option value={GameVariant.INTERNATIONAL}>International (10x10)</option>
                </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
             </label>
           </div>
 

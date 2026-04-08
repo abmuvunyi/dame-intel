@@ -10,8 +10,8 @@ class ReplayEngine {
   public currentTurn: PieceColor;
   private readonly BOARD_SIZE: number;
 
-  constructor(rules: { boardSize?: number } = {}) {
-    this.BOARD_SIZE = rules.boardSize || 8;
+  constructor(rules: { variant?: string } = {}) {
+    this.BOARD_SIZE = rules.variant === 'INTERNATIONAL' ? 10 : 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 
     const rowsOfPieces = this.BOARD_SIZE === 10 ? 4 : 3;
