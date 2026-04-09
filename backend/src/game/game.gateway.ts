@@ -18,7 +18,7 @@ import { jwtConstants } from '../auth/constants';
 import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
 
-import { GameRules } from './engine/engine.service';
+import { GameRules, GameVariant } from './engine/engine.service';
 
 interface GameRoom {
   roomId: string;
@@ -246,7 +246,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
+    const rules = data.rules || { variant: GameVariant.STANDARD };
 
     const room: GameRoom = {
       roomId,
@@ -290,7 +290,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+    const rules = data?.rules || { variant: GameVariant.STANDARD };
 
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
 
@@ -299,7 +299,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
        // Match if tournament ID matches, AND if the requested rulesets match
-       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+       const rulesMatch = p.rules?.variant === rules.variant;
 
        if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
           matchIdx = i;

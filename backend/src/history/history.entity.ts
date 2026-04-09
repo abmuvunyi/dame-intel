@@ -19,7 +19,7 @@ export class GameHistory {
   moves: any; // Serialized array of moves
 
   @Column('simple-json', { nullable: true })
-  rules: any; // Serialized GameRules object (boardSize, forceMajorityCapture)
+  rules: any; // Serialized GameRules object (variant)
 
   @CreateDateColumn()
   playedAt: Date;

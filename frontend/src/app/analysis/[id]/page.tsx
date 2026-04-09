@@ -4,14 +4,16 @@ import axios from 'axios';
 import { useParams, useRouter } from 'next/navigation';
 import { PieceColor, PieceType } from '@/components/game/GameBoard';
 
+import { GameVariant } from '@/components/game/GameBoard';
+
 // Simplified local engine state just for replaying moves
 class ReplayEngine {
   public board: any[][];
   public currentTurn: PieceColor;
   private readonly BOARD_SIZE: number;
 
-  constructor(rules: { boardSize?: number } = {}) {
-    this.BOARD_SIZE = rules.boardSize || 8;
+  constructor(rules: { variant?: GameVariant } = {}) {
+    this.BOARD_SIZE = rules.variant === GameVariant.INTERNATIONAL ? 10 : 8;
     this.board = Array(this.BOARD_SIZE).fill(null).map(() => Array(this.BOARD_SIZE).fill(null));
 
     const rowsOfPieces = this.BOARD_SIZE === 10 ? 4 : 3;
