@@ -169,7 +169,8 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+      // Kings can fly (slide across empty diagonals) in International 10x10.
+      // In Standard 8x8, kings move exactly 1 square.
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -179,6 +180,10 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+
+          if (this.rules.boardSize === 8) {
+            break;
+          }
           step++;
         }
       }
@@ -214,6 +219,22 @@ export class DraughtsEngine {
           const c = currentPos.col + dir.dc * step;
 
           if (!this.isValidPos(r, c)) break;
+
+          if (this.rules.boardSize === 8) {
+             // In Standard 8x8, Kings only capture adjacent pieces
+             // so if we haven't found an opponent and step > 1, we can't jump
+             if (step > 1 && !opponentFoundPos) {
+                 break;
+             }
+             // If we have found an opponent and we try to land further away than right behind it
+             // we can't jump
+             if (opponentFoundPos) {
+                 const distR = Math.abs(r - opponentFoundPos.row);
+                 if (distR > 1) {
+                     break;
+                 }
+             }
+          }
 
           const cell = this.board[r][c];
 
@@ -269,6 +290,14 @@ export class DraughtsEngine {
     } else {
       // Men captures
       for (const dir of dirs) {
+        if (this.rules.boardSize === 8) {
+           // In 8x8 Standard, men can only capture forwards
+           const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+           if (dir.dr !== forward) {
+               continue;
+           }
+        }
+
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
