@@ -168,8 +168,8 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Kings can fly (slide across empty diagonals) in International draughts
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -183,6 +183,7 @@ export class DraughtsEngine {
         }
       }
     } else {
+      // Men, or Kings in 8x8 standard draughts (short moves)
       for (const dir of dirs) {
         const nr = pos.row + dir.dr;
         const nc = pos.col + dir.dc;
@@ -198,12 +199,9 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
-      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
-    ];
+    const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -268,7 +266,15 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      let captureDirs = dirs;
+      // International rules allow men to capture backward
+      if (this.rules.boardSize === 10) {
+        captureDirs = [
+          { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+          { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+        ];
+      }
+      for (const dir of captureDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;

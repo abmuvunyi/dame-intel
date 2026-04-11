@@ -49,4 +49,58 @@ describe('DraughtsEngine', () => {
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
   });
 
+  it('backward jump test in 8x8 standard', () => {
+     // Standard checkers 8x8. Regular pieces shouldn't jump backwards.
+     const customEngine = new DraughtsEngine({ boardSize: 8 });
+     const board = Array(8).fill(null).map(() => Array(8).fill(null));
+     board[4][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+     board[5][4] = { color: PieceColor.DARK, type: PieceType.MAN }; // Dark piece behind light piece
+     customEngine.loadBoard(board, PieceColor.LIGHT);
+
+     const moves = customEngine.getLegalMoves();
+     // Should not be able to capture backwards
+     expect(moves.filter(m => m.captured && m.captured.length > 0).length).toBe(0);
+  });
+
+  it('backward jump test in 10x10 international', () => {
+     // International draughts 10x10. Regular pieces CAN jump backwards.
+     const customEngine = new DraughtsEngine({ boardSize: 10 });
+     const board = Array(10).fill(null).map(() => Array(10).fill(null));
+     board[4][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+     board[5][4] = { color: PieceColor.DARK, type: PieceType.MAN }; // Dark piece behind light piece
+     customEngine.loadBoard(board, PieceColor.LIGHT);
+
+     const moves = customEngine.getLegalMoves();
+     // Should be able to capture backwards
+     expect(moves.filter(m => m.captured && m.captured.length > 0).length).toBeGreaterThan(0);
+  });
+
+});
+
+describe('DraughtsEngine King Rules', () => {
+  it('short jump for kings in 8x8 standard', () => {
+     const customEngine = new DraughtsEngine({ boardSize: 8 });
+     const board = Array(8).fill(null).map(() => Array(8).fill(null));
+     board[4][3] = { color: PieceColor.LIGHT, type: PieceType.KING };
+     customEngine.loadBoard(board, PieceColor.LIGHT);
+
+     const moves = customEngine.getLegalMoves();
+     // Should only be able to move 1 square diagonally (4 moves max)
+     expect(moves.length).toBeLessThanOrEqual(4);
+     for (const move of moves) {
+         expect(Math.abs(move.from.row - move.to.row)).toBe(1);
+         expect(Math.abs(move.from.col - move.to.col)).toBe(1);
+     }
+  });
+
+  it('flying kings in 10x10 international', () => {
+     const customEngine = new DraughtsEngine({ boardSize: 10 });
+     const board = Array(10).fill(null).map(() => Array(10).fill(null));
+     board[4][3] = { color: PieceColor.LIGHT, type: PieceType.KING };
+     customEngine.loadBoard(board, PieceColor.LIGHT);
+
+     const moves = customEngine.getLegalMoves();
+     // Should be able to move more than 1 square diagonally
+     expect(moves.some(move => Math.abs(move.from.row - move.to.row) > 1)).toBe(true);
+  });
 });
