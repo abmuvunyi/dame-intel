@@ -36,6 +36,28 @@ export class UsersService {
       return this.usersRepository.save(user);
   }
 
+  async getRankings(limit: number = 100): Promise<User[]> {
+    return this.usersRepository.find({
+      order: { rating: 'DESC' },
+      take: limit,
+      select: ['id', 'username', 'rating', 'gamesPlayed', 'wins', 'losses', 'draws']
+    });
+  }
+
+  async getRatingStats(): Promise<{ bucket: string, count: number }[]> {
+    // Basic distribution in buckets of 200 ELO
+    const users = await this.usersRepository.find({ select: ['rating'] });
+    const buckets: Record<string, number> = {};
+
+    users.forEach(u => {
+      const bucketStart = Math.floor(u.rating / 200) * 200;
+      const bucketName = `${bucketStart}-${bucketStart + 199}`;
+      buckets[bucketName] = (buckets[bucketName] || 0) + 1;
+    });
+
+    return Object.entries(buckets).map(([bucket, count]) => ({ bucket, count }));
+  }
+
   // Calculates the standard ELO rating change
   calculateEloChange(ratingA: number, ratingB: number, result: 'win' | 'loss' | 'draw', gamesPlayed: number): number {
     // Determine K-Factor (How volatile the rating is)
