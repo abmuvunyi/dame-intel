@@ -168,7 +168,7 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
@@ -198,14 +198,19 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
+    let jumpDirs = [
       { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.MAN && this.rules.boardSize === 8) {
+      const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+      jumpDirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+    }
+
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Flying King captures
-      for (const dir of dirs) {
+      for (const dir of jumpDirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
 
@@ -267,8 +272,8 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
-      for (const dir of dirs) {
+      // Men and short-range King captures
+      for (const dir of jumpDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +293,19 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let stopJumping = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if (piece.color === PieceColor.LIGHT && landR === 0) {
+              stopJumping = true;
+            } else if (piece.color === PieceColor.DARK && landR === 7) {
+              stopJumping = true;
+            }
+          }
+
+          let subJumps: Move[] = [];
+          if (!stopJumping) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
