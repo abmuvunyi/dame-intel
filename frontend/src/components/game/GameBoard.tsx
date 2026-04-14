@@ -33,7 +33,7 @@ export interface Move {
   captured?: Position[];
 }
 
-export default function GameBoard() {
+export default function GameBoard({ onBack, initialSettings }: { onBack?: () => void, initialSettings?: any }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
@@ -52,14 +52,14 @@ export default function GameBoard() {
   // Timers and Profiles
   const [remainingTime, setRemainingTime] = useState<{[key: string]: number}>({});
   const [playerProfiles, setPlayerProfiles] = useState<{[key: string]: any}>({});
-  const [timeControl, setTimeControl] = useState<{initial: number, increment: number}>({ initial: 600, increment: 5 });
+  const [timeControl, setTimeControl] = useState<{initial: number, increment: number}>(initialSettings?.timeControl || { initial: 600, increment: 5 });
   const [customTime, setCustomTime] = useState('10');
   const [gameOverData, setGameOverData] = useState<any>(null);
 
   // Theme Settings
-  const [boardSize, setBoardSize] = useState(8);
+  const [boardSize, setBoardSize] = useState(initialSettings?.boardSize || 8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
-  const [boardTheme, setBoardTheme] = useState('classic'); // 'classic', 'wood', 'ocean'
+  const [boardTheme, setBoardTheme] = useState(initialSettings?.boardTheme || 'classic'); // 'classic', 'wood', 'ocean'
   const [pieceTheme, setPieceTheme] = useState('modern'); // 'modern', 'neon'
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -455,12 +455,12 @@ export default function GameBoard() {
                           ${getPieceColor(cell.color)}
                         `}>
                           {cell.type === PieceType.KING && (
-                            <div className="relative flex items-center justify-center">
-                              {/* Better King Visual: Crown Icon + Stack */}
-                              <svg className="w-8 h-8 absolute -top-1 opacity-80" viewBox="0 0 24 24" fill="currentColor">
+                            <div className="relative flex items-center justify-center w-full h-full">
+                              {/* Better King Visual: More Detailed Crown + Shadow Effect */}
+                              <svg className={`w-10 h-10 absolute z-20 drop-shadow-md ${cell.color === PieceColor.LIGHT ? 'text-amber-500' : 'text-amber-200'}`} viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M5 16L3 5L8.5 10L12 4L15.5 10L21 5L19 16H5M19 19C19 19.6 18.6 20 18 20H6C5.4 20 5 19.6 5 19V18H19V19Z" />
                               </svg>
-                              <div className={`w-full h-full rounded-full border-2 absolute -top-1 ${cell.color === PieceColor.LIGHT ? 'bg-slate-200 border-slate-400' : 'bg-slate-700 border-slate-900'}`}></div>
+                              <div className={`w-full h-full rounded-full border-4 absolute -top-1.5 z-10 ${cell.color === PieceColor.LIGHT ? 'bg-slate-50 border-slate-200' : 'bg-slate-700 border-slate-900'}`}></div>
                             </div>
                           )}
                         </div>
@@ -483,12 +483,22 @@ export default function GameBoard() {
                 </p>
                 <div className="flex flex-col gap-3">
                   {rematchOfferPending ? (
-                    <button onClick={handleAcceptRematch} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition shadow-lg">Accept Rematch</button>
+                    <button onClick={handleAcceptRematch} className="w-full py-4 bg-[#81b64c] text-white text-xl font-black rounded-xl hover:bg-[#a3d16e] transition shadow-[0_4px_0_rgb(69,98,41)] active:translate-y-1 active:shadow-none">Accept Rematch</button>
                   ) : (
-                    <button onClick={handleOfferRematch} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-lg">Offer Rematch</button>
+                    <button onClick={handleOfferRematch} className="w-full py-4 bg-[#81b64c] text-white text-xl font-black rounded-xl hover:bg-[#a3d16e] transition shadow-[0_4px_0_rgb(69,98,41)] active:translate-y-1 active:shadow-none">Offer Rematch</button>
                   )}
-                  <button onClick={() => window.location.reload()} className="w-full py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition">New Opponent</button>
-                  <button onClick={() => setBoard(null)} className="w-full py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition">Back to Dashboard</button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => window.location.reload()} className="py-3 bg-[#45423e] text-white font-bold rounded-xl hover:bg-[#524f4a] transition">New Game</button>
+                    <button
+                      onClick={() => {
+                        if (onBack) onBack();
+                        else setBoard(null);
+                      }}
+                      className="py-3 bg-[#45423e] text-white font-bold rounded-xl hover:bg-[#524f4a] transition"
+                    >
+                      Dashboard
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

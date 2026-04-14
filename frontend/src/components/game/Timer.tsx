@@ -21,17 +21,18 @@ export default function Timer({ initialTime, isActive, onTimeout }: TimerProps) 
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
-          if (prev <= 1) {
+          if (prev <= 0) {
             clearInterval(interval);
-            if (onTimeout) onTimeout();
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
+    } else if (timeLeft <= 0) {
+      if (onTimeout) onTimeout();
     }
     return () => clearInterval(interval);
-  }, [isActive, timeLeft, onTimeout]);
+  }, [isActive]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
