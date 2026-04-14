@@ -53,6 +53,7 @@ export default function GameBoard() {
   const [remainingTime, setRemainingTime] = useState<{[key: string]: number}>({});
   const [playerProfiles, setPlayerProfiles] = useState<{[key: string]: any}>({});
   const [timeControl, setTimeControl] = useState<{initial: number, increment: number}>({ initial: 600, increment: 5 });
+  const [customTime, setCustomTime] = useState('10');
   const [gameOverData, setGameOverData] = useState<any>(null);
 
   // Theme Settings
@@ -285,16 +286,42 @@ export default function GameBoard() {
               </label>
 
               <label className="text-sm font-semibold text-slate-600 block pt-2">Time Control</label>
-              <select
-                value={timeControl.initial}
-                onChange={e => setTimeControl({ ...timeControl, initial: parseInt(e.target.value) })}
-                className="w-full border rounded-lg p-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value={60}>1 min (Bullet)</option>
-                <option value={180}>3 min (Blitz)</option>
-                <option value={600}>10 min (Rapid)</option>
-                <option value={1800}>30 min (Classical)</option>
-              </select>
+              <div className="space-y-2">
+                <select
+                  value={timeControl.initial > 1800 ? 'custom' : timeControl.initial}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === 'custom') {
+                      setTimeControl({ ...timeControl, initial: parseInt(customTime) * 60 });
+                    } else {
+                      setTimeControl({ ...timeControl, initial: parseInt(val) });
+                    }
+                  }}
+                  className="w-full border rounded-lg p-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value={60}>1 min (Bullet)</option>
+                  <option value={180}>3 min (Blitz)</option>
+                  <option value={600}>10 min (Rapid)</option>
+                  <option value={1800}>30 min (Classical)</option>
+                  <option value="custom">Custom...</option>
+                </select>
+
+                {(timeControl.initial > 1800 || ![60, 180, 600, 1800].includes(timeControl.initial)) && (
+                  <div className="flex items-center gap-2 animate-in slide-in-from-top-2 duration-200">
+                    <input
+                      type="number"
+                      value={customTime}
+                      onChange={e => {
+                        setCustomTime(e.target.value);
+                        setTimeControl({ ...timeControl, initial: (parseInt(e.target.value) || 0) * 60 });
+                      }}
+                      className="w-20 border rounded p-1 text-sm"
+                      min="1"
+                    />
+                    <span className="text-xs text-slate-500 font-bold">minutes</span>
+                  </div>
+                )}
+              </div>
 
               <label className="text-sm font-semibold text-slate-600 block pt-2">Visuals</label>
               <div className="grid grid-cols-2 gap-2">
