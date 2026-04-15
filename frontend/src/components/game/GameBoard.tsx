@@ -237,22 +237,32 @@ export default function GameBoard() {
                Board Size:
                <select
                   value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  onChange={e => {
+                    const newSize = parseInt(e.target.value);
+                    setBoardSize(newSize);
+                    if (newSize === 8) {
+                      setForceMajorityCapture(false);
+                    } else if (newSize === 10) {
+                      setForceMajorityCapture(true);
+                    }
+                  }}
                   className="ml-2 border rounded p-1 text-sm bg-white"
                >
                  <option value={8}>8x8 (Standard)</option>
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
-            </label>
+            {boardSize === 10 && (
+              <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+                 <input
+                    type="checkbox"
+                    checked={forceMajorityCapture}
+                    onChange={e => setForceMajorityCapture(e.target.checked)}
+                    className="rounded"
+                 />
+                 Force Majority Capture
+              </label>
+            )}
           </div>
 
           <button
