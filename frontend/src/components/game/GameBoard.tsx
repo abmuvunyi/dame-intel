@@ -49,7 +49,12 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(false);
+
+  const handleBoardSizeChange = (newSize: number) => {
+    setBoardSize(newSize);
+    setForceMajorityCapture(newSize === 10);
+  };
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -237,7 +242,7 @@ export default function GameBoard() {
                Board Size:
                <select
                   value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  onChange={e => handleBoardSizeChange(parseInt(e.target.value))}
                   className="ml-2 border rounded p-1 text-sm bg-white"
                >
                  <option value={8}>8x8 (Standard)</option>
