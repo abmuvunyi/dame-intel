@@ -32,7 +32,22 @@ export interface Move {
   captured?: Position[];
 }
 
-export default function GameBoard() {
+export interface GameSettings {
+  boardSize: number;
+  forceMajorityCapture: boolean;
+  mode: 'multiplayer' | 'ai' | 'spectate';
+  variant?: '8x8' | '10x10';
+  aiDifficulty?: number;
+  roomIdToSpectate?: string;
+}
+
+export default function GameBoard({
+  initialSettings,
+  onBack
+}: {
+  initialSettings?: GameSettings;
+  onBack?: () => void;
+}) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
@@ -48,8 +63,8 @@ export default function GameBoard() {
   const [drawOfferPending, setDrawOfferPending] = useState(false);
 
   // Settings
-  const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [boardSize, setBoardSize] = useState(initialSettings?.boardSize || 8);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(initialSettings?.forceMajorityCapture ?? true);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -65,9 +80,30 @@ export default function GameBoard() {
 
     newSocket.on('connect', () => {
       if (tournamentIdToJoin) {
-         setStatus(`Connected. Click 'Find Tournament Match' to join the Arena.`);
+         setStatus(`Connected. Finding Tournament Match...`);
+         newSocket.emit('joinMatchmaking', {
+            tournamentId: tournamentIdToJoin,
+            rules: { boardSize, forceMajorityCapture }
+         });
+      } else if (initialSettings) {
+         // Auto-trigger game actions based on initial settings
+         if (initialSettings.mode === 'multiplayer') {
+             setStatus('Finding match...');
+             newSocket.emit('joinMatchmaking', {
+                rules: { boardSize, forceMajorityCapture }
+             });
+         } else if (initialSettings.mode === 'ai') {
+             setStatus('Starting AI game...');
+             newSocket.emit('playVsAi', {
+                difficulty: initialSettings.aiDifficulty || 2,
+                rules: { boardSize, forceMajorityCapture }
+             });
+         } else if (initialSettings.mode === 'spectate' && initialSettings.roomIdToSpectate) {
+             setStatus('Joining as spectator...');
+             newSocket.emit('joinSpectator', { roomId: initialSettings.roomIdToSpectate });
+         }
       } else {
-         setStatus('Connected to server. Click Find Match to begin.');
+         setStatus('Connected to server.');
       }
       newSocket.emit('getActiveGames');
     });
@@ -225,77 +261,40 @@ export default function GameBoard() {
 
   if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
-
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
-
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
-               <select
-                  value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
-               >
-                 <option value={8}>8x8 (Standard)</option>
-                 <option value={10}>10x10 (International)</option>
-               </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
-            </label>
-          </div>
-
-          <button
-            onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
-          </button>
-
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
-              >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {activeGames.length > 0 && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
-            <ul className="space-y-2">
-              {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
-                   <button
-                     onClick={() => handleWatchGame(game.roomId)}
-                     className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
-                   >
-                     Watch ({game.spectatorsCount} 👀)
-                   </button>
-                </li>
-              ))}
-            </ul>
+      <div className="flex flex-col items-center justify-center w-full min-h-[500px] space-y-6">
+        {onBack && (
+          <div className="w-full max-w-lg mb-4">
+             <button onClick={onBack} className="text-sm font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition">
+               ← Back to Dashboard
+             </button>
           </div>
         )}
 
+        <div className="animate-pulse flex space-x-4">
+          <div className="rounded-full bg-slate-200 h-10 w-10"></div>
+          <div className="flex-1 space-y-6 py-1">
+            <div className="h-2 bg-slate-200 rounded"></div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="h-2 bg-slate-200 rounded col-span-2"></div>
+                <div className="h-2 bg-slate-200 rounded col-span-1"></div>
+              </div>
+              <div className="h-2 bg-slate-200 rounded"></div>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-lg font-medium text-slate-600">{status}</p>
+
+        {/* If we are waiting for a match, show a cancel button */}
+        {status.includes('Waiting') && onBack && (
+          <button
+             onClick={onBack}
+             className="px-6 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-medium"
+          >
+             Cancel
+          </button>
+        )}
       </div>
     );
   }
@@ -304,11 +303,20 @@ export default function GameBoard() {
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col md:flex-row justify-center py-4 gap-8 max-w-6xl mx-auto px-4 w-full relative">
+
+      {/* Back Button (Absolute positioning for large screens, relative for small) */}
+      {onBack && (
+         <button onClick={onBack} className="md:absolute top-4 left-4 z-10 text-sm font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1 transition bg-white/80 p-2 rounded-lg backdrop-blur-sm shadow-sm border border-slate-100">
+           ← Exit Game
+         </button>
+      )}
 
       {/* Board Column */}
-      <div className="flex flex-col items-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
+      <div className="flex flex-col items-center space-y-4 mt-8 md:mt-0">
+        <h1 className="text-2xl font-bold text-gray-800">
+           {initialSettings?.boardSize === 10 ? 'International Draughts' : 'Standard Draughts'}
+        </h1>
         <div className="flex space-x-4 text-sm text-gray-500 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
