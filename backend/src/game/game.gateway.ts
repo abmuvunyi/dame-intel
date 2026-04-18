@@ -37,6 +37,12 @@ interface GameRoom {
   }
   moves: Move[];
   tournamentId?: number;
+  timers?: {
+    [PieceColor.LIGHT]: number; // ms remaining
+    [PieceColor.DARK]: number;  // ms remaining
+    lastMoveTimestamp: number;
+    timeoutId?: NodeJS.Timeout;
+  };
 }
 
 @WebSocketGateway({ cors: true })
@@ -236,6 +242,124 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('offerRematch')
+  handleOfferRematch(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    if (room.aiDifficulty) return; // No rematches vs AI
+
+    const opponentSocketId = room.players[PieceColor.LIGHT] === client.id
+      ? room.players[PieceColor.DARK]
+      : room.players[PieceColor.LIGHT];
+
+    if (opponentSocketId) {
+      this.server.to(opponentSocketId).emit('rematchOffered');
+    }
+  }
+
+  @SubscribeMessage('acceptRematch')
+  handleAcceptRematch(@ConnectedSocket() client: Socket) {
+    const oldRoomId = this.socketToRoom.get(client.id);
+    if (!oldRoomId) return;
+    const oldRoom = this.activeGames.get(oldRoomId);
+    if (!oldRoom) return;
+
+    const player1Id = oldRoom.players[PieceColor.LIGHT];
+    const player2Id = oldRoom.players[PieceColor.DARK];
+
+    if (!player1Id || !player2Id) return; // Someone left
+
+    // Clean up old room
+    this.activeGames.delete(oldRoomId);
+
+    const roomId = `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const rules = oldRoom.rules;
+
+    let timers = undefined;
+    if (rules.timeControl) {
+      const initialMs = rules.timeControl.minutes * 60 * 1000;
+      timers = {
+        [PieceColor.LIGHT]: initialMs,
+        [PieceColor.DARK]: initialMs,
+        lastMoveTimestamp: Date.now(),
+      };
+    }
+
+    // Create new room with reversed colors
+    const room: GameRoom = {
+      roomId,
+      engine: new DraughtsEngine(rules),
+      rules,
+      players: {
+        [PieceColor.LIGHT]: player2Id, // Reverse!
+        [PieceColor.DARK]: player1Id,  // Reverse!
+      },
+      spectators: [],
+      playerProfiles: {
+        [PieceColor.LIGHT]: oldRoom.playerProfiles[PieceColor.DARK],
+        [PieceColor.DARK]: oldRoom.playerProfiles[PieceColor.LIGHT],
+      },
+      moves: [],
+      tournamentId: oldRoom.tournamentId,
+      timers,
+    };
+
+    this.activeGames.set(roomId, room);
+    this.socketToRoom.set(player1Id, roomId);
+    this.socketToRoom.set(player2Id, roomId);
+
+    // Join new socket.io rooms, leave old
+    const socket1 = this.server.sockets.sockets.get(player1Id);
+    if (socket1) { socket1.leave(oldRoomId); socket1.join(roomId); }
+
+    const socket2 = this.server.sockets.sockets.get(player2Id);
+    if (socket2) { socket2.leave(oldRoomId); socket2.join(roomId); }
+
+    if (room.timers) {
+       this.startTimer(roomId, room, PieceColor.LIGHT);
+    }
+
+    // Notify players (P2 is now LIGHT)
+    this.server.to(player2Id).emit('gameStart', {
+      roomId,
+      color: PieceColor.LIGHT,
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      legalMoves: room.engine.getLegalMoves(),
+      lightTimeMs: room.timers?.[PieceColor.LIGHT],
+      darkTimeMs: room.timers?.[PieceColor.DARK]
+    });
+
+    this.server.to(player1Id).emit('gameStart', {
+      roomId,
+      color: PieceColor.DARK,
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      legalMoves: [],
+      lightTimeMs: room.timers?.[PieceColor.LIGHT],
+      darkTimeMs: room.timers?.[PieceColor.DARK]
+    });
+  }
+
+  @SubscribeMessage('declineRematch')
+  handleDeclineRematch(@ConnectedSocket() client: Socket) {
+    const roomId = this.socketToRoom.get(client.id);
+    if (!roomId) return;
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+
+    const opponentSocketId = room.players[PieceColor.LIGHT] === client.id
+      ? room.players[PieceColor.DARK]
+      : room.players[PieceColor.LIGHT];
+
+    if (opponentSocketId) {
+       this.server.to(opponentSocketId).emit('rematchDeclined');
+    }
+  }
+
   @SubscribeMessage('playVsAi')
   handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: GameRules }) {
     // Remove from existing game if any
@@ -318,6 +442,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
+      let timers = undefined;
+      if (rules.timeControl) {
+        const initialMs = rules.timeControl.minutes * 60 * 1000;
+        timers = {
+          [PieceColor.LIGHT]: initialMs,
+          [PieceColor.DARK]: initialMs,
+          lastMoveTimestamp: Date.now(),
+        };
+      }
+
       const room: GameRoom = {
         roomId,
         engine: new DraughtsEngine(rules),
@@ -333,6 +467,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         moves: [],
         tournamentId: data?.tournamentId,
+        timers,
       };
 
       this.activeGames.set(roomId, room);
@@ -343,13 +478,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.sockets.sockets.get(player1Id)?.join(roomId);
       this.server.sockets.sockets.get(player2Id)?.join(roomId);
 
+      // Start timeout for Light's first turn if timers are active
+      if (room.timers) {
+         this.startTimer(roomId, room, PieceColor.LIGHT);
+      }
+
       // Notify players
       this.server.to(player1Id).emit('gameStart', {
         roomId,
         color: PieceColor.LIGHT,
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
-        legalMoves: room.engine.getLegalMoves()
+        legalMoves: room.engine.getLegalMoves(),
+        lightTimeMs: room.timers?.[PieceColor.LIGHT],
+        darkTimeMs: room.timers?.[PieceColor.DARK]
       });
 
       this.server.to(player2Id).emit('gameStart', {
@@ -358,7 +500,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         board: room.engine.getBoard(),
         turn: room.engine.getCurrentTurn(),
         // Only send legal moves to the player whose turn it is
-        legalMoves: []
+        legalMoves: [],
+        lightTimeMs: room.timers?.[PieceColor.LIGHT],
+        darkTimeMs: room.timers?.[PieceColor.DARK]
       });
     } else {
       client.emit('waitingForOpponent');
@@ -394,12 +538,47 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (success && exactLegalMove) {
       room.moves.push(exactLegalMove);
+
+      // Handle Timer Logic BEFORE checking game over, so final time is accurate
+      if (room.timers && !room.aiDifficulty) { // Timers only in PvP for now
+        if (room.timers.timeoutId) {
+          clearTimeout(room.timers.timeoutId);
+        }
+
+        const now = Date.now();
+        const timeElapsed = now - room.timers.lastMoveTimestamp;
+
+        // Subtract elapsed time from the player who just moved
+        room.timers[color] -= timeElapsed;
+
+        const currentTurnNow = room.engine.getCurrentTurn();
+
+        // Add increment if their turn is over (not over if multi-jump)
+        if (currentTurnNow !== color && room.rules.timeControl) {
+            room.timers[color] += room.rules.timeControl.increment * 1000;
+        }
+
+        room.timers.lastMoveTimestamp = now;
+
+        // Check if they ran out of time
+        if (room.timers[color] <= 0) {
+            room.timers[color] = 0;
+            this.handleGameOver(roomId, room, color === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT);
+            return;
+        }
+
+        // Start timer for the player whose turn it is now
+        this.startTimer(roomId, room, currentTurnNow);
+      }
+
       const currentTurn = room.engine.getCurrentTurn();
 
       // Broadcast updated state
       this.server.to(roomId).emit('gameState', {
         board: room.engine.getBoard(),
         turn: currentTurn,
+        lightTimeMs: room.timers?.[PieceColor.LIGHT],
+        darkTimeMs: room.timers?.[PieceColor.DARK]
       });
 
       // Send specific legal moves to players
@@ -427,6 +606,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } else {
       client.emit('invalidMove');
     }
+  }
+
+  private startTimer(roomId: string, room: GameRoom, color: PieceColor) {
+    if (!room.timers) return;
+
+    if (room.timers.timeoutId) {
+       clearTimeout(room.timers.timeoutId);
+    }
+
+    const timeRemaining = room.timers[color];
+
+    room.timers.timeoutId = setTimeout(() => {
+       // Timer expired!
+       const currentRoom = this.activeGames.get(roomId);
+       if (currentRoom && currentRoom.engine.getCurrentTurn() === color) {
+          if (currentRoom.timers) currentRoom.timers[color] = 0;
+          this.handleGameOver(roomId, currentRoom, color === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT);
+       }
+    }, timeRemaining);
   }
 
   private triggerAiTurn(roomId: string, room: GameRoom) {
@@ -474,6 +672,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
+    if (room.timers?.timeoutId) {
+       clearTimeout(room.timers.timeoutId);
+    }
+
     this.server.to(roomId).emit('gameOver', { winner });
 
     // Save to database

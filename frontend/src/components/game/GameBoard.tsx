@@ -32,7 +32,16 @@ export interface Move {
   captured?: Position[];
 }
 
-export default function GameBoard() {
+export interface GameSettings {
+  boardSize: number;
+  timeControl?: {
+    minutes: number;
+    increment: number;
+  };
+  forceMajorityCapture: boolean;
+}
+
+export default function GameBoard({ initialSettings }: { initialSettings?: GameSettings }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
@@ -46,10 +55,15 @@ export default function GameBoard() {
   const [chatMessages, setChatMessages] = useState<{sender: string, message: string, timestamp: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [drawOfferPending, setDrawOfferPending] = useState(false);
+  const [rematchOfferPending, setRematchOfferPending] = useState(false);
 
   // Settings
-  const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [boardSize, setBoardSize] = useState(initialSettings?.boardSize || 8);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(initialSettings?.forceMajorityCapture ?? true);
+
+  // Timers
+  const [lightTimeMs, setLightTimeMs] = useState<number | null>(null);
+  const [darkTimeMs, setDarkTimeMs] = useState<number | null>(null);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -80,12 +94,23 @@ export default function GameBoard() {
       setStatus('Waiting in matchmaking queue...');
     });
 
-    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor, legalMoves: Move[] }) => {
+    newSocket.on('gameStart', (data: {
+      roomId: string,
+      color: PieceColor | null,
+      board: BoardState,
+      turn: PieceColor,
+      legalMoves: Move[],
+      lightTimeMs?: number,
+      darkTimeMs?: number
+    }) => {
       setRoomId(data.roomId);
       setMyColor(data.color);
       setBoard(data.board);
       setCurrentTurn(data.turn);
       setLegalMoves(data.legalMoves || []);
+      if (data.lightTimeMs !== undefined) setLightTimeMs(data.lightTimeMs);
+      if (data.darkTimeMs !== undefined) setDarkTimeMs(data.darkTimeMs);
+
       if (data.color) {
          setStatus(`Game Started! You are ${data.color === PieceColor.LIGHT ? 'Light (Bottom)' : 'Dark (Top)'}.`);
       } else {
@@ -93,10 +118,17 @@ export default function GameBoard() {
       }
     });
 
-    newSocket.on('gameState', (data: { board: BoardState, turn: PieceColor }) => {
+    newSocket.on('gameState', (data: {
+      board: BoardState,
+      turn: PieceColor,
+      lightTimeMs?: number,
+      darkTimeMs?: number
+    }) => {
       setBoard(data.board);
       setCurrentTurn(data.turn);
       setSelectedPos(null);
+      if (data.lightTimeMs !== undefined) setLightTimeMs(data.lightTimeMs);
+      if (data.darkTimeMs !== undefined) setDarkTimeMs(data.darkTimeMs);
     });
 
     newSocket.on('legalMoves', (moves: Move[]) => {
@@ -132,16 +164,58 @@ export default function GameBoard() {
       alert("Your opponent declined the draw offer.");
     });
 
+    newSocket.on('rematchOffered', () => {
+      setRematchOfferPending(true);
+    });
+
+    newSocket.on('rematchDeclined', () => {
+      alert("Your opponent declined the rematch offer.");
+    });
+
     return () => {
       newSocket.disconnect();
     };
   }, []);
 
+  // Local timer decrement
+  useEffect(() => {
+    if (!currentTurn || status.includes('Game Over') || lightTimeMs === null || darkTimeMs === null) return;
+
+    const interval = setInterval(() => {
+      if (currentTurn === PieceColor.LIGHT) {
+        setLightTimeMs(prev => prev !== null ? Math.max(0, prev - 100) : null);
+      } else {
+        setDarkTimeMs(prev => prev !== null ? Math.max(0, prev - 100) : null);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [currentTurn, status]);
+
+  const formatTime = (ms: number | null) => {
+    if (ms === null) return null;
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const tenths = Math.floor((ms % 1000) / 100);
+
+    // Show tenths of a second if under 10 seconds
+    if (minutes === 0 && seconds < 10) {
+      return `${seconds}.${tenths}`;
+    }
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   const handleFindMatch = () => {
     if (socket) {
       socket.emit('joinMatchmaking', {
          tournamentId: tournamentIdToJoin,
-         rules: { boardSize, forceMajorityCapture }
+         rules: {
+            boardSize,
+            forceMajorityCapture,
+            timeControl: initialSettings?.timeControl
+         }
       });
     }
   };
@@ -150,7 +224,11 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('playVsAi', {
          difficulty,
-         rules: { boardSize, forceMajorityCapture }
+         rules: {
+            boardSize,
+            forceMajorityCapture,
+            timeControl: initialSettings?.timeControl
+         }
       });
     }
   };
@@ -188,6 +266,21 @@ export default function GameBoard() {
   const handleDeclineDraw = () => {
     socket?.emit('declineDraw');
     setDrawOfferPending(false);
+  };
+
+  const handleOfferRematch = () => {
+    socket?.emit('offerRematch');
+    alert("Rematch offer sent.");
+  };
+
+  const handleAcceptRematch = () => {
+    socket?.emit('acceptRematch');
+    setRematchOfferPending(false);
+  };
+
+  const handleDeclineRematch = () => {
+    socket?.emit('declineRematch');
+    setRematchOfferPending(false);
   };
 
   const isMoveLegal = (from: Position, to: Position) => {
@@ -328,6 +421,40 @@ export default function GameBoard() {
           </div>
         )}
 
+        {status.includes('Game Over') && myColor && (
+          <div className="flex gap-4">
+            <button onClick={handleOfferRematch} className="px-6 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 font-semibold transition">
+              Offer Rematch
+            </button>
+            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 font-semibold transition">
+              New Game
+            </button>
+          </div>
+        )}
+
+        {/* Timers */}
+        {(lightTimeMs !== null || darkTimeMs !== null) && (
+          <div className="flex gap-8 w-full justify-center mt-2 mb-2">
+            <div className={`px-4 py-2 rounded font-mono text-xl shadow ${
+              currentTurn === PieceColor.LIGHT && !status.includes('Game Over')
+                ? 'bg-blue-100 border-2 border-blue-500 font-bold'
+                : 'bg-white border border-gray-300 text-gray-500'
+            }`}>
+              <span className="text-xs uppercase mr-2 text-gray-400">Light</span>
+              {formatTime(lightTimeMs)}
+            </div>
+
+            <div className={`px-4 py-2 rounded font-mono text-xl shadow ${
+              currentTurn === PieceColor.DARK && !status.includes('Game Over')
+                ? 'bg-blue-100 border-2 border-blue-500 font-bold'
+                : 'bg-white border border-gray-300 text-gray-500'
+            }`}>
+              <span className="text-xs uppercase mr-2 text-gray-400">Dark</span>
+              {formatTime(darkTimeMs)}
+            </div>
+          </div>
+        )}
+
         {drawOfferPending && (
           <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded relative shadow-md mt-2">
             <p className="font-bold">Draw Offered</p>
@@ -335,6 +462,17 @@ export default function GameBoard() {
             <div className="mt-2 flex gap-2">
               <button onClick={handleAcceptDraw} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
               <button onClick={handleDeclineDraw} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
+            </div>
+          </div>
+        )}
+
+        {rematchOfferPending && (
+          <div className="bg-blue-100 border border-blue-400 text-blue-800 px-4 py-3 rounded relative shadow-md mt-2">
+            <p className="font-bold">Rematch Offered</p>
+            <p className="text-sm">Your opponent wants a rematch.</p>
+            <div className="mt-2 flex gap-2">
+              <button onClick={handleAcceptRematch} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
+              <button onClick={handleDeclineRematch} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
             </div>
           </div>
         )}

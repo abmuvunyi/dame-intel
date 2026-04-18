@@ -1,58 +1,93 @@
 'use client';
+
+import { useState } from 'react';
 import GameBoard from "@/components/game/GameBoard";
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+
+export type TimeControl = {
+  label: string;
+  minutes: number;
+  increment: number; // in seconds
+  type: 'Bullet' | 'Blitz' | 'Rapid';
+};
+
+const TIME_CONTROLS: TimeControl[] = [
+  { label: '1 min', minutes: 1, increment: 0, type: 'Bullet' },
+  { label: '1 | 1', minutes: 1, increment: 1, type: 'Bullet' },
+  { label: '2 | 1', minutes: 2, increment: 1, type: 'Bullet' },
+  { label: '3 min', minutes: 3, increment: 0, type: 'Blitz' },
+  { label: '3 | 2', minutes: 3, increment: 2, type: 'Blitz' },
+  { label: '5 min', minutes: 5, increment: 0, type: 'Blitz' },
+  { label: '10 min', minutes: 10, increment: 0, type: 'Rapid' },
+  { label: '15 | 10', minutes: 15, increment: 10, type: 'Rapid' },
+  { label: '30 min', minutes: 30, increment: 0, type: 'Rapid' },
+];
 
 export default function Home() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const router = useRouter();
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsAuthenticated(!!token);
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setIsAuthenticated(false);
-  };
+  const [boardSize, setBoardSize] = useState<8 | 10>(8);
+  const [selectedTime, setSelectedTime] = useState<TimeControl>(TIME_CONTROLS[5]); // Default 5 min
 
   return (
-    <main className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-5xl flex justify-between items-center mb-6">
-        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-amber-600 tracking-tight">
-          Online Draughts
-        </h1>
+    <main className="min-h-screen bg-gray-50 flex py-10 px-4 justify-center">
+      <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-8">
 
-        <div className="flex space-x-4">
-          {isAuthenticated ? (
-            <>
-              <Link href="/tournaments" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition shadow">
-                Tournaments
-              </Link>
-              <Link href="/puzzles" className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition shadow">
-                Train / Puzzles
-              </Link>
-              <Link href="/profile" className="px-4 py-2 text-sm font-medium text-white bg-slate-800 rounded hover:bg-slate-900 transition shadow">
-                My Profile
-              </Link>
-              <button onClick={handleLogout} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition shadow-sm">
-                Log Out
-              </button>
-            </>
-          ) : (
-            <Link href="/login" className="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition shadow">
-              Login / Register
-            </Link>
-          )}
-        </div>
-      </div>
+        {/* Play Dashboard (Variant & Time Selection) */}
+        <div className="w-full lg:w-80 flex flex-col gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">Play Draughts</h2>
 
-      <div className="w-full max-w-5xl bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-100">
-        <div className="p-8">
-          <GameBoard />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Variant</label>
+                <div className="flex bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setBoardSize(8)}
+                    className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${boardSize === 8 ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
+                  >
+                    Standard (8x8)
+                  </button>
+                  <button
+                    onClick={() => setBoardSize(10)}
+                    className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${boardSize === 10 ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
+                  >
+                    International (10x10)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Time Control</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {TIME_CONTROLS.map((tc) => (
+                    <button
+                      key={tc.label}
+                      onClick={() => setSelectedTime(tc)}
+                      className={`p-2 rounded-lg text-sm font-bold border-2 transition ${
+                        selectedTime.label === tc.label
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-transparent bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tc.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Game Board Component Area */}
+        <div className="flex-1">
+          <GameBoard
+            key={`${boardSize}-${selectedTime.label}`}
+            initialSettings={{
+              boardSize,
+              timeControl: selectedTime,
+              forceMajorityCapture: true
+            }}
+          />
+        </div>
+
       </div>
     </main>
   );

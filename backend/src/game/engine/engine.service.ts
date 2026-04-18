@@ -30,6 +30,10 @@ export interface Move {
 export interface GameRules {
   boardSize: number; // 8 or 10
   forceMajorityCapture: boolean;
+  timeControl?: {
+    minutes: number;
+    increment: number;
+  };
 }
 
 export class DraughtsEngine {
