@@ -37,7 +37,24 @@ interface GameRoom {
   }
   moves: Move[];
   tournamentId?: number;
+  timeControl?: {
+    type: string; // 'bullet', 'blitz', 'rapid'
+    initialMs: number;
+    incrementMs: number;
+  };
+  timers?: {
+    [PieceColor.LIGHT]: number; // remaining ms
+    [PieceColor.DARK]: number; // remaining ms
+    lastMoveTimestamp: number;
+    intervalId?: NodeJS.Timeout;
+  };
 }
+
+const TIME_PRESETS = {
+  bullet: { initialMs: 1 * 60 * 1000, incrementMs: 0 },
+  blitz: { initialMs: 3 * 60 * 1000, incrementMs: 0 },
+  rapid: { initialMs: 10 * 60 * 1000, incrementMs: 0 },
+};
 
 @WebSocketGateway({ cors: true })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -53,7 +70,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules }[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules, timeControl?: string }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -179,9 +196,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!room) return;
 
     if (room.players[PieceColor.LIGHT] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.DARK);
+       this.handleGameOver(roomId, room, PieceColor.DARK, 'Resignation');
     } else if (room.players[PieceColor.DARK] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.LIGHT);
+       this.handleGameOver(roomId, room, PieceColor.LIGHT, 'Resignation');
     }
   }
 
@@ -237,7 +254,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: GameRules }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: GameRules, timeControl?: string }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -247,6 +264,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
+    const tcPreset = TIME_PRESETS[data.timeControl as keyof typeof TIME_PRESETS];
 
     const room: GameRoom = {
       roomId,
@@ -261,7 +279,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),
       },
-      moves: []
+      moves: [],
+      ...(tcPreset ? {
+        timeControl: { type: data.timeControl!, initialMs: tcPreset.initialMs, incrementMs: tcPreset.incrementMs },
+        timers: {
+          [PieceColor.LIGHT]: tcPreset.initialMs,
+          [PieceColor.DARK]: tcPreset.initialMs,
+          lastMoveTimestamp: Date.now()
+        }
+      } : {})
     };
 
     this.activeGames.set(roomId, room);
@@ -269,6 +295,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Join socket.io room
     this.server.sockets.sockets.get(client.id)?.join(roomId);
+
+    if (room.timers) {
+      this.startGameTimer(roomId, room);
+    }
 
     // Notify player
     this.server.to(client.id).emit('gameStart', {
@@ -281,7 +311,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules, timeControl?: string }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -292,16 +322,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
 
-    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
+    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules, timeControl: data?.timeControl });
 
     // Look for a match
     let matchIdx = -1;
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
-       // Match if tournament ID matches, AND if the requested rulesets match
+       // Match if tournament ID matches, AND if the requested rulesets match, AND time controls match
        const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+       const timeMatch = p.timeControl === data?.timeControl;
 
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch && timeMatch) {
           matchIdx = i;
           break;
        }
@@ -317,6 +348,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const player2Id = me.socketId;
 
       const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const tcPreset = TIME_PRESETS[data?.timeControl as keyof typeof TIME_PRESETS];
 
       const room: GameRoom = {
         roomId,
@@ -333,6 +365,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         moves: [],
         tournamentId: data?.tournamentId,
+        ...(tcPreset ? {
+          timeControl: { type: data!.timeControl!, initialMs: tcPreset.initialMs, incrementMs: tcPreset.incrementMs },
+          timers: {
+            [PieceColor.LIGHT]: tcPreset.initialMs,
+            [PieceColor.DARK]: tcPreset.initialMs,
+            lastMoveTimestamp: Date.now()
+          }
+        } : {})
       };
 
       this.activeGames.set(roomId, room);
@@ -360,8 +400,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Only send legal moves to the player whose turn it is
         legalMoves: []
       });
+
+      if (room.timers) {
+        this.startGameTimer(roomId, room);
+      }
     } else {
       client.emit('waitingForOpponent');
+    }
+  }
+
+  private startGameTimer(roomId: string, room: GameRoom) {
+    if (room.timers && !room.timers.intervalId) {
+      room.timers.lastMoveTimestamp = Date.now();
+      room.timers.intervalId = setInterval(() => {
+        const now = Date.now();
+        const turn = room.engine.getCurrentTurn();
+        const elapsed = now - room.timers!.lastMoveTimestamp;
+
+        room.timers![turn] -= elapsed;
+        room.timers!.lastMoveTimestamp = now;
+
+        if (room.timers![turn] <= 0) {
+           room.timers![turn] = 0;
+           clearInterval(room.timers!.intervalId);
+           room.timers!.intervalId = undefined;
+
+           // Time out: other player wins
+           const winner = turn === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+           this.handleGameOver(roomId, room, winner, 'Timeout');
+        } else {
+           this.server.to(roomId).emit('timeUpdate', {
+             L: room.timers![PieceColor.LIGHT],
+             D: room.timers![PieceColor.DARK]
+           });
+        }
+      }, 250); // emit updates every 250ms
     }
   }
 
@@ -393,13 +466,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const success = room.engine.makeMove(move);
 
     if (success && exactLegalMove) {
+      const prevTurn = room.engine.getCurrentTurn() === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
       room.moves.push(exactLegalMove);
       const currentTurn = room.engine.getCurrentTurn();
+
+      if (room.timers && prevTurn !== currentTurn) {
+        // Add increment to the player who just moved
+        room.timers[prevTurn] += room.timeControl!.incrementMs;
+        room.timers.lastMoveTimestamp = Date.now();
+      }
 
       // Broadcast updated state
       this.server.to(roomId).emit('gameState', {
         board: room.engine.getBoard(),
         turn: currentTurn,
+        times: room.timers ? { L: room.timers[PieceColor.LIGHT], D: room.timers[PieceColor.DARK] } : undefined
       });
 
       // Send specific legal moves to players
@@ -445,9 +526,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           room.moves.push(bestMove);
           const newTurn = room.engine.getCurrentTurn();
 
+          if (room.timers && room.aiColor !== newTurn) {
+            room.timers[room.aiColor] += room.timeControl!.incrementMs;
+            room.timers.lastMoveTimestamp = Date.now();
+          }
+
           this.server.to(roomId).emit('gameState', {
             board: room.engine.getBoard(),
             turn: newTurn,
+            times: room.timers ? { L: room.timers[PieceColor.LIGHT], D: room.timers[PieceColor.DARK] } : undefined
           });
 
           // Send legal moves back to human player
@@ -473,8 +560,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }, 500); // 500ms delay
   }
 
-  private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
-    this.server.to(roomId).emit('gameOver', { winner });
+  private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW', reason?: string) {
+    if (room.timers && room.timers.intervalId) {
+      clearInterval(room.timers.intervalId);
+      room.timers.intervalId = undefined;
+    }
+
+    this.server.to(roomId).emit('gameOver', { winner, reason });
 
     // Save to database
     try {
