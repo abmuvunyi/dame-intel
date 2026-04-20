@@ -20,10 +20,22 @@ import { AnticheatService } from '../anticheat/anticheat.service';
 
 import { GameRules } from './engine/engine.service';
 
+interface TimeControl {
+  initialMinutes: number;
+  incrementSeconds: number;
+}
+
 interface GameRoom {
   roomId: string;
   engine: DraughtsEngine;
   rules: GameRules;
+  timeControl?: TimeControl;
+  timeLeft: {
+    [PieceColor.LIGHT]: number; // milliseconds
+    [PieceColor.DARK]: number;  // milliseconds
+  };
+  lastMoveTimestamp?: number;
+  timerInterval?: NodeJS.Timeout;
   players: {
     [PieceColor.LIGHT]?: string; // Socket ID
     [PieceColor.DARK]?: string;  // Socket ID
@@ -53,7 +65,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules }[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules, timeControl?: TimeControl }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -90,17 +102,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = this.activeGames.get(roomId);
       if (room) {
         // Find which color this player was
-        if (room.players[PieceColor.LIGHT] === client.id) {
-          room.players[PieceColor.LIGHT] = undefined;
-        } else if (room.players[PieceColor.DARK] === client.id) {
-          room.players[PieceColor.DARK] = undefined;
+        if (room.players[PieceColor.LIGHT] === client.id || room.players[PieceColor.DARK] === client.id) {
+          if (room.timerInterval) clearInterval(room.timerInterval);
+          this.server.to(roomId).emit('playerDisconnected');
+
+          const winner = room.players[PieceColor.LIGHT] === client.id ? PieceColor.DARK : PieceColor.LIGHT;
+          this.handleGameOver(roomId, room, winner);
+
+          if (room.players[PieceColor.LIGHT] === client.id) {
+            room.players[PieceColor.LIGHT] = undefined;
+          } else if (room.players[PieceColor.DARK] === client.id) {
+            room.players[PieceColor.DARK] = undefined;
+          }
         } else {
           // Remove from spectators
           room.spectators = room.spectators.filter(s => s !== client.id);
         }
-
-        // Notify others
-        this.server.to(roomId).emit('playerDisconnected', { id: client.id });
 
         // Clean up empty rooms
         if (!room.players[PieceColor.LIGHT] && !room.players[PieceColor.DARK] && room.spectators.length === 0) {
@@ -252,6 +269,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       roomId,
       engine: new DraughtsEngine(rules),
       rules,
+      timeLeft: {
+         [PieceColor.LIGHT]: 0,
+         [PieceColor.DARK]: 0
+      },
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -281,7 +302,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules, timeControl?: TimeControl }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -291,8 +312,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+    const timeControl = data?.timeControl;
 
-    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
+    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules, timeControl });
 
     // Look for a match
     let matchIdx = -1;
@@ -300,8 +322,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
        const p = this.waitingPlayers[i];
        // Match if tournament ID matches, AND if the requested rulesets match
        const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+       const timeControlMatch = p.timeControl?.initialMinutes === timeControl?.initialMinutes && p.timeControl?.incrementSeconds === timeControl?.incrementSeconds;
 
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
+       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch && timeControlMatch) {
           matchIdx = i;
           break;
        }
@@ -318,10 +341,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
+      let initialTime = 0;
+      if (timeControl) {
+         initialTime = timeControl.initialMinutes * 60 * 1000;
+      }
+
       const room: GameRoom = {
         roomId,
         engine: new DraughtsEngine(rules),
         rules,
+        timeControl,
+        timeLeft: {
+           [PieceColor.LIGHT]: initialTime,
+           [PieceColor.DARK]: initialTime
+        },
         players: {
           [PieceColor.LIGHT]: player1Id,
           [PieceColor.DARK]: player2Id,
@@ -336,6 +369,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       this.activeGames.set(roomId, room);
+      this.startGameTimer(roomId, room);
       this.socketToRoom.set(player1Id, roomId);
       this.socketToRoom.set(player2Id, roomId);
 
@@ -365,6 +399,34 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  private startGameTimer(roomId: string, room: GameRoom) {
+    if (!room.timeControl) return;
+
+    room.lastMoveTimestamp = Date.now();
+
+    // Broadcast initial time
+    this.server.to(roomId).emit('timeUpdate', room.timeLeft);
+
+    room.timerInterval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - room.lastMoveTimestamp!;
+      const currentTurn = room.engine.getCurrentTurn();
+
+      room.timeLeft[currentTurn] -= elapsed;
+      room.lastMoveTimestamp = now;
+
+      this.server.to(roomId).emit('timeUpdate', room.timeLeft);
+
+      if (room.timeLeft[currentTurn] <= 0) {
+        if (room.timerInterval) clearInterval(room.timerInterval);
+        room.timeLeft[currentTurn] = 0;
+        this.server.to(roomId).emit('timeUpdate', room.timeLeft);
+        const winner = currentTurn === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+        this.handleGameOver(roomId, room, winner);
+      }
+    }, 1000); // Check every second
+  }
+
   @SubscribeMessage('makeMove')
   handleMakeMove(@ConnectedSocket() client: Socket, @MessageBody() move: Move) {
     const roomId = this.socketToRoom.get(client.id);
@@ -390,11 +452,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         m.to.row === move.to.row && m.to.col === move.to.col
     );
 
+    const prevTurn = room.engine.getCurrentTurn();
     const success = room.engine.makeMove(move);
 
     if (success && exactLegalMove) {
       room.moves.push(exactLegalMove);
       const currentTurn = room.engine.getCurrentTurn();
+
+      // Handle time control
+      if (room.timeControl) {
+        const now = Date.now();
+        const elapsed = now - room.lastMoveTimestamp!;
+        room.timeLeft[prevTurn] -= elapsed;
+
+        // Apply increment if turn changed
+        if (prevTurn !== currentTurn) {
+          room.timeLeft[prevTurn] += room.timeControl.incrementSeconds * 1000;
+        }
+
+        room.lastMoveTimestamp = now;
+        this.server.to(roomId).emit('timeUpdate', room.timeLeft);
+      }
 
       // Broadcast updated state
       this.server.to(roomId).emit('gameState', {
@@ -474,6 +552,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
+    if (room.timerInterval) clearInterval(room.timerInterval);
     this.server.to(roomId).emit('gameOver', { winner });
 
     // Save to database
