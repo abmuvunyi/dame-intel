@@ -169,17 +169,28 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      if (this.rules.boardSize === 10) {
+        // Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // 8x8 Kings move exactly one square diagonally
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          }
         }
       }
     } else {
@@ -204,71 +215,109 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
-      for (const dir of dirs) {
-        let step = 1;
-        let opponentFoundPos: Position | null = null;
+      if (this.rules.boardSize === 10) {
+        // Flying King captures
+        for (const dir of dirs) {
+          let step = 1;
+          let opponentFoundPos: Position | null = null;
 
-        while (true) {
-          const r = currentPos.row + dir.dr * step;
-          const c = currentPos.col + dir.dc * step;
+          while (true) {
+            const r = currentPos.row + dir.dr * step;
+            const c = currentPos.col + dir.dc * step;
 
-          if (!this.isValidPos(r, c)) break;
+            if (!this.isValidPos(r, c)) break;
 
-          const cell = this.board[r][c];
+            const cell = this.board[r][c];
 
-          if (cell !== null) {
-            if (cell.color === piece.color) {
-              // Blocked by own piece
-              break;
-            } else if (cell.color !== piece.color) {
-              // Found opponent
-              if (opponentFoundPos) {
-                 // Two opponents in a row, can't jump
-                 break;
+            if (cell !== null) {
+              if (cell.color === piece.color) {
+                // Blocked by own piece
+                break;
+              } else if (cell.color !== piece.color) {
+                // Found opponent
+                if (opponentFoundPos) {
+                   // Two opponents in a row, can't jump
+                   break;
+                }
+                // Check if we already captured this exact piece in this multi-jump sequence
+                const alreadyCaptured = capturedSoFar.some(cap => cap.row === r && cap.col === c);
+                if (alreadyCaptured) {
+                   break;
+                }
+                opponentFoundPos = { row: r, col: c };
               }
-              // Check if we already captured this exact piece in this multi-jump sequence
-              const alreadyCaptured = capturedSoFar.some(cap => cap.row === r && cap.col === c);
-              if (alreadyCaptured) {
-                 break;
+            } else if (opponentFoundPos !== null) {
+              // Empty square after finding an opponent! We can land here.
+              const newCaptured = [...capturedSoFar, opponentFoundPos];
+              const landR = r;
+              const landC = c;
+
+              // Temporarily apply jump to check for sub-jumps from THIS landing spot
+              const originalCurrent = this.board[currentPos.row][currentPos.col];
+              this.board[currentPos.row][currentPos.col] = null;
+              this.board[landR][landC] = piece;
+
+              // In international draughts, pieces captured during a sequence are removed ONLY
+              // after the entire sequence finishes, preventing "jumping over the same piece twice"
+              // but allowing crossing the same empty square twice.
+              // We've satisfied this by checking `alreadyCaptured` above.
+
+              const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+              // Revert
+              this.board[currentPos.row][currentPos.col] = originalCurrent;
+              this.board[landR][landC] = null;
+
+              if (subJumps.length > 0) {
+                jumps.push(...subJumps);
+              } else {
+                jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
               }
-              opponentFoundPos = { row: r, col: c };
             }
-          } else if (opponentFoundPos !== null) {
-            // Empty square after finding an opponent! We can land here.
-            const newCaptured = [...capturedSoFar, opponentFoundPos];
-            const landR = r;
-            const landC = c;
 
-            // Temporarily apply jump to check for sub-jumps from THIS landing spot
+            step++;
+          }
+        }
+      } else {
+        // 8x8 Short-range King captures
+        for (const dir of dirs) {
+          const overR = currentPos.row + dir.dr;
+          const overC = currentPos.col + dir.dc;
+          const landR = currentPos.row + dir.dr * 2;
+          const landC = currentPos.col + dir.dc * 2;
+
+          if (!this.isValidPos(landR, landC)) continue;
+
+          const overPiece = this.board[overR][overC];
+          const landPos = this.board[landR][landC];
+
+          const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+          if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+            const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
             const originalCurrent = this.board[currentPos.row][currentPos.col];
             this.board[currentPos.row][currentPos.col] = null;
             this.board[landR][landC] = piece;
 
-            // In international draughts, pieces captured during a sequence are removed ONLY
-            // after the entire sequence finishes, preventing "jumping over the same piece twice"
-            // but allowing crossing the same empty square twice.
-            // We've satisfied this by checking `alreadyCaptured` above.
-
             const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
-            // Revert
             this.board[currentPos.row][currentPos.col] = originalCurrent;
             this.board[landR][landC] = null;
 
             if (subJumps.length > 0) {
-              jumps.push(...subJumps);
+               jumps.push(...subJumps);
             } else {
-              jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
           }
-
-          step++;
         }
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // In 10x10, men can capture backwards. In 8x8, only forwards.
+      const captureDirs = this.rules.boardSize === 10 ? dirs : this.getMoveDirections(piece);
+      for (const dir of captureDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -284,11 +333,18 @@ export class DraughtsEngine {
         if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
           const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
 
+          // Check for immediate promotion in 8x8
+          const isPromotionRank = (piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1);
+          const stopsForPromotion = this.rules.boardSize === 8 && isPromotionRank;
+
           const originalCurrent = this.board[currentPos.row][currentPos.col];
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+          if (!stopsForPromotion) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
