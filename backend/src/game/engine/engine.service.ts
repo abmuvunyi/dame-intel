@@ -179,6 +179,11 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+
+          // 8x8 Kings do not fly, they only move 1 square
+          if (this.rules.boardSize === 8) {
+            break;
+          }
           step++;
         }
       }
@@ -261,6 +266,16 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+
+            // 8x8 Kings do not do flying captures, they must land exactly one square past the captured piece
+            if (this.rules.boardSize === 8) {
+               break;
+            }
+          }
+
+          // In 8x8, if we haven't found an opponent on step 1, we can't find one on step 2
+          if (this.rules.boardSize === 8 && step === 1 && opponentFoundPos === null) {
+              break;
           }
 
           step++;
@@ -268,7 +283,14 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // In 8x8, Men can only capture forward. In 10x10, they can capture backward as well.
+      let menDirs = dirs;
+      if (this.rules.boardSize === 8) {
+          const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+          menDirs = dirs.filter(d => d.dr === forward);
+      }
+
+      for (const dir of menDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +310,18 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // In 8x8, if a man reaches the promotion row during a jump, its turn immediately ends (it cannot continue jumping as a king in the same turn).
+          let isPromotionIn8x8 = false;
+          if (this.rules.boardSize === 8) {
+              if ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === 7)) {
+                  isPromotionIn8x8 = true;
+              }
+          }
+
+          let subJumps: Move[] = [];
+          if (!isPromotionIn8x8) {
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
