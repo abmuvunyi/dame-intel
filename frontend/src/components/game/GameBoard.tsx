@@ -32,7 +32,7 @@ export interface Move {
   captured?: Position[];
 }
 
-export default function GameBoard() {
+export default function GameBoard({ initialSettings, onBack }: { initialSettings?: any, onBack?: () => void }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | null>(null);
@@ -47,9 +47,29 @@ export default function GameBoard() {
   const [chatInput, setChatInput] = useState('');
   const [drawOfferPending, setDrawOfferPending] = useState(false);
 
+  // Time remaining mapped by color
+  const [timeRemaining, setTimeRemaining] = useState<{[key: string]: number}>({ 'L': 0, 'D': 0 });
+  const [localTimeRemaining, setLocalTimeRemaining] = useState<{[key: string]: number}>({ 'L': 0, 'D': 0 });
+
+  useEffect(() => {
+    // Tick local timer down visually
+    const interval = setInterval(() => {
+      if (status.includes('Game Over') || !currentTurn) return;
+      setLocalTimeRemaining(prev => {
+        const copy = { ...prev };
+        if (copy[currentTurn] > 0) {
+           copy[currentTurn] = Math.max(0, copy[currentTurn] - 100);
+        }
+        return copy;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [currentTurn, status]);
+
   // Settings
-  const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [boardSize, setBoardSize] = useState(initialSettings?.boardSize || 8);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(initialSettings?.forceMajorityCapture ?? true);
+  const [timeControl, setTimeControl] = useState(initialSettings?.timeControl);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -132,6 +152,11 @@ export default function GameBoard() {
       alert("Your opponent declined the draw offer.");
     });
 
+    newSocket.on('timeUpdate', (data: {[key: string]: number}) => {
+      setTimeRemaining(data);
+      setLocalTimeRemaining(data);
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -141,7 +166,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('joinMatchmaking', {
          tournamentId: tournamentIdToJoin,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture, timeControl }
       });
     }
   };
@@ -150,7 +175,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('playVsAi', {
          difficulty,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture, timeControl }
       });
     }
   };
@@ -229,52 +254,34 @@ export default function GameBoard() {
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
         <p className="text-gray-600">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
-
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
-               <select
-                  value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
-               >
-                 <option value={8}>8x8 (Standard)</option>
-                 <option value={10}>10x10 (International)</option>
-               </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
-            </label>
-          </div>
+        <div className="flex flex-col space-y-4 pt-4 border-t border-slate-700 w-80">
 
           <button
             onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+            className="w-full px-6 py-4 bg-green-600 text-white text-lg font-bold rounded-lg shadow hover:bg-green-500 transition"
           >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
+            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer Online'}
           </button>
 
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
+          <div className="text-center text-sm text-slate-400 font-medium">OR PLAY COMPUTER</div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {[1, 2, 3, 4, 5, 6, 7].map(level => (
               <button
                 key={level}
                 onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+                className={`w-full px-2 py-2 text-white rounded transition text-xs font-bold ${level > 4 ? 'bg-red-800 hover:bg-red-700' : 'bg-slate-700 hover:bg-slate-600'}`}
               >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                Lvl {level}
               </button>
             ))}
           </div>
+
+          {onBack && (
+            <button onClick={onBack} className="mt-4 text-sm text-slate-400 hover:text-white transition underline">
+              &larr; Back to Dashboard
+            </button>
+          )}
         </div>
 
         {activeGames.length > 0 && (
@@ -303,6 +310,14 @@ export default function GameBoard() {
   // Calculate valid destinations for highlighting
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
+  const formatTime = (ms: number) => {
+    if (ms === undefined) return '0:00';
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
 
@@ -316,6 +331,13 @@ export default function GameBoard() {
         <p className="text-xl font-semibold text-blue-700">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
         </p>
+
+        {/* Render Opponent Clock if time control is set */}
+        {timeControl && (
+           <div className={`px-6 py-2 rounded-lg font-mono text-2xl font-bold border-2 ${currentTurn !== myColor ? 'bg-white text-black border-yellow-400 shadow-lg' : 'bg-[#262421] text-slate-300 border-slate-700'}`}>
+              {myColor === PieceColor.LIGHT ? formatTime(localTimeRemaining[PieceColor.DARK]) : formatTime(localTimeRemaining[PieceColor.LIGHT])}
+           </div>
+        )}
 
         {myColor && !status.includes('Game Over') && (
           <div className="flex gap-4">
@@ -385,6 +407,13 @@ export default function GameBoard() {
             </div>
           ))}
         </div>
+
+        {/* Render Player Clock */}
+        {timeControl && (
+           <div className={`px-6 py-2 rounded-lg font-mono text-2xl font-bold border-2 ${currentTurn === myColor ? 'bg-white text-black border-yellow-400 shadow-lg' : 'bg-[#262421] text-slate-300 border-slate-700'}`}>
+              {myColor === PieceColor.LIGHT ? formatTime(localTimeRemaining[PieceColor.LIGHT]) : formatTime(localTimeRemaining[PieceColor.DARK])}
+           </div>
+        )}
       </div>
 
       {/* Chat Column */}

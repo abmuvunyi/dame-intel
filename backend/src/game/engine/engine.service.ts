@@ -30,6 +30,7 @@ export interface Move {
 export interface GameRules {
   boardSize: number; // 8 or 10
   forceMajorityCapture: boolean;
+  timeControl?: { minutes: number, increment: number };
 }
 
 export class DraughtsEngine {
@@ -169,7 +170,8 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+      // Kings can fly in 10x10, but only move 1 step in 8x8
+      const isFlyingKing = this.rules.boardSize === 10;
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -179,6 +181,9 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+          if (!isFlyingKing) {
+            break; // Only 1 step for short-range kings
+          }
           step++;
         }
       }
@@ -204,7 +209,8 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      const isFlyingKing = this.rules.boardSize === 10;
+      // Flying King captures (10x10) or Short-range King captures (8x8)
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -261,6 +267,9 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+            if (!isFlyingKing) {
+              break; // Only land immediately after the captured piece for short-range kings
+            }
           }
 
           step++;
@@ -268,7 +277,10 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // In 8x8, men can only capture forwards. In 10x10, men can capture backwards.
+      const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+      const menDirs = this.rules.boardSize === 10 ? dirs : [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+      for (const dir of menDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +300,17 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // Check promotion
+          let promoted = false;
+          if (this.rules.boardSize === 8) {
+             if (piece.color === PieceColor.LIGHT && landR === 0) promoted = true;
+             else if (piece.color === PieceColor.DARK && landR === 7) promoted = true;
+          }
+
+          let subJumps: Move[] = [];
+          if (!promoted) {
+             subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;

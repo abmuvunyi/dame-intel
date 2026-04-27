@@ -37,6 +37,12 @@ interface GameRoom {
   }
   moves: Move[];
   tournamentId?: number;
+  timeRemaining: {
+    [PieceColor.LIGHT]: number;
+    [PieceColor.DARK]: number;
+  };
+  lastMoveTimestamp?: number;
+  timerInterval?: NodeJS.Timeout;
 }
 
 @WebSocketGateway({ cors: true })
@@ -261,7 +267,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),
       },
-      moves: []
+      moves: [],
+      timeRemaining: {
+        [PieceColor.LIGHT]: rules.timeControl ? rules.timeControl.minutes * 60 * 1000 : 10 * 60 * 1000,
+        [PieceColor.DARK]: rules.timeControl ? rules.timeControl.minutes * 60 * 1000 : 10 * 60 * 1000,
+      },
     };
 
     this.activeGames.set(roomId, room);
@@ -299,7 +309,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
        // Match if tournament ID matches, AND if the requested rulesets match
-       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+       const timeControl1 = p.rules?.timeControl ? `${p.rules.timeControl.minutes}:${p.rules.timeControl.increment}` : 'none';
+       const timeControl2 = rules.timeControl ? `${rules.timeControl.minutes}:${rules.timeControl.increment}` : 'none';
+       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture && timeControl1 === timeControl2;
 
        if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
           matchIdx = i;
@@ -318,6 +330,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
+      const initialTime = rules.timeControl ? rules.timeControl.minutes * 60 * 1000 : 10 * 60 * 1000;
       const room: GameRoom = {
         roomId,
         engine: new DraughtsEngine(rules),
@@ -333,6 +346,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         moves: [],
         tournamentId: data?.tournamentId,
+        timeRemaining: {
+          [PieceColor.LIGHT]: initialTime,
+          [PieceColor.DARK]: initialTime,
+        },
       };
 
       this.activeGames.set(roomId, room);
@@ -360,6 +377,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Only send legal moves to the player whose turn it is
         legalMoves: []
       });
+      this.startGameTimer(roomId, room);
     } else {
       client.emit('waitingForOpponent');
     }
@@ -395,6 +413,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (success && exactLegalMove) {
       room.moves.push(exactLegalMove);
       const currentTurn = room.engine.getCurrentTurn();
+
+      // Time Update
+      if (room.lastMoveTimestamp) {
+        const timeSpent = Date.now() - room.lastMoveTimestamp;
+        room.timeRemaining[color] -= timeSpent;
+        if (room.timeRemaining[color] < 0) room.timeRemaining[color] = 0;
+        if (room.rules.timeControl) {
+           room.timeRemaining[color] += room.rules.timeControl.increment * 1000;
+        }
+      }
+      room.lastMoveTimestamp = Date.now();
+      this.server.to(roomId).emit('timeUpdate', room.timeRemaining);
 
       // Broadcast updated state
       this.server.to(roomId).emit('gameState', {
@@ -473,7 +503,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }, 500); // 500ms delay
   }
 
+  private startGameTimer(roomId: string, room: GameRoom) {
+    room.lastMoveTimestamp = Date.now();
+    this.server.to(roomId).emit('timeUpdate', room.timeRemaining);
+
+    room.timerInterval = setInterval(() => {
+      const currentTurn = room.engine.getCurrentTurn();
+      if (!room.lastMoveTimestamp) return;
+
+      const timeSpent = Date.now() - room.lastMoveTimestamp;
+      const timeLeft = room.timeRemaining[currentTurn] - timeSpent;
+
+      if (timeLeft <= 0) {
+         room.timeRemaining[currentTurn] = 0;
+         if (room.timerInterval) clearInterval(room.timerInterval);
+         const winner = currentTurn === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+         this.handleGameOver(roomId, room, winner);
+      }
+    }, 1000);
+  }
+
   private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
+    if (room.timerInterval) clearInterval(room.timerInterval);
     this.server.to(roomId).emit('gameOver', { winner });
 
     // Save to database

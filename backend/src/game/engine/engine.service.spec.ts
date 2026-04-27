@@ -49,4 +49,61 @@ describe('DraughtsEngine', () => {
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
   });
 
+  it('should restrict 8x8 kings to short-range movement', () => {
+    engine = new DraughtsEngine({ boardSize: 8 });
+    const board = engine.getBoard();
+    // Clear board and add a king in the middle
+    for(let r=0; r<8; r++) for(let c=0; c<8; c++) board[r][c] = null;
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    engine.loadBoard(board, PieceColor.LIGHT);
+
+    const moves = engine.getLegalMoves();
+    // A short-range king in the middle of an empty board should have exactly 4 normal moves
+    expect(moves.length).toBe(4);
+  });
+
+  it('should allow 10x10 kings to fly', () => {
+    engine = new DraughtsEngine({ boardSize: 10 });
+    const board = engine.getBoard();
+    for(let r=0; r<10; r++) for(let c=0; c<10; c++) board[r][c] = null;
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    engine.loadBoard(board, PieceColor.LIGHT);
+
+    const moves = engine.getLegalMoves();
+    // A flying king on an empty 10x10 board from (4,4) can move to many more squares
+    expect(moves.length).toBeGreaterThan(4);
+  });
+
+  it('should restrict 8x8 men to forward captures', () => {
+    engine = new DraughtsEngine({ boardSize: 8 });
+    const board = engine.getBoard();
+    for(let r=0; r<8; r++) for(let c=0; c<8; c++) board[r][c] = null;
+    // Light man at (4,4)
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+    // Dark men behind it at (5,3) and (5,5) - backwards for Light
+    board[5][3] = { color: PieceColor.DARK, type: PieceType.MAN };
+    board[5][5] = { color: PieceColor.DARK, type: PieceType.MAN };
+    engine.loadBoard(board, PieceColor.LIGHT);
+
+    const moves = engine.getLegalMoves();
+    // In 8x8, it should not be able to jump backward
+    expect(moves.length).toBe(2); // Only normal forward moves
+  });
+
+  it('should allow 10x10 men to capture backwards', () => {
+    engine = new DraughtsEngine({ boardSize: 10 });
+    const board = engine.getBoard();
+    for(let r=0; r<10; r++) for(let c=0; c<10; c++) board[r][c] = null;
+    // Light man at (4,4)
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+    // Dark man behind it at (5,5)
+    board[5][5] = { color: PieceColor.DARK, type: PieceType.MAN };
+    engine.loadBoard(board, PieceColor.LIGHT);
+
+    const moves = engine.getLegalMoves();
+    // In 10x10, it should find the backward jump
+    expect(moves.length).toBe(1);
+    expect(moves[0].captured).toBeDefined();
+    expect(moves[0].captured!.length).toBe(1);
+  });
 });
