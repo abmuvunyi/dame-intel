@@ -168,8 +168,8 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // 10x10 Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -204,9 +204,47 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      // King captures
       for (const dir of dirs) {
         let step = 1;
+
+        // If 8x8 standard, kings cannot fly
+        if (this.rules.boardSize === 8) {
+           // Standard 8x8 king capture is just 1 step adjacent jump over opponent
+           const overR = currentPos.row + dir.dr;
+           const overC = currentPos.col + dir.dc;
+           const landR = currentPos.row + dir.dr * 2;
+           const landC = currentPos.col + dir.dc * 2;
+
+           if (!this.isValidPos(landR, landC)) continue;
+
+           const overPiece = this.board[overR][overC];
+           const landPos = this.board[landR][landC];
+           const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+           if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+              const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+              const originalCurrent = this.board[currentPos.row][currentPos.col];
+              this.board[currentPos.row][currentPos.col] = null;
+              this.board[landR][landC] = piece;
+
+              let subJumps: Move[] = [];
+              let stopJumping = false;
+
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+              this.board[currentPos.row][currentPos.col] = originalCurrent;
+
+              if (subJumps.length > 0) {
+                 jumps.push(...subJumps);
+              } else {
+                 jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+              }
+           }
+           continue;
+        }
+
+        // Flying King captures (10x10)
         let opponentFoundPos: Position | null = null;
 
         while (true) {
@@ -268,7 +306,20 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      let manDirs = [
+        { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+        { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+      ];
+      // In 8x8 standard rules, men can only capture forwards. In 10x10, they can capture backwards.
+      if (this.rules.boardSize === 8) {
+         const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+         manDirs = [
+           { dr: forward, dc: -1 },
+           { dr: forward, dc: 1 }
+         ];
+      }
+
+      for (const dir of manDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +339,20 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+
+          // In 8x8 standard rules, if a piece reaches the promotion row, its turn ends immediately.
+          let stopJumping = false;
+          if (this.rules.boardSize === 8) {
+             const promoRow = piece.color === PieceColor.LIGHT ? 0 : 7;
+             if (landR === promoRow) {
+                 stopJumping = true;
+             }
+          }
+
+          if (!stopJumping) {
+             subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
@@ -339,6 +403,10 @@ export class DraughtsEngine {
     }
 
     // King promotion
+    // Standard 8x8: promotes immediately and ends turn (even if jumps are possible).
+    // International 10x10: only promotes if it STOPS on the promotion row.
+    // Wait, the way multi-jumps are implemented in makeMove, move.to is the final destination of the jump sequence.
+    // So if the piece lands on the promotion row at the END of its turn, it promotes.
     if (piece.type === PieceType.MAN) {
       if (piece.color === PieceColor.LIGHT && move.to.row === 0) {
         piece.type = PieceType.KING;
