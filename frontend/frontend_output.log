@@ -5,30 +5,17 @@
 ▲ Next.js 16.1.6 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
-- Environments: .env.local
 
 ✓ Starting...
-✓ Ready in 4.2s
- GET / 200 in 3.4s (compile: 2.9s, render: 524ms)
-⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
-▲ Next.js 16.1.6 (Turbopack)
-- Local:         http://localhost:3000
-- Network:       http://192.168.0.2:3000
-- Environments: .env.local
-- Experiments (use with caution):
-  · allowedRevalidateHeaderKeys
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
 
-✓ Starting...
-✓ Ready in 3.4s
-⨯ You are using configuration and/or tools that are not yet
-supported by Next.js with Turbopack:
-
-
-- Unsupported Next.js configuration option(s) (next.config.js)
-  Turbopack will ignore the following configuration options:
-    - experimental.allowedRevalidateHeaderKeys
-
-
-⚠ Learn more about how to configure Turbopack with Next.js:
-https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack
-[?25h
+✓ Ready in 1133ms
+○ Compiling / ...
+ GET / 200 in 4.3s (compile: 3.9s, render: 400ms)
+ GET / 200 in 154ms (compile: 31ms, render: 123ms)
+✓ Compiled in 130ms
+ GET / 200 in 320ms (compile: 151ms, render: 169ms)
+ GET / 200 in 65ms (compile: 8ms, render: 56ms)
