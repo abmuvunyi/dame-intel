@@ -155,21 +155,29 @@ export class DraughtsEngine {
     return r >= 0 && r < size && c >= 0 && c < size;
   }
 
-  private getMoveDirections(piece: Piece): { dr: number, dc: number }[] {
+  private getMoveDirections(piece: Piece, isJump: boolean = false): { dr: number, dc: number }[] {
     if (piece.type === PieceType.KING) {
       return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
     }
     // Men: Light moves UP (-1), Dark moves DOWN (+1)
     const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
-    return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+    const forwardMoves = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+
+    // In 10x10 International Draughts, men can jump backwards
+    if (isJump && this.rules.boardSize === 10) {
+      const backward = piece.color === PieceColor.LIGHT ? 1 : -1;
+      return [...forwardMoves, { dr: backward, dc: -1 }, { dr: backward, dc: 1 }];
+    }
+
+    return forwardMoves;
   }
 
   private getValidNormalMovesForPiece(pos: Position, piece: Piece): Move[] {
     const moves: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
+    const dirs = this.getMoveDirections(piece, false);
 
-    if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Kings can fly (slide across empty diagonals) in 10x10 International
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -198,12 +206,9 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
-      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
-    ];
+    const dirs = this.getMoveDirections(piece, true);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -288,7 +293,14 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // In standard 8x8, if a man reaches the kings row during a jump, its turn ends immediately
+          let endsTurnImmediately = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+             if (piece.color === PieceColor.LIGHT && landR === 0) endsTurnImmediately = true;
+             else if (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1) endsTurnImmediately = true;
+          }
+
+          const subJumps = endsTurnImmediately ? [] : this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
