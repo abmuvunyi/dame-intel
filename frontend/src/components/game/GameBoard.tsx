@@ -225,31 +225,31 @@ export default function GameBoard() {
 
   if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
+      <div className="flex flex-col items-center justify-center space-y-4 py-12">
+        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-600 tracking-tight">Play Draughts</h1>
+        <p className="text-gray-400">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+        <div className="flex flex-col space-y-4 pt-4 border-t border-[#3c3b39] w-72">
 
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
+          <div className="bg-[#262421] p-4 rounded-lg shadow-inner flex flex-col space-y-3 border border-[#3c3b39]">
+            <h4 className="text-sm font-bold text-gray-300">Game Rules</h4>
+            <label className="text-sm flex justify-between items-center text-gray-400">
                Board Size:
                <select
                   value={boardSize}
                   onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
+                  className="ml-2 border border-[#3c3b39] rounded p-1 text-sm bg-[#302e2b] text-white focus:outline-none focus:ring-1 focus:ring-green-500"
                >
                  <option value={8}>8x8 (Standard)</option>
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+            <label className="text-sm flex items-center gap-2 text-gray-400 cursor-pointer">
                <input
                   type="checkbox"
                   checked={forceMajorityCapture}
                   onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
+                  className="rounded bg-[#302e2b] border-[#3c3b39] text-green-500 focus:ring-green-500 focus:ring-offset-[#262421]"
                />
                Force Majority Capture
             </label>
@@ -257,19 +257,19 @@ export default function GameBoard() {
 
           <button
             onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+            className="w-full px-6 py-4 bg-green-600 text-white font-bold text-lg rounded-lg shadow-[0_4px_0_rgba(21,128,61,1)] hover:bg-green-700 hover:translate-y-[2px] hover:shadow-[0_2px_0_rgba(21,128,61,1)] transition-all"
           >
             {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
           </button>
 
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
+          <div className="text-center pt-4 pb-2 text-sm text-gray-500 font-bold uppercase tracking-wider">Play vs Computer</div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {[1, 2, 3, 4, 5, 6, 7].map(level => (
               <button
                 key={level}
                 onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+                className={`w-full px-2 py-3 text-white font-bold rounded-lg transition-all text-sm shadow-[0_4px_0_rgba(0,0,0,0.2)] hover:translate-y-[2px] hover:shadow-[0_2px_0_rgba(0,0,0,0.2)] ${level > 4 ? 'bg-red-700 hover:bg-red-800 col-span-2 shadow-[0_4px_0_rgba(153,27,27,1)]' : 'bg-[#3c3b39] hover:bg-[#4c4b49]'}`}
               >
                 AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
               </button>
@@ -278,15 +278,15 @@ export default function GameBoard() {
         </div>
 
         {activeGames.length > 0 && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
+          <div className="mt-8 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-4 text-center text-white">Live Games</h3>
             <ul className="space-y-2">
               {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                <li key={i} className="flex justify-between items-center bg-[#262421] p-3 rounded-lg border border-[#3c3b39]">
+                   <span className="font-medium text-gray-300">{game.player1} vs {game.player2}</span>
                    <button
                      onClick={() => handleWatchGame(game.roomId)}
-                     className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                     className="px-4 py-1.5 bg-[#3c3b39] text-white font-bold rounded-md text-sm hover:bg-[#4c4b49] transition-colors"
                    >
                      Watch ({game.spectatorsCount} 👀)
                    </button>
@@ -304,7 +304,7 @@ export default function GameBoard() {
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col md:flex-row justify-center items-start gap-8 w-full max-w-6xl">
 
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
@@ -347,16 +347,14 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
-                if (isSelected) squareBg = 'bg-yellow-400';
-                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style colors
+                if (isSelected) squareBg = 'bg-[#f6f669] opacity-80'; // Selection color
+                if (isHighlighted) squareBg = 'bg-[#f6f669] opacity-50';
 
                 // Dynamically adjust sizes for 10x10 boards so they don't break the layout
                 const is10x10 = board.length === 10;
-                const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
-                const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
-                const stackClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1' : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-                const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
+                const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14' : 'w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20';
+                const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 border-[3px]';
 
                 return (
                   <div
@@ -364,18 +362,21 @@ export default function GameBoard() {
                     onClick={() => handleSquareClick(r, c)}
                     className={`${cellClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150 relative`}
                   >
+                    {isHighlighted && !cell && (
+                      <div className="w-4 h-4 rounded-full bg-black opacity-20 absolute" />
+                    )}
+
                     {cell && (
                       <div className={`
-                        ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                        ${cell.type === PieceType.KING ? kingOffset : ''}
+                        ${pieceClass} rounded-full flex items-center justify-center transform transition-transform hover:scale-105 relative
+                        ${cell.color === PieceColor.LIGHT
+                          ? 'bg-[#f9f9f9] border-[#e0e0e0] shadow-[0_4px_4px_rgba(0,0,0,0.3),inset_0_-4px_4px_rgba(0,0,0,0.1)]'
+                          : 'bg-[#403d39] border-[#2c2a27] shadow-[0_4px_4px_rgba(0,0,0,0.4),inset_0_-4px_4px_rgba(0,0,0,0.3)]'}
                       `}>
-                        {/* Stacked piece visual for King */}
                         {cell.type === PieceType.KING && (
-                          <div className={`
-                            ${stackClass} rounded-full shadow-md
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                          `} />
+                          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={`w-3/5 h-3/5 ${cell.color === PieceColor.LIGHT ? 'text-[#e0e0e0]' : 'text-[#8a8a8a]'}`}>
+                            <path d="M4 19V17H20V19H4ZM5 15L3 7L8 10L12 4L16 10L21 7L19 15H5Z" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
+                          </svg>
                         )}
                       </div>
                     )}
