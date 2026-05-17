@@ -168,7 +168,7 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
@@ -203,7 +203,7 @@ export class DraughtsEngine {
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -267,8 +267,14 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
-      for (const dir of dirs) {
+      // Men captures (8x8 & 10x10) and Short-range King captures (8x8)
+      let activeDirs = dirs;
+      if (piece.type === PieceType.MAN && this.rules.boardSize === 8) {
+        const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+        activeDirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+      }
+
+      for (const dir of activeDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +294,16 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+
+          // 8x8 Men immediate turn end on promotion
+          const is8x8ManPromotion = this.rules.boardSize === 8 && piece.type === PieceType.MAN &&
+            ((piece.color === PieceColor.LIGHT && landR === 0) ||
+             (piece.color === PieceColor.DARK && landR === 7));
+
+          if (!is8x8ManPromotion) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;

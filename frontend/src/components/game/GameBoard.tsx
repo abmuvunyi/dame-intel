@@ -225,55 +225,64 @@ export default function GameBoard() {
 
   if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
+      <div className="flex flex-col lg:flex-row items-center lg:items-start justify-center gap-12 w-full pt-10">
+        <div className="hidden lg:flex flex-col items-center">
+            {/* Empty board visual placeholder */}
+            <div className="border-[6px] border-[#3d3b38] p-1 bg-[#262421] shadow-2xl rounded-sm opacity-50">
+                <div className="w-[500px] h-[500px] bg-[url('https://www.chess.com/boards/green/150.png')] bg-cover opacity-20 flex items-center justify-center">
+                    <span className="text-white text-xl font-bold">Board Preview</span>
+                </div>
+            </div>
+        </div>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+        <div className="flex flex-col space-y-4 w-full max-w-sm">
+           <p className="text-gray-400 text-center font-medium">{status}</p>
 
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
+          <div className="bg-[#262421] p-4 rounded-lg shadow-lg flex flex-col space-y-3 w-80 text-white">
+            <h4 className="text-lg font-bold text-center border-b border-[#3d3b38] pb-2 mb-2">Play Draughts</h4>
+            <label className="text-sm flex justify-between items-center text-gray-300">
+               Game Variant:
                <select
                   value={boardSize}
                   onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
+                  className="ml-2 border-none rounded p-1.5 text-sm bg-[#3d3b38] text-white focus:ring-0 outline-none"
                >
                  <option value={8}>8x8 (Standard)</option>
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+            <label className="text-sm flex items-center gap-2 text-gray-300 cursor-pointer">
                <input
                   type="checkbox"
                   checked={forceMajorityCapture}
                   onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
+                  className="rounded bg-[#3d3b38] border-none text-green-500 focus:ring-green-500"
                />
                Force Majority Capture
             </label>
-          </div>
 
-          <button
-            onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
-          </button>
-
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
+            <div className="pt-4">
               <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+                onClick={handleFindMatch}
+                className="w-full px-6 py-4 bg-[#81b64c] hover:bg-[#86bd4e] text-white font-bold rounded-lg shadow-lg text-xl transition-all"
               >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                {tournamentIdToJoin ? 'Join Tournament' : 'Play Online'}
               </button>
-            ))}
+            </div>
+
+            <div className="text-center pt-2 text-xs text-gray-500 font-medium">PLAY COMPUTER</div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[1, 2, 3, 4, 5, 6, 7].map(level => (
+                <button
+                  key={level}
+                  onClick={() => handlePlayAI(level)}
+                  className={`w-full px-2 py-2 text-white rounded font-medium transition text-sm ${level > 4 ? 'bg-[#b33430] hover:bg-[#c23934] col-span-2' : 'bg-[#3d3b38] hover:bg-[#4d4a46]'}`}
+                >
+                  AI Lvl {level} {level === 7 ? '(Max)' : ''}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -308,12 +317,12 @@ export default function GameBoard() {
 
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
-        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
+        <h1 className="text-2xl font-bold text-gray-100">Game Room</h1>
+        <div className="flex space-x-4 text-sm text-gray-400 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
+        <p className="text-md text-gray-300">{status}</p>
+        <p className="text-xl font-semibold text-green-500">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
         </p>
 
@@ -339,7 +348,7 @@ export default function GameBoard() {
           </div>
         )}
 
-        <div className="border-[6px] border-slate-800 p-1 bg-slate-200 shadow-2xl rounded-sm">
+        <div className="border-[6px] border-[#262421] p-1 bg-[#262421] shadow-2xl rounded-sm">
           {board.map((row, r) => (
             <div key={r} className="flex">
               {row.map((cell, c) => {
@@ -347,7 +356,7 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style colors
                 if (isSelected) squareBg = 'bg-yellow-400';
                 if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
 
@@ -388,19 +397,19 @@ export default function GameBoard() {
       </div>
 
       {/* Chat Column */}
-      <div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-[600px]">
-        <div className="bg-slate-800 text-white p-4 rounded-t-lg">
-          <h3 className="font-bold">Live Chat</h3>
+      <div className="w-full lg:w-80 flex flex-col bg-[#262421] rounded-lg shadow-xl border border-[#3d3b38] h-[600px]">
+        <div className="bg-[#1e1e1e] text-gray-300 p-4 rounded-t-lg border-b border-[#3d3b38]">
+          <h3 className="font-bold text-center">Live Game</h3>
         </div>
 
-        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#262421]">
           {chatMessages.length === 0 ? (
-             <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
+             <p className="text-center text-gray-500 text-sm mt-10">No messages yet.</p>
           ) : (
             chatMessages.map((msg, i) => (
               <div key={i} className="flex flex-col">
-                <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                <span className="text-xs font-semibold text-gray-400">{msg.sender}</span>
+                <span className="bg-[#3d3b38] text-gray-200 p-2 rounded shadow-sm text-sm border border-[#262421] inline-block w-fit max-w-[90%] break-words">
                   {msg.message}
                 </span>
               </div>
@@ -408,18 +417,18 @@ export default function GameBoard() {
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+        <div className="p-3 border-t border-[#3d3b38] bg-[#262421] rounded-b-lg">
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <input
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 text-sm bg-[#3d3b38] text-white border border-[#1e1e1e] rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-green-500"
             />
             <button
               type="submit"
-              className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700 transition"
+              className="bg-[#81b64c] text-white px-4 py-2 rounded text-sm font-semibold hover:bg-[#86bd4e] transition"
             >
               Send
             </button>

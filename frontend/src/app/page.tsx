@@ -19,40 +19,25 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-5xl flex justify-between items-center mb-6">
-        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-amber-600 tracking-tight">
-          Online Draughts
-        </h1>
-
+    <main className="min-h-screen flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-7xl flex justify-end items-center mb-6">
         <div className="flex space-x-4">
           {isAuthenticated ? (
             <>
-              <Link href="/tournaments" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition shadow">
-                Tournaments
-              </Link>
-              <Link href="/puzzles" className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition shadow">
-                Train / Puzzles
-              </Link>
-              <Link href="/profile" className="px-4 py-2 text-sm font-medium text-white bg-slate-800 rounded hover:bg-slate-900 transition shadow">
-                My Profile
-              </Link>
-              <button onClick={handleLogout} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition shadow-sm">
+              <button onClick={handleLogout} className="px-4 py-2 text-sm font-medium text-white bg-[#3d3b38] rounded hover:bg-[#262421] transition shadow">
                 Log Out
               </button>
             </>
           ) : (
-            <Link href="/login" className="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition shadow">
-              Login / Register
+            <Link href="/login" className="px-6 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition shadow">
+              Sign Up / Log In
             </Link>
           )}
         </div>
       </div>
 
-      <div className="w-full max-w-5xl bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-100">
-        <div className="p-8">
-          <GameBoard />
-        </div>
+      <div className="w-full max-w-7xl flex-1 flex justify-center items-start">
+        <GameBoard />
       </div>
     </main>
   );
