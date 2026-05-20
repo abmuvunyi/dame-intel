@@ -227,29 +227,29 @@ export default function GameBoard() {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
+        <p className="text-gray-300">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+        <div className="flex flex-col space-y-4 pt-4 border-t border-[#3e3e3c] w-64">
 
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
+          <div className="bg-[#302e2b] p-4 rounded-lg shadow-inner flex flex-col space-y-3">
+            <h4 className="text-sm font-bold text-gray-300">Game Rules</h4>
+            <label className="text-sm flex justify-between items-center text-gray-400">
                Board Size:
                <select
                   value={boardSize}
                   onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
+                  className="ml-2 border border-[#3e3e3c] rounded p-1 text-sm bg-[#262522] text-white"
                >
                  <option value={8}>8x8 (Standard)</option>
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+            <label className="text-sm flex items-center gap-2 text-gray-400 cursor-pointer">
                <input
                   type="checkbox"
                   checked={forceMajorityCapture}
                   onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
+                  className="rounded bg-[#262522] border-[#3e3e3c]"
                />
                Force Majority Capture
             </label>
@@ -279,11 +279,11 @@ export default function GameBoard() {
 
         {activeGames.length > 0 && (
           <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
+            <h3 className="text-xl font-bold mb-4 text-center text-white">Live Games</h3>
             <ul className="space-y-2">
               {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                <li key={i} className="flex justify-between items-center bg-[#302e2b] p-3 rounded border border-[#3e3e3c]">
+                   <span className="font-medium text-gray-300">{game.player1} vs {game.player2}</span>
                    <button
                      onClick={() => handleWatchGame(game.roomId)}
                      className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
@@ -308,21 +308,21 @@ export default function GameBoard() {
 
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
-        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
+        <h1 className="text-2xl font-bold text-white">Game Room</h1>
+        <div className="flex space-x-4 text-sm text-gray-400 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
+        <p className="text-md text-gray-300">{status}</p>
+        <p className="text-xl font-semibold text-blue-400">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
         </p>
 
         {myColor && !status.includes('Game Over') && (
           <div className="flex gap-4">
-            <button onClick={handleOfferDraw} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-sm font-semibold transition">
+            <button onClick={handleOfferDraw} className="px-4 py-2 bg-[#302e2b] text-gray-300 rounded shadow hover:bg-[#3e3e3c] border border-[#3e3e3c] text-sm font-semibold transition">
               Offer Draw
             </button>
-            <button onClick={handleResign} className="px-4 py-2 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-sm font-semibold transition">
+            <button onClick={handleResign} className="px-4 py-2 bg-red-900 text-red-200 rounded shadow hover:bg-red-800 text-sm font-semibold transition">
               Resign
             </button>
           </div>
@@ -347,7 +347,7 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style colors
                 if (isSelected) squareBg = 'bg-yellow-400';
                 if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
 
@@ -388,19 +388,19 @@ export default function GameBoard() {
       </div>
 
       {/* Chat Column */}
-      <div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-[600px]">
-        <div className="bg-slate-800 text-white p-4 rounded-t-lg">
+      <div className="w-full md:w-80 flex flex-col bg-[#262522] rounded-lg shadow-xl border border-[#3e3e3c] h-[600px]">
+        <div className="bg-[#1f1e1b] text-white p-4 rounded-t-lg border-b border-[#3e3e3c]">
           <h3 className="font-bold">Live Chat</h3>
         </div>
 
-        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#262522]">
           {chatMessages.length === 0 ? (
-             <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
+             <p className="text-center text-gray-500 text-sm mt-10">No messages yet. Say hi!</p>
           ) : (
             chatMessages.map((msg, i) => (
               <div key={i} className="flex flex-col">
-                <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                <span className="text-xs font-semibold text-gray-400">{msg.sender}</span>
+                <span className="bg-[#302e2b] p-2 rounded shadow-sm text-sm border border-[#3e3e3c] text-gray-200 inline-block w-fit max-w-[90%] break-words">
                   {msg.message}
                 </span>
               </div>
@@ -408,14 +408,14 @@ export default function GameBoard() {
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+        <div className="p-3 border-t border-[#3e3e3c] bg-[#262522] rounded-b-lg">
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <input
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 text-sm border border-[#3e3e3c] bg-[#302e2b] text-white rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
               type="submit"
