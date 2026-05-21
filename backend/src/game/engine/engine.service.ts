@@ -169,17 +169,28 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      if (this.rules.boardSize === 8) {
+        // 8x8 kings move 1 square in any diagonal direction
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // 10x10 Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
+          }
         }
       }
     } else {
@@ -204,7 +215,49 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      if (this.rules.boardSize === 8) {
+        // 8x8 King captures (same as men but in 4 directions)
+        for (const dir of dirs) {
+          const overR = currentPos.row + dir.dr;
+          const overC = currentPos.col + dir.dc;
+          const landR = currentPos.row + dir.dr * 2;
+          const landC = currentPos.col + dir.dc * 2;
+
+          if (!this.isValidPos(landR, landC)) continue;
+
+          const overPiece = this.board[overR][overC];
+          const landPos = this.board[landR][landC];
+
+          const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+          if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+            const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
+            const originalCurrent = this.board[currentPos.row][currentPos.col];
+            this.board[currentPos.row][currentPos.col] = null;
+            this.board[landR][landC] = piece;
+
+            let subJumps: Move[] = [];
+            // In 8x8 standard draughts, a man promoting to a King immediately ends its turn.
+            const isPromotion = piece.type === PieceType.MAN && this.rules.boardSize === 8 &&
+              ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1));
+
+            if (!isPromotion) {
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+            }
+
+            this.board[currentPos.row][currentPos.col] = originalCurrent;
+            this.board[landR][landC] = null;
+
+            if (subJumps.length > 0) {
+               jumps.push(...subJumps);
+            } else {
+               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+            }
+          }
+        }
+      } else {
+      // 10x10 Flying King captures
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -266,9 +319,16 @@ export class DraughtsEngine {
           step++;
         }
       }
+      }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      let menDirs = dirs;
+      if (this.rules.boardSize === 8) {
+        const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+        menDirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+      }
+
+      for (const dir of menDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +348,14 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+          // In 8x8 standard draughts, a man promoting to a King immediately ends its turn.
+          const isPromotion = piece.type === PieceType.MAN && this.rules.boardSize === 8 &&
+            ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1));
+
+          if (!isPromotion) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
