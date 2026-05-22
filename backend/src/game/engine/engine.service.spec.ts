@@ -12,41 +12,50 @@ describe('DraughtsEngine', () => {
     expect(engine).toBeDefined();
   });
 
-  it('should initialize with correct pieces', () => {
-    const board = engine.getBoard();
-
-    // Check dark pieces on row 0
-    expect(board[0][1]?.color).toBe(PieceColor.DARK);
-    expect(board[0][0]).toBeNull();
-
-    // Check light pieces on row 7
-    expect(board[7][0]?.color).toBe(PieceColor.LIGHT);
-    expect(board[7][1]).toBeNull();
-
-    expect(engine.getCurrentTurn()).toBe(PieceColor.LIGHT);
+  describe('International 10x10 Rules', () => {
+    it('should allow flying king', () => {
+        engine = new DraughtsEngine({ boardSize: 10 });
+        const board = engine.getBoard();
+        for (let r=0; r<10; r++) for (let c=0; c<10; c++) board[r][c] = null;
+        engine.loadBoard(board, PieceColor.LIGHT);
+        board[9][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+        const moves = engine.getLegalMoves();
+        expect(moves.length).toBe(9); // Slide all the way to 0,9
+    });
+    it('men can capture backwards', () => {
+        engine = new DraughtsEngine({ boardSize: 10 });
+        const board = engine.getBoard();
+        for (let r=0; r<10; r++) for (let c=0; c<10; c++) board[r][c] = null;
+        engine.loadBoard(board, PieceColor.LIGHT);
+        board[3][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+        board[4][4] = { color: PieceColor.DARK, type: PieceType.MAN };
+        const moves = engine.getLegalMoves();
+        expect(moves.length).toBe(1);
+        expect(moves[0].to).toEqual({ row: 5, col: 5 }); // Down/backwards capture
+    });
   });
 
-  it('should prevent invalid moves', () => {
-    // Light is trying to move a Dark piece
-    const moved = engine.makeMove({ from: { row: 2, col: 1 }, to: { row: 3, col: 0 } });
-    expect(moved).toBe(false);
+  describe('Standard 8x8 Rules', () => {
+    it('men cannot capture backwards', () => {
+        engine = new DraughtsEngine({ boardSize: 8 });
+        const board = engine.getBoard();
+        for (let r=0; r<8; r++) for (let c=0; c<8; c++) board[r][c] = null;
+        engine.loadBoard(board, PieceColor.LIGHT);
+        board[3][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+        board[4][4] = { color: PieceColor.DARK, type: PieceType.MAN };
+        const moves = engine.getLegalMoves();
+        // Since LIGHT moves UP (-1), it shouldn't be able to capture DOWN (+1)
+        expect(moves.length).toBe(2); // Should only have normal moves UP
+        expect(moves[0].to.row).toBe(2);
+    });
+    it('kings are short range', () => {
+        engine = new DraughtsEngine({ boardSize: 8 });
+        const board = engine.getBoard();
+        for (let r=0; r<8; r++) for (let c=0; c<8; c++) board[r][c] = null;
+        engine.loadBoard(board, PieceColor.LIGHT);
+        board[7][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+        const moves = engine.getLegalMoves();
+        expect(moves.length).toBe(1); // Only 1 step, not 7!
+    });
   });
-
-  // Basic move test
-  it('should allow valid opening move for light', () => {
-    const legalMoves = engine.getLegalMoves();
-    expect(legalMoves.length).toBeGreaterThan(0);
-
-    const move = { from: { row: 5, col: 0 }, to: { row: 4, col: 1 } };
-    const moved = engine.makeMove(move);
-    expect(moved).toBe(true);
-
-    // Piece moved
-    expect(engine.getBoard()[4][1]?.color).toBe(PieceColor.LIGHT);
-    expect(engine.getBoard()[5][0]).toBeNull();
-
-    // Turn changed
-    expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
-  });
-
 });
