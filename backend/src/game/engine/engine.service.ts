@@ -40,7 +40,7 @@ export class DraughtsEngine {
   constructor(rules: Partial<GameRules> = {}) {
     this.rules = {
       boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (rules.boardSize === 10)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -180,6 +180,9 @@ export class DraughtsEngine {
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
           step++;
+          if (this.rules.boardSize === 8) {
+            if (step > 1) break;
+          }
         }
       }
     } else {
@@ -261,14 +264,20 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+            if (this.rules.boardSize === 8) break;
           }
 
           step++;
+          if (this.rules.boardSize === 8) {
+            if (step > 2) break;
+            if (step === 2 && opponentFoundPos === null) break;
+          }
         }
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      const jumpDirs = this.rules.boardSize === 8 ? this.getMoveDirections(piece) : dirs;
+      for (const dir of jumpDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +297,15 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          const isPromotion = this.rules.boardSize === 8 && piece.type === PieceType.MAN && (
+            (piece.color === PieceColor.LIGHT && landR === 0) ||
+            (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)
+          );
+
+          let subJumps: Move[] = [];
+          if (!isPromotion) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
