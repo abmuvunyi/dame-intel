@@ -49,4 +49,31 @@ describe('DraughtsEngine', () => {
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
   });
 
+  it('8x8 short-range king move', () => {
+    const eng = new DraughtsEngine({boardSize: 8});
+    const b = eng.getBoard();
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 8; j++) {
+        b[i][j] = null;
+      }
+    }
+    b[7][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    eng.loadBoard(b, PieceColor.LIGHT);
+    const moves = eng.getLegalMoves();
+    expect(moves.length).toBe(1); // Only to 6,1
+  });
+
+  it('10x10 flying king move', () => {
+    const eng = new DraughtsEngine({boardSize: 10});
+    const b = eng.getBoard();
+    for (let i = 0; i < 10; i++) {
+      for (let j = 0; j < 10; j++) {
+        b[i][j] = null;
+      }
+    }
+    b[9][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    eng.loadBoard(b, PieceColor.LIGHT);
+    const moves = eng.getLegalMoves();
+    expect(moves.length).toBe(9);
+  });
 });
