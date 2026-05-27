@@ -49,7 +49,16 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(false);
+
+  useEffect(() => {
+    // Automatically toggle force majority capture based on variant
+    if (boardSize === 10) {
+      setForceMajorityCapture(true);
+    } else {
+      setForceMajorityCapture(false);
+    }
+  }, [boardSize]);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -347,16 +356,14 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
-                if (isSelected) squareBg = 'bg-yellow-400';
-                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style green/white
+                if (isSelected) squareBg = 'bg-[#f6f669]'; // Chess.com yellow select
+                if (isHighlighted) squareBg = 'bg-[#baca44] opacity-90';
 
                 // Dynamically adjust sizes for 10x10 boards so they don't break the layout
                 const is10x10 = board.length === 10;
                 const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
                 const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
-                const stackClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1' : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-                const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
 
                 return (
                   <div
@@ -366,16 +373,14 @@ export default function GameBoard() {
                   >
                     {cell && (
                       <div className={`
-                        ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                        ${cell.type === PieceType.KING ? kingOffset : ''}
+                        ${pieceClass} rounded-full shadow-[0_4px_4px_rgba(0,0,0,0.5)] flex items-center justify-center font-bold transform transition-transform hover:scale-105
+                        ${cell.color === PieceColor.LIGHT ? 'bg-[#f8f8f8] border-[#e8e8e8]' : 'bg-[#333333] border-[#222222]'}
                       `}>
-                        {/* Stacked piece visual for King */}
+                        {/* King Crown SVG */}
                         {cell.type === PieceType.KING && (
-                          <div className={`
-                            ${stackClass} rounded-full shadow-md
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                          `} />
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={cell.color === PieceColor.LIGHT ? "#333" : "#f8f8f8"} className="w-3/5 h-3/5">
+                            <path d="M4 18v2h16v-2H4zm1.4-8L3 16h18l-2.4-6-4.6 2.5L12 5l-2 7.5L5.4 10z"/>
+                          </svg>
                         )}
                       </div>
                     )}

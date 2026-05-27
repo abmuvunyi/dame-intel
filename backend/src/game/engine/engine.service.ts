@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (boardSize === 10)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -164,22 +165,43 @@ export class DraughtsEngine {
     return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
   }
 
+  private getCaptureDirections(piece: Piece): { dr: number, dc: number }[] {
+    if (piece.type === PieceType.KING || this.rules.boardSize === 10) {
+      // Kings always capture all directions. Men in 10x10 capture all directions.
+      return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
+    // Men in 8x8 standard only capture forward
+    const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+    return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+  }
+
   private getValidNormalMovesForPiece(pos: Position, piece: Piece): Move[] {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      if (this.rules.boardSize === 10) {
+        // 10x10 Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // 8x8 Kings move only one square
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          }
         }
       }
     } else {
@@ -203,8 +225,8 @@ export class DraughtsEngine {
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
-      // Flying King captures
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Flying King captures for 10x10
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -267,8 +289,9 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
-      for (const dir of dirs) {
+      // 8x8 Kings and all Men captures
+      const captureDirs = this.getCaptureDirections(piece);
+      for (const dir of captureDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +311,16 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // In 8x8 standard, promotion immediately ends the turn
+          let canSubJump = true;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === 7)) {
+              canSubJump = false;
+            }
+          }
+
+          const subJumps = canSubJump ? this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured) : [];
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
