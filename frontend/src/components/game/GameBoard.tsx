@@ -49,11 +49,15 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(false);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
   const tournamentIdToJoin = tIdStr ? parseInt(tIdStr, 10) : null;
+
+  useEffect(() => {
+    setForceMajorityCapture(boardSize === 10);
+  }, [boardSize]);
 
   useEffect(() => {
     // Connect to backend WebSocket
