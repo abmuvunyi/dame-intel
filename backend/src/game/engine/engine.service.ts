@@ -169,17 +169,28 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      if (this.rules.boardSize === 8) {
+        // Standard 8x8: Kings move only 1 square
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // International 10x10: Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
+          }
         }
       }
     } else {
@@ -204,10 +215,45 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
-      for (const dir of dirs) {
-        let step = 1;
-        let opponentFoundPos: Position | null = null;
+      if (this.rules.boardSize === 8) {
+        // Standard 8x8 King captures: only jump adjacent pieces
+        for (const dir of dirs) {
+          const overR = currentPos.row + dir.dr;
+          const overC = currentPos.col + dir.dc;
+          const landR = currentPos.row + dir.dr * 2;
+          const landC = currentPos.col + dir.dc * 2;
+
+          if (!this.isValidPos(landR, landC)) continue;
+
+          const overPiece = this.board[overR][overC];
+          const landPos = this.board[landR][landC];
+
+          const alreadyCaptured = capturedSoFar.some(cap => cap.row === overR && cap.col === overC);
+
+          if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
+            const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
+
+            const originalCurrent = this.board[currentPos.row][currentPos.col];
+            this.board[currentPos.row][currentPos.col] = null;
+            this.board[landR][landC] = piece;
+
+            const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+
+            this.board[currentPos.row][currentPos.col] = originalCurrent;
+            this.board[landR][landC] = null;
+
+            if (subJumps.length > 0) {
+               jumps.push(...subJumps);
+            } else {
+               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
+            }
+          }
+        }
+      } else {
+        // International 10x10: Flying King captures
+        for (const dir of dirs) {
+          let step = 1;
+          let opponentFoundPos: Position | null = null;
 
         while (true) {
           const r = currentPos.row + dir.dr * step;
@@ -263,12 +309,20 @@ export class DraughtsEngine {
             }
           }
 
-          step++;
+            step++;
+          }
         }
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // Standard 8x8 restricts men captures to forward only
+      let validDirs = dirs;
+      if (this.rules.boardSize === 8) {
+        const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+        validDirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+      }
+
+      for (const dir of validDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -284,11 +338,23 @@ export class DraughtsEngine {
         if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
           const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
 
+          // 8x8 rule: Men stop their turn immediately upon promotion
+          let stopsTurn = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === 7)) {
+              stopsTurn = true;
+            }
+          }
+
           const originalCurrent = this.board[currentPos.row][currentPos.col];
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+          if (!stopsTurn) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
