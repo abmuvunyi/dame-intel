@@ -229,27 +229,31 @@ export default function GameBoard() {
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
         <p className="text-gray-600">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+        <div className="flex flex-col space-y-4 pt-4 border-t border-[#3c3a38] w-64">
 
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
+          <div className="bg-[#262421] p-4 rounded-lg shadow-inner flex flex-col space-y-3 text-white">
+            <h4 className="text-sm font-bold text-gray-200">Game Rules</h4>
+            <label className="text-sm flex justify-between items-center text-gray-300">
                Board Size:
                <select
                   value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
+                  onChange={e => {
+                    const newSize = parseInt(e.target.value);
+                    setBoardSize(newSize);
+                    setForceMajorityCapture(newSize === 10);
+                  }}
+                  className="ml-2 border border-[#3c3a38] rounded p-1 text-sm bg-[#302e2b] text-white"
                >
                  <option value={8}>8x8 (Standard)</option>
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+            <label className="text-sm flex items-center gap-2 text-gray-300 cursor-pointer">
                <input
                   type="checkbox"
                   checked={forceMajorityCapture}
                   onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
+                  className="rounded bg-[#302e2b] border-[#3c3a38]"
                />
                Force Majority Capture
             </label>
@@ -304,16 +308,16 @@ export default function GameBoard() {
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4 w-full">
 
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
-        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
+        <h1 className="text-2xl font-bold text-gray-200">Game Room</h1>
+        <div className="flex space-x-4 text-sm text-gray-400 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
+        <p className="text-md text-gray-400">{status}</p>
+        <p className="text-xl font-semibold text-blue-400">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
         </p>
 
@@ -339,7 +343,7 @@ export default function GameBoard() {
           </div>
         )}
 
-        <div className="border-[6px] border-slate-800 p-1 bg-slate-200 shadow-2xl rounded-sm">
+        <div className="border-[6px] border-[#3c3a38] p-1 bg-[#262421] shadow-2xl rounded-sm">
           {board.map((row, r) => (
             <div key={r} className="flex">
               {row.map((cell, c) => {
@@ -347,16 +351,14 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
-                if (isSelected) squareBg = 'bg-yellow-400';
-                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style colors
+                if (isSelected) squareBg = 'bg-[#f6f669]';
+                if (isHighlighted) squareBg = 'bg-[#f4f680] opacity-90';
 
                 // Dynamically adjust sizes for 10x10 boards so they don't break the layout
                 const is10x10 = board.length === 10;
                 const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
                 const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
-                const stackClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1' : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-                const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
 
                 return (
                   <div
@@ -367,15 +369,13 @@ export default function GameBoard() {
                     {cell && (
                       <div className={`
                         ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                        ${cell.type === PieceType.KING ? kingOffset : ''}
+                        ${cell.color === PieceColor.LIGHT ? 'bg-[#f8f8f8] border-[#e0e0e0]' : 'bg-[#262421] border-[#1a1917]'}
                       `}>
-                        {/* Stacked piece visual for King */}
+                        {/* Crown SVG for King */}
                         {cell.type === PieceType.KING && (
-                          <div className={`
-                            ${stackClass} rounded-full shadow-md
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                          `} />
+                          <svg className="w-3/5 h-3/5" viewBox="0 0 24 24" fill={cell.color === PieceColor.LIGHT ? '#262421' : '#f8f8f8'}>
+                            <path d="M4 18v2h16v-2H4zm2-10l2 6h8l2-6-3 4-3-6-3 6-3-4z"/>
+                          </svg>
                         )}
                       </div>
                     )}
@@ -388,19 +388,19 @@ export default function GameBoard() {
       </div>
 
       {/* Chat Column */}
-      <div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-[600px]">
-        <div className="bg-slate-800 text-white p-4 rounded-t-lg">
-          <h3 className="font-bold">Live Chat</h3>
+      <div className="w-full md:w-80 flex flex-col bg-[#262421] rounded-lg shadow-xl border border-[#3c3a38] h-[600px]">
+        <div className="bg-[#1a1917] text-white p-4 rounded-t-lg">
+          <h3 className="font-bold text-gray-200">Live Chat</h3>
         </div>
 
-        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#262421]">
           {chatMessages.length === 0 ? (
              <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
           ) : (
             chatMessages.map((msg, i) => (
               <div key={i} className="flex flex-col">
-                <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                <span className="text-xs font-semibold text-gray-400">{msg.sender}</span>
+                <span className="bg-[#302e2b] text-gray-200 p-2 rounded shadow-sm text-sm border border-[#3c3a38] inline-block w-fit max-w-[90%] break-words">
                   {msg.message}
                 </span>
               </div>
@@ -408,14 +408,14 @@ export default function GameBoard() {
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+        <div className="p-3 border-t border-[#3c3a38] bg-[#262421] rounded-b-lg">
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <input
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 text-sm border border-[#3c3a38] bg-[#302e2b] text-white rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
               type="submit"
