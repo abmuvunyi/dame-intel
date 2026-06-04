@@ -288,7 +288,16 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // In 8x8 standard draughts, a man ends its turn immediately upon reaching the king row
+          let canSubJump = true;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+              canSubJump = false;
+            }
+          }
+
+          const subJumps = canSubJump ? this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured) : [];
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
