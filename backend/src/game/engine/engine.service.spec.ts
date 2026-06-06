@@ -50,3 +50,52 @@ describe('DraughtsEngine', () => {
   });
 
 });
+
+  it('10x10 King flying', () => {
+    const e = new DraughtsEngine({ boardSize: 10, forceMajorityCapture: false });
+    // Empty board
+    const board = Array(10).fill(null).map(() => Array(10).fill(null));
+    board[0][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    e.loadBoard(board, PieceColor.LIGHT);
+    const moves = e.getLegalMoves();
+    // 9 squares available to fly to
+    expect(moves.length).toBe(9);
+  });
+
+  it('8x8 King single step', () => {
+    const e = new DraughtsEngine({ boardSize: 8, forceMajorityCapture: false });
+    const board = Array(8).fill(null).map(() => Array(8).fill(null));
+    board[0][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
+    e.loadBoard(board, PieceColor.LIGHT);
+    const moves = e.getLegalMoves();
+    // only 1 square available
+    expect(moves.length).toBe(1);
+    expect(moves[0].to).toEqual({ row: 1, col: 1 });
+  });
+
+  it('8x8 Men capture direction', () => {
+    const e = new DraughtsEngine({ boardSize: 8, forceMajorityCapture: false });
+    const board = Array(8).fill(null).map(() => Array(8).fill(null));
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.MAN }; // Moves up (-1)
+    board[5][5] = { color: PieceColor.DARK, type: PieceType.MAN }; // Behind light piece
+    board[3][3] = { color: PieceColor.DARK, type: PieceType.MAN }; // In front of light piece
+    e.loadBoard(board, PieceColor.LIGHT);
+    const moves = e.getLegalMoves();
+
+    // Light piece should only be able to capture forward, i.e., piece at 3,3
+    expect(moves.length).toBe(1);
+    expect(moves[0].to).toEqual({ row: 2, col: 2 });
+  });
+
+  it('10x10 Men capture direction', () => {
+    const e = new DraughtsEngine({ boardSize: 10, forceMajorityCapture: false });
+    const board = Array(10).fill(null).map(() => Array(10).fill(null));
+    board[4][4] = { color: PieceColor.LIGHT, type: PieceType.MAN }; // Moves up (-1)
+    board[5][5] = { color: PieceColor.DARK, type: PieceType.MAN }; // Behind light piece
+    board[3][3] = { color: PieceColor.DARK, type: PieceType.MAN }; // In front of light piece
+    e.loadBoard(board, PieceColor.LIGHT);
+    const moves = e.getLegalMoves();
+
+    // Light piece should be able to capture both forward and backward
+    expect(moves.length).toBe(2);
+  });

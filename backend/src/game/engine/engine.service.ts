@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (boardSize === 10)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -180,6 +181,8 @@ export class DraughtsEngine {
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
           step++;
+
+          if (this.rules.boardSize === 8) break; // Standard Kings only move 1 square
         }
       }
     } else {
@@ -204,7 +207,7 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      // King captures
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -240,6 +243,13 @@ export class DraughtsEngine {
             const landR = r;
             const landC = c;
 
+            // In 8x8 standard draughts, Kings must land exactly one square behind the captured piece
+            if (this.rules.boardSize === 8) {
+               if (Math.abs(landR - opponentFoundPos.row) !== 1 || Math.abs(landC - opponentFoundPos.col) !== 1) {
+                   break;
+               }
+            }
+
             // Temporarily apply jump to check for sub-jumps from THIS landing spot
             const originalCurrent = this.board[currentPos.row][currentPos.col];
             this.board[currentPos.row][currentPos.col] = null;
@@ -264,11 +274,23 @@ export class DraughtsEngine {
           }
 
           step++;
+
+          if (this.rules.boardSize === 8 && opponentFoundPos === null && step > 1) {
+              break; // In 8x8, Kings cannot fly to look for opponents
+          }
         }
       }
     } else {
       // Men captures
+      const is8x8 = this.rules.boardSize === 8;
+      const forwardDir = piece.color === PieceColor.LIGHT ? -1 : 1;
+
       for (const dir of dirs) {
+        // In standard 8x8 rules, men can only capture forwards.
+        if (is8x8 && dir.dr !== forwardDir) {
+           continue;
+        }
+
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -293,7 +315,15 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
 
-          if (subJumps.length > 0) {
+          let isPromotionIn8x8 = false;
+          if (is8x8) {
+             if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                 (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+                 isPromotionIn8x8 = true;
+             }
+          }
+
+          if (subJumps.length > 0 && !isPromotionIn8x8) {
              jumps.push(...subJumps);
           } else {
              jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
