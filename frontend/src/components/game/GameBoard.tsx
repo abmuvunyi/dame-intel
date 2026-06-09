@@ -49,7 +49,7 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(false);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -136,6 +136,15 @@ export default function GameBoard() {
       newSocket.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    // When board size changes, auto-update the forced majority capture rule to match variants
+    if (boardSize === 10) {
+      setForceMajorityCapture(true);
+    } else if (boardSize === 8) {
+      setForceMajorityCapture(false);
+    }
+  }, [boardSize]);
 
   const handleFindMatch = () => {
     if (socket) {
