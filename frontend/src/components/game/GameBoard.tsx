@@ -237,7 +237,11 @@ export default function GameBoard() {
                Board Size:
                <select
                   value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  onChange={e => {
+                     const size = parseInt(e.target.value);
+                     setBoardSize(size);
+                     setForceMajorityCapture(size === 10);
+                  }}
                   className="ml-2 border rounded p-1 text-sm bg-white"
                >
                  <option value={8}>8x8 (Standard)</option>
@@ -347,9 +351,13 @@ export default function GameBoard() {
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
-                if (isSelected) squareBg = 'bg-yellow-400';
-                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]'; // Chess.com style colors
+                if (isSelected) squareBg = 'bg-yellow-400 opacity-80';
+
+                // We still want the square background color but maybe add a circle to indicate legal move
+                // However, the class structure here is on the container. We'll use a pseudo-element or just an inner div for dot later,
+                // but let's just make the square bg look like a valid move for now.
+                if (isHighlighted && !isSelected) squareBg = isDarkSquare ? 'bg-[#769656] after:content-[""] after:w-6 after:h-6 after:bg-black after:opacity-20 after:rounded-full after:absolute' : 'bg-[#eeeed2] after:content-[""] after:w-6 after:h-6 after:bg-black after:opacity-20 after:rounded-full after:absolute';
 
                 // Dynamically adjust sizes for 10x10 boards so they don't break the layout
                 const is10x10 = board.length === 10;
