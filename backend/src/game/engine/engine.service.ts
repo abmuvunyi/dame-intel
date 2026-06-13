@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const defaultBoardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: defaultBoardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (defaultBoardSize === 10 ? true : false)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -168,7 +169,7 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
@@ -198,12 +199,21 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
+
+    // Stop multi-jump sequence immediately if a man promotes to a king in 8x8 rules
+    if (this.rules.boardSize === 8 && piece.type === PieceType.MAN && capturedSoFar.length > 0) {
+        const promoRow = piece.color === PieceColor.LIGHT ? 0 : this.rules.boardSize - 1;
+        if (currentPos.row === promoRow) {
+            return jumps;
+        }
+    }
+
     const dirs = [
       { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -267,8 +277,12 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
-      for (const dir of dirs) {
+      // Men captures and 8x8 King captures
+      const allowedDirs = (piece.type === PieceType.MAN && this.rules.boardSize === 8)
+        ? dirs.filter(d => piece.color === PieceColor.LIGHT ? d.dr === -1 : d.dr === 1)
+        : dirs;
+
+      for (const dir of allowedDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;

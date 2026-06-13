@@ -49,7 +49,12 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [forceMajorityCapture, setForceMajorityCapture] = useState(false);
+
+  useEffect(() => {
+    // Default forceMajorityCapture for 8x8 is false, for 10x10 is true
+    setForceMajorityCapture(boardSize === 10);
+  }, [boardSize]);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
