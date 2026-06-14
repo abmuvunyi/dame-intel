@@ -169,7 +169,6 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -179,6 +178,10 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+
+          if (this.rules.boardSize === 8) {
+              break; // 8x8 kings only move 1 square
+          }
           step++;
         }
       }
@@ -204,7 +207,7 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      // King captures
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -245,11 +248,6 @@ export class DraughtsEngine {
             this.board[currentPos.row][currentPos.col] = null;
             this.board[landR][landC] = piece;
 
-            // In international draughts, pieces captured during a sequence are removed ONLY
-            // after the entire sequence finishes, preventing "jumping over the same piece twice"
-            // but allowing crossing the same empty square twice.
-            // We've satisfied this by checking `alreadyCaptured` above.
-
             const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
             // Revert
@@ -261,6 +259,14 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+
+            if (this.rules.boardSize === 8) {
+               break; // 8x8 kings only jump to immediate square after capture
+            }
+          }
+
+          if (this.rules.boardSize === 8 && opponentFoundPos === null) {
+              break; // 8x8 kings only search 1 square ahead for an opponent
           }
 
           step++;
@@ -268,7 +274,10 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // In 10x10, men can capture backward (all 4 directions). In 8x8, only forward.
+      const captureDirs = this.rules.boardSize === 10 ? dirs : this.getMoveDirections(piece);
+
+      for (const dir of captureDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +297,15 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+
+          // In 8x8 standard draughts, a man stops multi-jumping immediately upon hitting the promotion row.
+          const promotesThisJump = piece.type === PieceType.MAN && this.rules.boardSize === 8 &&
+                ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1));
+
+          if (!promotesThisJump) {
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
