@@ -225,74 +225,80 @@ export default function GameBoard() {
 
   if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
+      <div className="flex flex-col items-center justify-center h-full w-full space-y-6">
+        <h1 className="text-4xl font-bold text-white tracking-tight">Play Draughts</h1>
+        <p className="text-gray-300">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
+        <div className="flex flex-col md:flex-row gap-6 w-full max-w-4xl">
+          {/* Settings Panel */}
+          <div className="flex-1 bg-[#262421] p-6 rounded-lg shadow-xl border border-white/10 flex flex-col space-y-5">
+            <h4 className="text-lg font-bold text-white">Game Settings</h4>
 
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-               Board Size:
-               <select
-                  value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
-                  className="ml-2 border rounded p-1 text-sm bg-white"
-               >
-                 <option value={8}>8x8 (Standard)</option>
-                 <option value={10}>10x10 (International)</option>
-               </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
-            </label>
+            <div className="flex flex-col space-y-4">
+              <label className="text-sm flex flex-col text-gray-300 gap-1">
+                 Board Variant:
+                 <select
+                    value={boardSize}
+                    onChange={e => setBoardSize(parseInt(e.target.value))}
+                    className="border border-white/20 rounded p-2 text-sm bg-[#302e2b] text-white focus:outline-none focus:border-green-500"
+                 >
+                   <option value={8}>8x8 (Standard)</option>
+                   <option value={10}>10x10 (International)</option>
+                 </select>
+              </label>
+              <label className="text-sm flex items-center gap-3 text-gray-300 cursor-pointer p-2 bg-[#302e2b] border border-white/10 rounded">
+                 <input
+                    type="checkbox"
+                    checked={forceMajorityCapture}
+                    onChange={e => setForceMajorityCapture(e.target.checked)}
+                    className="w-4 h-4 accent-green-500"
+                 />
+                 Force Majority Capture
+              </label>
+            </div>
+
+            <button
+              onClick={handleFindMatch}
+              className="w-full px-6 py-4 bg-green-600 text-white text-lg font-bold rounded shadow-lg hover:bg-green-500 transition-colors"
+            >
+              {tournamentIdToJoin ? 'Join Tournament Match' : 'Play Online'}
+            </button>
           </div>
 
-          <button
-            onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
-          </button>
+          {/* AI Panel */}
+          <div className="flex-1 bg-[#262421] p-6 rounded-lg shadow-xl border border-white/10 flex flex-col space-y-5">
+             <h4 className="text-lg font-bold text-white">Play vs Computer</h4>
 
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
-              >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
-              </button>
-            ))}
+             <div className="grid grid-cols-2 gap-3 flex-1">
+              {[1, 2, 3, 4, 5, 6, 7].map(level => (
+                <button
+                  key={level}
+                  onClick={() => handlePlayAI(level)}
+                  className={`w-full px-3 py-3 text-white rounded font-bold shadow transition-colors text-sm ${level > 4 ? 'bg-red-800/80 hover:bg-red-700 col-span-2' : 'bg-white/10 hover:bg-white/20'}`}
+                >
+                  Level {level} {level === 7 ? '(3500+)' : ''}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         {activeGames.length > 0 && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
-            <ul className="space-y-2">
+          <div className="w-full max-w-4xl bg-[#262421] p-6 rounded-lg shadow-xl border border-white/10 mt-6">
+            <h3 className="text-xl font-bold mb-4 text-white">Watch Live Games</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                   <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                <div key={i} className="flex justify-between items-center bg-[#302e2b] p-4 rounded border border-white/5">
+                   <span className="font-semibold text-gray-200 truncate pr-2">{game.player1} vs {game.player2}</span>
                    <button
                      onClick={() => handleWatchGame(game.roomId)}
-                     className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                     className="px-4 py-2 bg-white/10 text-white rounded font-bold text-sm hover:bg-white/20 whitespace-nowrap transition-colors"
                    >
-                     Watch ({game.spectatorsCount} 👀)
+                     Watch ({game.spectatorsCount})
                    </button>
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         )}
 
@@ -304,77 +310,68 @@ export default function GameBoard() {
   const validDestinations = selectedPos ? legalMoves.filter(m => m.from.row === selectedPos.row && m.from.col === selectedPos.col).map(m => `${m.to.row},${m.to.col}`) : [];
 
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col md:flex-row justify-center py-6 gap-6 w-full max-w-7xl mx-auto px-2 md:px-6">
 
       {/* Board Column */}
-      <div className="flex flex-col items-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
-        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
-          <span>{spectatorCount} Spectator(s)</span>
+      <div className="flex flex-col items-center flex-1">
+
+        {/* Opponent Info Area (Top) */}
+        <div className="w-full max-w-2xl flex justify-between items-center mb-2 px-2">
+           <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-600 rounded-sm flex items-center justify-center text-xl shadow-md border border-white/10">🤖</div>
+              <span className="font-bold text-gray-200">Opponent</span>
+           </div>
+           {/* Placeholder timer */}
+           <div className="bg-[#262421] text-gray-200 font-mono text-xl py-1 px-3 rounded shadow-inner">10:00</div>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
-          {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
-        </p>
 
-        {myColor && !status.includes('Game Over') && (
-          <div className="flex gap-4">
-            <button onClick={handleOfferDraw} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-sm font-semibold transition">
-              Offer Draw
-            </button>
-            <button onClick={handleResign} className="px-4 py-2 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-sm font-semibold transition">
-              Resign
-            </button>
-          </div>
-        )}
-
-        {drawOfferPending && (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded relative shadow-md mt-2">
-            <p className="font-bold">Draw Offered</p>
-            <p className="text-sm">Your opponent has offered a draw.</p>
-            <div className="mt-2 flex gap-2">
-              <button onClick={handleAcceptDraw} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
-              <button onClick={handleDeclineDraw} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
-            </div>
-          </div>
-        )}
-
-        <div className="border-[6px] border-slate-800 p-1 bg-slate-200 shadow-2xl rounded-sm">
+        {/* The Board */}
+        <div className="border-[12px] border-[#262421] bg-[#262421] shadow-2xl rounded-sm w-full max-w-2xl aspect-square flex flex-col">
           {board.map((row, r) => (
-            <div key={r} className="flex">
+            <div key={r} className="flex flex-1 w-full">
               {row.map((cell, c) => {
                 const isDarkSquare = (r + c) % 2 !== 0;
                 const isSelected = selectedPos?.row === r && selectedPos?.col === c;
                 const isHighlighted = validDestinations.includes(`${r},${c}`);
 
-                let squareBg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]'; // Traditional wooden board colors
-                if (isSelected) squareBg = 'bg-yellow-400';
-                if (isHighlighted) squareBg = 'bg-green-400 opacity-90';
-
-                // Dynamically adjust sizes for 10x10 boards so they don't break the layout
-                const is10x10 = board.length === 10;
-                const cellClass = is10x10 ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-14 h-14 sm:w-16 sm:h-16';
-                const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
-                const stackClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1' : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-                const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
+                // Chess.com style colors
+                let squareBg = isDarkSquare ? 'bg-[#769656]' : 'bg-[#eeeed2]';
+                if (isSelected) squareBg = 'bg-[#f6f669]'; // Yellowish highlight
+                if (isHighlighted) squareBg = 'bg-black/20'; // Dark dot overlay effect usually, using subtle darken here
 
                 return (
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
-                    className={`${cellClass} flex items-center justify-center ${squareBg} cursor-pointer transition-colors duration-150 relative`}
+                    className={`flex-1 flex items-center justify-center ${squareBg} cursor-pointer relative`}
                   >
+                     {/* Legal move dot indicator */}
+                     {isHighlighted && !cell && (
+                        <div className="w-1/3 h-1/3 bg-black/20 rounded-full" />
+                     )}
+
+                     {/* Capture highlight indicator */}
+                     {isHighlighted && cell && (
+                         <div className="absolute inset-0 border-4 border-black/20 rounded-full scale-90" />
+                     )}
+
                     {cell && (
                       <div className={`
-                        ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold transform transition-transform hover:scale-105
-                        ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                        ${cell.type === PieceType.KING ? kingOffset : ''}
+                        w-[85%] h-[85%] rounded-full shadow-[0_4px_6px_rgba(0,0,0,0.5)] flex items-center justify-center text-white font-bold
+                        ${cell.color === PieceColor.LIGHT ? 'bg-[#f8f8f8] border-2 border-[#e8e8e8]' : 'bg-[#2a2a2a] border-2 border-[#1a1a1a]'}
+                        relative z-10
                       `}>
-                        {/* Stacked piece visual for King */}
+                        {cell.type === PieceType.KING && (
+                           // Crown SVG for Kings
+                           <svg viewBox="0 0 24 24" className={`w-[60%] h-[60%] ${cell.color === PieceColor.LIGHT ? 'fill-black/60' : 'fill-white/80'}`}>
+                              <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/>
+                           </svg>
+                        )}
+                        {/* Shadow stack effect for King to make it look taller */}
                         {cell.type === PieceType.KING && (
                           <div className={`
-                            ${stackClass} rounded-full shadow-md
-                            ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
+                            absolute inset-0 rounded-full -z-10 translate-y-[4px] shadow-[0_4px_6px_rgba(0,0,0,0.5)]
+                            ${cell.color === PieceColor.LIGHT ? 'bg-[#d8d8d8]' : 'bg-[#1a1a1a]'}
                           `} />
                         )}
                       </div>
@@ -385,22 +382,63 @@ export default function GameBoard() {
             </div>
           ))}
         </div>
+
+        {/* Player Info Area (Bottom) */}
+        <div className="w-full max-w-2xl flex justify-between items-center mt-2 px-2">
+           <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-600 rounded-sm flex items-center justify-center text-xl shadow-md border border-white/10">👤</div>
+              <span className="font-bold text-gray-200">You</span>
+           </div>
+           {/* Placeholder timer */}
+           <div className="bg-[#262421] text-white font-mono text-xl py-1 px-3 rounded shadow-inner">10:00</div>
+        </div>
       </div>
 
-      {/* Chat Column */}
-      <div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-[600px]">
-        <div className="bg-slate-800 text-white p-4 rounded-t-lg">
-          <h3 className="font-bold">Live Chat</h3>
+      {/* Side Panel (Chat & Controls) */}
+      <div className="w-full md:w-80 flex flex-col bg-[#262421] rounded-lg shadow-xl border border-white/5 h-[600px] md:h-auto overflow-hidden">
+
+        {/* Status / Controls Tab */}
+        <div className="bg-[#21201d] p-4 flex flex-col items-center justify-center border-b border-white/5 space-y-3">
+          <p className="text-sm font-semibold text-gray-300 text-center">{status}</p>
+          <p className="text-lg font-bold text-white text-center">
+            {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : "Waiting for opponent...")}
+          </p>
+
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+             <span>👁️ {spectatorCount} Spectators</span>
+          </div>
+
+          {myColor && !status.includes('Game Over') && (
+            <div className="flex gap-2 w-full mt-2">
+              <button onClick={handleOfferDraw} className="flex-1 py-2 bg-white/10 text-gray-200 rounded font-bold hover:bg-white/20 text-sm transition">
+                ½ Draw
+              </button>
+              <button onClick={handleResign} className="flex-1 py-2 bg-red-900/50 text-red-200 rounded font-bold hover:bg-red-800/80 text-sm transition">
+                🏳️ Resign
+              </button>
+            </div>
+          )}
+
+          {drawOfferPending && (
+            <div className="bg-yellow-900/30 border border-yellow-700/50 p-3 rounded w-full">
+              <p className="text-sm font-bold text-yellow-500 mb-2">Draw Offered</p>
+              <div className="flex gap-2">
+                <button onClick={handleAcceptDraw} className="flex-1 bg-green-700 hover:bg-green-600 text-white font-bold py-1 px-2 rounded text-xs transition">Accept</button>
+                <button onClick={handleDeclineDraw} className="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold py-1 px-2 rounded text-xs transition">Decline</button>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+        {/* Chat Area */}
+        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#262421]">
           {chatMessages.length === 0 ? (
-             <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
+             <p className="text-center text-gray-500 text-sm mt-10">No messages yet.</p>
           ) : (
             chatMessages.map((msg, i) => (
               <div key={i} className="flex flex-col">
-                <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                <span className="text-xs font-semibold text-gray-400">{msg.sender}</span>
+                <span className="bg-[#302e2b] text-gray-200 p-2 rounded shadow-sm text-sm border border-white/5 inline-block w-fit max-w-[90%] break-words">
                   {msg.message}
                 </span>
               </div>
@@ -408,18 +446,18 @@ export default function GameBoard() {
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+        <div className="p-3 border-t border-white/5 bg-[#21201d]">
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <input
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               placeholder="Type a message..."
-              className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 text-sm border border-white/10 rounded bg-[#302e2b] text-white px-3 py-2 focus:outline-none focus:border-green-500"
             />
             <button
               type="submit"
-              className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700 transition"
+              className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-green-500 transition"
             >
               Send
             </button>
