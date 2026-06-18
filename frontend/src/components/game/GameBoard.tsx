@@ -237,7 +237,12 @@ export default function GameBoard() {
                Board Size:
                <select
                   value={boardSize}
-                  onChange={e => setBoardSize(parseInt(e.target.value))}
+                  onChange={e => {
+                     const newSize = parseInt(e.target.value);
+                     setBoardSize(newSize);
+                     if (newSize === 10) setForceMajorityCapture(true);
+                     if (newSize === 8) setForceMajorityCapture(false);
+                  }}
                   className="ml-2 border rounded p-1 text-sm bg-white"
                >
                  <option value={8}>8x8 (Standard)</option>

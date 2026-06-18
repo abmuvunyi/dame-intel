@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : boardSize === 10
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -155,10 +156,17 @@ export class DraughtsEngine {
     return r >= 0 && r < size && c >= 0 && c < size;
   }
 
-  private getMoveDirections(piece: Piece): { dr: number, dc: number }[] {
+  private getMoveDirections(piece: Piece, isCapture: boolean = false): { dr: number, dc: number }[] {
     if (piece.type === PieceType.KING) {
       return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
     }
+
+    // Men capturing directions depending on the board size
+    if (isCapture && this.rules.boardSize === 10) {
+      // In International draughts, men can capture backwards
+      return [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }];
+    }
+
     // Men: Light moves UP (-1), Dark moves DOWN (+1)
     const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
     return [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
@@ -198,10 +206,7 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
-      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
-    ];
+    const dirs = this.getMoveDirections(piece, true);
 
     if (piece.type === PieceType.KING) {
       // Flying King captures
@@ -288,7 +293,16 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+
+          // In standard 8x8 draughts, a man ends its turn immediately upon promotion to a king
+          // even if a further jump is possible as a king.
+          const isStandard8x8Promotion = this.rules.boardSize === 8 && piece.type === PieceType.MAN &&
+               ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1));
+
+          if (!isStandard8x8Promotion) {
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
