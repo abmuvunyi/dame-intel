@@ -168,8 +168,8 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // 10x10 Kings can fly (slide across empty diagonals)
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -183,6 +183,7 @@ export class DraughtsEngine {
         }
       }
     } else {
+      // 8x8 Kings or Men (both only move 1 step)
       for (const dir of dirs) {
         const nr = pos.row + dir.dr;
         const nc = pos.col + dir.dc;
@@ -198,13 +199,19 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
+    let dirs = [
       { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
-      // Flying King captures
+    if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+      // 8x8 Men can only capture forwards
+      const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+      dirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+    }
+
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Flying King captures (10x10)
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -248,7 +255,6 @@ export class DraughtsEngine {
             // In international draughts, pieces captured during a sequence are removed ONLY
             // after the entire sequence finishes, preventing "jumping over the same piece twice"
             // but allowing crossing the same empty square twice.
-            // We've satisfied this by checking `alreadyCaptured` above.
 
             const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
 
@@ -267,7 +273,7 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
+      // Men captures and 8x8 King captures (short range jump)
       for (const dir of dirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
@@ -288,7 +294,19 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+
+          // In 8x8 standard draughts, if a man reaches the kings row, it promotes to a king and the turn ends immediately
+          let endsTurnDueToPromotion = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === 7)) {
+              endsTurnDueToPromotion = true;
+            }
+          }
+
+          if (!endsTurnDueToPromotion) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
