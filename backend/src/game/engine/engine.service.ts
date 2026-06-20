@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (boardSize === 10)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -179,6 +180,9 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+          if (this.rules.boardSize === 8) {
+            break; // Standard kings only move 1 square
+          }
           step++;
         }
       }
@@ -261,6 +265,14 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+
+            if (this.rules.boardSize === 8) {
+              break; // Standard kings only jump 1 square and land immediately
+            }
+          }
+
+          if (this.rules.boardSize === 8 && opponentFoundPos === null && step > 1) {
+             break; // Standard kings can't fly looking for an opponent
           }
 
           step++;
@@ -268,7 +280,14 @@ export class DraughtsEngine {
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      // Filter directions if 8x8 standard rules (only forward jumps allowed for men)
+      let validDirs = dirs;
+      if (this.rules.boardSize === 8) {
+        const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+        validDirs = dirs.filter(d => d.dr === forward);
+      }
+
+      for (const dir of validDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +307,18 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // Check if promoted mid-sequence
+          let subJumps: Move[] = [];
+          let promoted = false;
+          if (this.rules.boardSize === 8) {
+             if ((piece.color === PieceColor.LIGHT && landR === 0) || (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+                 promoted = true;
+             }
+          }
+
+          if (!promoted) {
+             subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
