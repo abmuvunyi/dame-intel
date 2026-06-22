@@ -12,6 +12,19 @@ describe('DraughtsEngine', () => {
     expect(engine).toBeDefined();
   });
 
+  it('should default to forceMajorityCapture=false for 8x8', () => {
+    const rules = engine.getRules();
+    expect(rules.boardSize).toBe(8);
+    expect(rules.forceMajorityCapture).toBe(false);
+  });
+
+  it('should default to forceMajorityCapture=true for 10x10', () => {
+    const engine10 = new DraughtsEngine({ boardSize: 10 });
+    const rules = engine10.getRules();
+    expect(rules.boardSize).toBe(10);
+    expect(rules.forceMajorityCapture).toBe(true);
+  });
+
   it('should initialize with correct pieces', () => {
     const board = engine.getBoard();
 
