@@ -246,7 +246,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
+    const boardSize = data.rules?.boardSize || 8;
+    const rules = data.rules || { boardSize, forceMajorityCapture: boardSize === 10 };
 
     const room: GameRoom = {
       roomId,
@@ -290,7 +291,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+    const boardSize = data?.rules?.boardSize || 8;
+    const rules = data?.rules || { boardSize, forceMajorityCapture: boardSize === 10 };
 
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
 
@@ -299,7 +301,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (let i = 0; i < this.waitingPlayers.length; i++) {
        const p = this.waitingPlayers[i];
        // Match if tournament ID matches, AND if the requested rulesets match
-       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
+       const rulesMatch = p.rules?.boardSize === rules.boardSize;
 
        if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
           matchIdx = i;
