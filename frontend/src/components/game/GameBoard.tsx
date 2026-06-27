@@ -49,7 +49,6 @@ export default function GameBoard() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -141,7 +140,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('joinMatchmaking', {
          tournamentId: tournamentIdToJoin,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture: boardSize === 10 }
       });
     }
   };
@@ -150,7 +149,7 @@ export default function GameBoard() {
     if (socket) {
       socket.emit('playVsAi', {
          difficulty,
-         rules: { boardSize, forceMajorityCapture }
+         rules: { boardSize, forceMajorityCapture: boardSize === 10 }
       });
     }
   };
@@ -244,15 +243,7 @@ export default function GameBoard() {
                  <option value={10}>10x10 (International)</option>
                </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-               <input
-                  type="checkbox"
-                  checked={forceMajorityCapture}
-                  onChange={e => setForceMajorityCapture(e.target.checked)}
-                  className="rounded"
-               />
-               Force Majority Capture
-            </label>
+
           </div>
 
           <button
