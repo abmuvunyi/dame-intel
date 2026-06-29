@@ -38,9 +38,10 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : (boardSize === 10)
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -168,8 +169,8 @@ export class DraughtsEngine {
     const moves: Move[] = [];
     const dirs = this.getMoveDirections(piece);
 
-    if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Kings can fly (slide across empty diagonals) in 10x10 variants
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -198,14 +199,24 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
+
+    // In 8x8 standard draughts, men can only capture forwards.
+    // In 10x10 international, men can capture backwards (all 4 directions).
+    const manDirs = this.rules.boardSize === 8
+      ? this.getMoveDirections(piece)
+      : [
+          { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+          { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+        ];
+
+    const kingDirs = [
       { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
-      // Flying King captures
-      for (const dir of dirs) {
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // Flying King captures (10x10)
+      for (const dir of kingDirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
 
@@ -267,8 +278,10 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
-      for (const dir of dirs) {
+      // Short-range captures (Men in 8x8/10x10, Kings in 8x8)
+      const dirsToUse = piece.type === PieceType.KING ? kingDirs : manDirs;
+
+      for (const dir of dirsToUse) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +301,19 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // Check if promotion happens during the jump (8x8 standard rule)
+          let promotesNow = false;
+          if (piece.type === PieceType.MAN && this.rules.boardSize === 8) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+              promotesNow = true;
+            }
+          }
+
+          let subJumps: Move[] = [];
+          if (!promotesNow) {
+            subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;

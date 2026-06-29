@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DraughtsEngine, PieceColor, PieceType } from './engine.service';
+import { DraughtsEngine, PieceColor, PieceType, GameRules } from './engine.service';
 
 describe('DraughtsEngine', () => {
   let engine: DraughtsEngine;
@@ -47,6 +47,18 @@ describe('DraughtsEngine', () => {
 
     // Turn changed
     expect(engine.getCurrentTurn()).toBe(PieceColor.DARK);
+  });
+
+  it('should initialize with correct default rules for 10x10', () => {
+      const engine10 = new DraughtsEngine({ boardSize: 10 });
+      expect(engine10.getRules().forceMajorityCapture).toBe(true);
+      expect(engine10.getBoard().length).toBe(10);
+  });
+
+  it('should initialize with correct default rules for 8x8', () => {
+      const engine8 = new DraughtsEngine({ boardSize: 8 });
+      expect(engine8.getRules().forceMajorityCapture).toBe(false);
+      expect(engine8.getBoard().length).toBe(8);
   });
 
 });
