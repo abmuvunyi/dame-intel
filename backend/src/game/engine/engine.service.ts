@@ -38,9 +38,11 @@ export class DraughtsEngine {
   private rules: GameRules;
 
   constructor(rules: Partial<GameRules> = {}) {
+    const boardSize = rules.boardSize || 8;
+    const defaultForce = boardSize === 10;
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize,
+      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : defaultForce
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -166,23 +168,38 @@ export class DraughtsEngine {
 
   private getValidNormalMovesForPiece(pos: Position, piece: Piece): Move[] {
     const moves: Move[] = [];
-    const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      const dirs = [
+        { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+        { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+      ];
+      if (this.rules.boardSize === 10) {
+        // Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // 8x8 Kings move 1 step
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          }
         }
       }
     } else {
+      const dirs = this.getMoveDirections(piece);
       for (const dir of dirs) {
         const nr = pos.row + dir.dr;
         const nc = pos.col + dir.dc;
@@ -198,12 +215,34 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
-      { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
-    ];
+    const is10x10 = this.rules.boardSize === 10;
 
+    if (!is10x10 && piece.type === PieceType.MAN && currentPos !== start) {
+       const promotionRow = piece.color === PieceColor.LIGHT ? 0 : this.rules.boardSize - 1;
+       if (currentPos.row === promotionRow) {
+           return [];
+       }
+    }
+
+    let dirs: {dr: number, dc: number}[] = [];
     if (piece.type === PieceType.KING) {
+      dirs = [
+        { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+        { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+      ];
+    } else {
+      if (is10x10) {
+        dirs = [
+          { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
+          { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+        ];
+      } else {
+        const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+        dirs = [{ dr: forward, dc: -1 }, { dr: forward, dc: 1 }];
+      }
+    }
+
+    if (piece.type === PieceType.KING && is10x10) {
       // Flying King captures
       for (const dir of dirs) {
         let step = 1;
@@ -267,7 +306,7 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
+      // Men captures and 8x8 King captures
       for (const dir of dirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
