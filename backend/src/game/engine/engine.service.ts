@@ -29,7 +29,6 @@ export interface Move {
 
 export interface GameRules {
   boardSize: number; // 8 or 10
-  forceMajorityCapture: boolean;
 }
 
 export class DraughtsEngine {
@@ -39,8 +38,7 @@ export class DraughtsEngine {
 
   constructor(rules: Partial<GameRules> = {}) {
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: rules.boardSize || 8
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -134,8 +132,8 @@ export class DraughtsEngine {
 
     // Forced capture rule: if any jump is possible, only jumps are legal
     if (jumps.length > 0) {
-        if (this.rules.forceMajorityCapture) {
-            // Find the maximum number of captures in any sequence
+        if (this.rules.boardSize === 10) {
+            // International rules: Find the maximum number of captures in any sequence
             let maxCaptures = 0;
             for (const jump of jumps) {
                 const numCaps = jump.captured ? jump.captured.length : 0;
@@ -169,7 +167,7 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
+      // Kings can fly in 10x10, but in 8x8 they only move one step
       for (const dir of dirs) {
         let step = 1;
         while (true) {
@@ -179,6 +177,9 @@ export class DraughtsEngine {
             break; // Stop sliding in this direction if off board or blocked
           }
           moves.push({ from: pos, to: { row: nr, col: nc } });
+          if (this.rules.boardSize === 8) {
+             break; // Kings only move one step in 8x8
+          }
           step++;
         }
       }
@@ -204,7 +205,7 @@ export class DraughtsEngine {
     ];
 
     if (piece.type === PieceType.KING) {
-      // Flying King captures
+      // Flying King captures (International) / Short King captures (Standard)
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -261,14 +262,27 @@ export class DraughtsEngine {
             } else {
               jumps.push({ from: start, to: { row: landR, col: landC }, captured: newCaptured });
             }
+
+            if (this.rules.boardSize === 8) {
+               break; // 8x8 kings can only land immediately behind the captured piece
+            }
           }
 
           step++;
+          if (this.rules.boardSize === 8 && opponentFoundPos === null) {
+              break; // 8x8 kings must jump over an adjacent piece
+          }
         }
       }
     } else {
       // Men captures
-      for (const dir of dirs) {
+      const forwardDirs = this.getMoveDirections(piece);
+      // In 10x10, men can capture backwards, so we use all 4 directions
+      const captureDirs = this.rules.boardSize === 10 ?
+        [{ dr: -1, dc: -1 }, { dr: -1, dc: 1 }, { dr: 1, dc: -1 }, { dr: 1, dc: 1 }] :
+        forwardDirs;
+
+      for (const dir of captureDirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
         const landR = currentPos.row + dir.dr * 2;
@@ -288,7 +302,19 @@ export class DraughtsEngine {
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          // 8x8 Standard: Immediately stop jumping if a man promotes to a king mid-jump
+          let turnEndsDueToPromotion = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+                turnEndsDueToPromotion = true;
+            }
+          }
+
+          let subJumps: Move[] = [];
+          if (!turnEndsDueToPromotion) {
+              subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
