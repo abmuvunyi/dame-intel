@@ -29,7 +29,6 @@ export interface Move {
 
 export interface GameRules {
   boardSize: number; // 8 or 10
-  forceMajorityCapture: boolean;
 }
 
 export class DraughtsEngine {
@@ -39,8 +38,7 @@ export class DraughtsEngine {
 
   constructor(rules: Partial<GameRules> = {}) {
     this.rules = {
-      boardSize: rules.boardSize || 8,
-      forceMajorityCapture: rules.forceMajorityCapture !== undefined ? rules.forceMajorityCapture : true
+      boardSize: rules.boardSize || 8
     };
     this.board = this.createInitialBoard();
     this.currentTurn = PieceColor.LIGHT; // Light always starts
@@ -134,7 +132,7 @@ export class DraughtsEngine {
 
     // Forced capture rule: if any jump is possible, only jumps are legal
     if (jumps.length > 0) {
-        if (this.rules.forceMajorityCapture) {
+        if (this.rules.boardSize === 10) {
             // Find the maximum number of captures in any sequence
             let maxCaptures = 0;
             for (const jump of jumps) {
@@ -169,17 +167,29 @@ export class DraughtsEngine {
     const dirs = this.getMoveDirections(piece);
 
     if (piece.type === PieceType.KING) {
-      // Kings can fly (slide across empty diagonals)
-      for (const dir of dirs) {
-        let step = 1;
-        while (true) {
-          const nr = pos.row + dir.dr * step;
-          const nc = pos.col + dir.dc * step;
-          if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
-            break; // Stop sliding in this direction if off board or blocked
+      if (this.rules.boardSize === 10) {
+        // International Rules: Kings can fly (slide across empty diagonals)
+        for (const dir of dirs) {
+          let step = 1;
+          while (true) {
+            const nr = pos.row + dir.dr * step;
+            const nc = pos.col + dir.dc * step;
+            if (!this.isValidPos(nr, nc) || this.board[nr][nc] !== null) {
+              break; // Stop sliding in this direction if off board or blocked
+            }
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+            step++;
           }
-          moves.push({ from: pos, to: { row: nr, col: nc } });
-          step++;
+        }
+      } else {
+        // Standard 8x8 Rules: Kings move exactly 1 square diagonally like men (but in all 4 directions)
+        for (const dir of dirs) {
+          const nr = pos.row + dir.dr;
+          const nc = pos.col + dir.dc;
+
+          if (this.isValidPos(nr, nc) && this.board[nr][nc] === null) {
+            moves.push({ from: pos, to: { row: nr, col: nc } });
+          }
         }
       }
     } else {
@@ -198,13 +208,17 @@ export class DraughtsEngine {
 
   private getValidJumpsForPiece(start: Position, piece: Piece, currentPos: Position = start, capturedSoFar: Position[] = []): Move[] {
     const jumps: Move[] = [];
-    const dirs = [
+    // Men capture backwards in International Rules, but only forwards in Standard Rules.
+    const forward = piece.color === PieceColor.LIGHT ? -1 : 1;
+    const dirs = piece.type === PieceType.KING || this.rules.boardSize === 10 ? [
       { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
       { dr: 1, dc: -1 }, { dr: 1, dc: 1 }
+    ] : [
+      { dr: forward, dc: -1 }, { dr: forward, dc: 1 }
     ];
 
-    if (piece.type === PieceType.KING) {
-      // Flying King captures
+    if (piece.type === PieceType.KING && this.rules.boardSize === 10) {
+      // International Rules: Flying King captures
       for (const dir of dirs) {
         let step = 1;
         let opponentFoundPos: Position | null = null;
@@ -267,7 +281,7 @@ export class DraughtsEngine {
         }
       }
     } else {
-      // Men captures
+      // Standard 8x8 King Captures OR Men captures
       for (const dir of dirs) {
         const overR = currentPos.row + dir.dr;
         const overC = currentPos.col + dir.dc;
@@ -284,11 +298,23 @@ export class DraughtsEngine {
         if (overPiece && overPiece.color !== piece.color && landPos === null && !alreadyCaptured) {
           const newCaptured = [...capturedSoFar, { row: overR, col: overC }];
 
+          // 8x8 specific rule: If a man reaches the kings row during a capture, it promotes and the turn immediately ends.
+          let isPromotionIn8x8 = false;
+          if (this.rules.boardSize === 8 && piece.type === PieceType.MAN) {
+            if ((piece.color === PieceColor.LIGHT && landR === 0) ||
+                (piece.color === PieceColor.DARK && landR === this.rules.boardSize - 1)) {
+              isPromotionIn8x8 = true;
+            }
+          }
+
           const originalCurrent = this.board[currentPos.row][currentPos.col];
           this.board[currentPos.row][currentPos.col] = null;
           this.board[landR][landC] = piece;
 
-          const subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          let subJumps: Move[] = [];
+          if (!isPromotionIn8x8) {
+             subJumps = this.getValidJumpsForPiece(start, piece, { row: landR, col: landC }, newCaptured);
+          }
 
           this.board[currentPos.row][currentPos.col] = originalCurrent;
           this.board[landR][landC] = null;
