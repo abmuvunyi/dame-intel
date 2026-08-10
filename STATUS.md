@@ -35,16 +35,20 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 
 | Page/Component | Exists (Y/N) | Wired to real backend (Y/N) | Verified (Y/N) | Notes |
 |---|---|---|---|---|
-| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Live-verified end-to-end**: loaded with zero console errors, showed "Connected to server", started a vs-AI game on both 8x8 and 10x10, selected a piece (legal destination correctly highlighted green), executed a move, and received a real AI response move. This is a genuinely working game loop. |
-| `GameBoard.tsx` | Y | Y | Y | Confirmed via the above — not a stub. |
+| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. |
+| `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. |
+| `Board.tsx` | Y | Y | Y | **New in Phase 4.** Board rendering, orientation/flip, drag-and-drop + click-click move input, move animation. Never computes legal moves itself — only ever filters the `legalMoves` array the server sends. |
+| `MoveList.tsx` | Y | Y | Y | **New in Phase 4.** Real move history in FMJD-style square-numbering notation. |
+| `CapturedTray.tsx` | Y | Y | Y | **New in Phase 4.** Per-side captured-piece tally, derived from the actual captured piece data at the moment of capture (not guessed after the fact). |
+| `ConnectionStatus.tsx` | Y | Y | Y | **New in Phase 4.** Reflects real socket connect/disconnect events. |
 | `/login` | Y | Y (1 API call) | Y | Renders correctly, zero console errors. |
-| `/profile` | Y | Y (5 API calls) | Y | **Correction from Phase 0's static read**: unauthenticated visits client-side redirect to `/login` rather than erroring or showing broken data — this is correct auth-guard behavior, confirmed live. |
+| `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). |
 | `/puzzles` | Y | Y (1 API call) | Y | Confirmed live, renders real dynamic puzzle data, zero console errors. |
-| `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven this pass. |
-| `/analysis/[id]` | Y | Y (2 API calls) | N | Not driven live this pass (needs a real game ID). |
-| `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | **Correction from Phase 0**: this was flagged "unverified." Now live-verified — renders correctly, zero console errors, zero failed requests, correct empty state on a fresh DB. Still not linked from any nav, so a real user can't reach it without typing the URL. |
-| `Timer.tsx` (game clock component) | Y | N/A (not wired) | N | Still not imported/used anywhere. Unchanged from Phase 0. |
-| Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. |
+| `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
+| `/analysis/[id]` | Y | Y (2 API calls) | N | Not driven live this pass (needs a real game ID with saved history). |
+| `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
+| `Timer.tsx` | Y | N/A | Y | **Wired in during Phase 4** — no longer an orphaned component (Phase 0/1's flagged gap is resolved). See "Phase 4" below for the important caveat: it's a client-only cosmetic clock, not yet server-authoritative. |
+| Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in Phase 4's scope (board/game-page rebuild only). |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors.
 
@@ -208,6 +212,65 @@ shuffle-to-draw pattern at the end:
 ```
 
 Both transcripts are reproducible by running `npx jest src/game/ai/ai/ai.service.spec.ts --verbose`.
+
+## Phase 4: frontend board rebuild (2026-08-10)
+
+Read `GameBoard.tsx` (432 lines, one file doing everything) and every other frontend page fully before
+changing anything, per the brief. Decomposed the board into `Board.tsx` / `MoveList.tsx` /
+`CapturedTray.tsx` / `ConnectionStatus.tsx`, kept `GameBoard.tsx` as a thinner orchestrator (socket
+wiring + game state only), and extracted the types it used to define inline into `frontend/src/lib/
+draughts.ts` (also fixed the one other place — `analysis/[id]/page.tsx` — that imported types from
+`GameBoard.tsx` directly). One small, justified backend touch: `game.gateway.ts`'s two `gameState`
+broadcasts now also include the move that was just applied, so the frontend can animate deterministically
+instead of diffing board states heuristically — purely additive, doesn't change any existing field.
+
+**1. Board renderer** — `Board.tsx`. Correct 8x8/10x10 rendering (cell size adapts, same visual language
+as before). **Board-flip**: auto-orients so a Dark player sees their own pieces at the bottom by default
+(this was a real, if minor, UX bug before — Dark players always saw an unflipped board), plus a manual
+"Flip Board" toggle for either side or a spectator, live-verified working (screenshots below). Legal
+moves are never computed client-side — `Board.tsx` only ever filters the server-supplied `legalMoves`
+array for highlighting/validation; the `onMove` callback just relays the player's chosen legal move
+to the socket for the server to authoritatively validate and apply.
+
+**2. Move input** — drag-and-drop implemented with plain pointer events (no new dependency; covers
+mouse and touch identically), with click-click as a genuine fallback sharing the same underlying
+`attemptMove()` path, not a separate code path. **Bug found and fixed while live-testing this**: the
+dragged piece is rendered centered on the pointer and was intercepting `elementFromPoint()` at drop
+time, so a drop always landed on nothing. Fixed by making the piece being dragged `pointer-events-none`
+while it's the one in motion. Legal-move highlighting kept from before. Animated piece movement:
+pieces are tracked with a stable client-side identity (not just a grid position) and diffed against the
+move the server just confirmed, so a moving piece's DOM node persists across the move and its position
+change animates via CSS transition; captured pieces get a fade-and-shrink exit instead of vanishing
+instantly.
+
+**3. Game page layout** — live clock display per player (see honesty caveat below), a real move list in
+FMJD-style notation (`frontend/src/lib/draughts.ts`'s `squareNumber`/`formatMove`, citing Annex 1 article
+8.2's `-`/`x` convention; simplified vs. full PDN since the engine only reports a move's final captured
+list and landing square, not each intermediate square of a multi-jump), resign/draw-offer controls
+(kept from before), a captured-pieces tray (tallied from the actual captured-piece data at the moment of
+capture, not reconstructed after the fact), and a connection-status indicator wired to real socket
+connect/disconnect events.
+
+**Clock honesty caveat**: there is no time-control data anywhere in the backend yet — "server-
+authoritative clocks" is explicitly Phase 5's job in the plan doc. Wiring in the previously-orphaned
+`Timer.tsx` as a genuine per-turn countdown (closing a gap flagged since Phase 0) satisfies the literal
+"live clock display" ask, but it's clearly commented in both files as client-only and cosmetic — it
+doesn't enforce anything and isn't backed by any server state. `onTimeout` is deliberately a no-op
+rather than a fake client-only "loss on time," since that would just be a different kind of broken.
+
+**4. Existing pages using real data** — re-checked profile/puzzles/tournaments/analysis: all make real
+`axios` calls (confirmed by grep, 16 calls total across the app pages), no mock/dummy/hardcoded data
+patterns found anywhere in `src/app` or `src/components`. No changes needed; this was already true as of
+Phase 1's live verification and still holds.
+
+**Verification**: `npx tsc --noEmit` clean, and a full **production build** (`npm run build`, not just
+the type-check) succeeds with all 9 routes generated, zero build errors. Live-verified with headless
+Chromium across 3 scenarios — 8x8 click-click, 10x10 click-click, 8x8 drag-and-drop — each playing several
+real moves against the AI, checking console errors after every move. **Zero console errors in any
+scenario.** Confirmed the full round-trip (frontend click/drag → `makeMove` socket emit → backend
+`DraughtsEngine.makeMove` validation → `gameState` broadcast with the applied move → frontend re-render
+and animation) by reading the real move notation that appeared in the move list after each interaction
+(e.g. `21-17`, `9-14`, `22-18`, `14x21` for the 8x8 game) — not just "no error was thrown."
 
 ## Repo cleanup notes (Phase 0)
 

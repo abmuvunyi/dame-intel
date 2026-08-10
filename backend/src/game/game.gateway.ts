@@ -401,10 +401,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       room.moves.push(exactLegalMove);
       const currentTurn = room.engine.getCurrentTurn();
 
-      // Broadcast updated state
+      // Broadcast updated state, including the move that was just applied so
+      // clients can animate it deterministically rather than diffing board states.
       this.server.to(roomId).emit('gameState', {
         board: room.engine.getBoard(),
         turn: currentTurn,
+        move: exactLegalMove,
       });
 
       // Send specific legal moves to players
@@ -453,6 +455,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.server.to(roomId).emit('gameState', {
             board: room.engine.getBoard(),
             turn: newTurn,
+            move: bestMove,
           });
 
           // Send legal moves back to human player
