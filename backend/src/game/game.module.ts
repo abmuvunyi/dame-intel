@@ -7,9 +7,10 @@ import { HistoryModule } from '../history/history.module';
 import { TournamentsModule } from '../tournaments/tournaments.module';
 import { AnalysisController } from './analysis.controller';
 import { AnticheatModule } from '../anticheat/anticheat.module';
+import { RatingModule } from '../rating/rating.module';
 
 @Module({
-  imports: [UsersModule, HistoryModule, TournamentsModule, AnticheatModule],
+  imports: [UsersModule, HistoryModule, TournamentsModule, AnticheatModule, RatingModule],
   providers: [DraughtsEngine, GameGateway, AiService],
   controllers: [AnalysisController]
 })

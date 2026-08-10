@@ -7,8 +7,8 @@ running the backend test suite, type-checking both apps, and **launching both se
 with a headless browser** — not just reading code. Rules engine rebuilt test-first during Phase 2
 (2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). Frontend board rebuilt
 in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks, and disconnect/reconnect
-built in Phase 5 (2026-08-10). See "How this was verified" below for exact method, and the per-phase
-sections below for each phase specifically.
+built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). See "How this was
+verified" below for exact method, and the per-phase sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -27,13 +27,16 @@ sections below for each phase specifically.
 | Tournaments | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. |
 | Puzzles | Y | Y | Y | Y | Live-verified: `/puzzles` rendered real seeded data ("Puzzle #4 - Difficulty: 1 - Find the best move for Dark") — dynamic, not hardcoded. |
 | History | Y | Y | Y | N | Not exercised live this pass (no game was completed/saved in the test session). |
+| `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. See "Phase 6" below. |
+| `rating/rating.service.ts` + entities (`PlayerRating`, `RatingHistoryEntry`) | Y | Y | Y | Y | **New in Phase 6.** Per-(variant, time control) rating pools, provisional status, rating history. 7 tests against a real in-memory sqlite DB. |
+| `GET /rating/:userId`, `GET /rating/:userId/history` | Y | Y | Y | Y | **New in Phase 6.** Live-verified against a real completed PvP game — see "Phase 6" below for the actual before/after numbers. |
 
-**Test run:** `npx jest` from `backend/` → 17 suites, 73 tests, all passing, ~1.6s (up from 51 as of
-Phase 3 — the +22 are `matchmaking.spec.ts`'s 15 pairing tests plus 7 new gateway tests for clocks/
-matchmaking-wiring/reconnect, see "Phase 5" below). `tsc --noEmit` clean across the whole backend.
-No `TODO`/`FIXME`/`not implemented`/`placeholder` markers anywhere in `backend/src`. Caveat on the
-remaining unbolded modules above is unchanged from Phase 0/1: their test coverage is still thin, mostly
-happy-path only.
+**Test run:** `npx jest` from `backend/` → 19 suites, 90 tests, all passing, ~1.8s (up from 73 as of
+Phase 5 — the +17 are `glicko2.spec.ts`'s 10 tests, including exact reproduction of the algorithm's own
+published reference example, plus `rating.service.spec.ts`'s 7 pooling/persistence tests, see "Phase 6"
+below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/`placeholder`
+markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is unchanged from
+Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
 ## Frontend (Next.js)
 
@@ -357,6 +360,69 @@ live" rather than an instant fake win. A **fresh page for the same authenticated
 **automatically** (no manual rejoin action) resynced into the game: same board, same move history, same
 clocks, board correctly still oriented for Dark. The Light player's screen then showed "Opponent
 reconnected." **Zero console errors on any of the three pages throughout.**
+
+## Phase 6: Glicko-2 rating system (2026-08-10)
+
+Checked STATUS.md and the existing `User`/`GameHistory` entities before building, per the brief. The
+existing rating system was a single flat `user.rating` field updated by a plain-ELO formula
+(`UsersService.calculateEloChange`), the same number regardless of whether you'd just played 8x8 bullet
+or 10x10 correspondence. Built all 4 items the plan asked for, as a new, additive `rating` module —
+the legacy ELO field is left alone (see below for why) rather than replaced.
+
+**1. Separate pools per variant and time control.** New `PlayerRating` entity: one row per
+`(userId, variant, timeControl)`, created lazily the first time that pool is touched, holding the
+Glicko-2 triple (`rating`, `ratingDeviation`, `volatility`) plus `gamesPlayed`. A player has up to 8
+fully independent ratings (2 variants × 4 time controls).
+
+**2. Real Glicko-2 updates, with history.** `rating/glicko2.ts` is a pure, framework-independent
+implementation of Mark Glickman's published algorithm (glicko.net/glicko/glicko2.pdf) — no I/O, all 8
+steps from the paper, same design discipline as the rules engine. **Verified against the paper's own
+worked example, not just trusted**: the paper's example (player 1500/RD 200/σ 0.06, three games against
+opponents at 1400/1550/1700 with results win/loss/loss, τ=0.5) states the answer as rating≈1464.06,
+RD≈151.52, σ≈0.05999 — my implementation reproduces those exact values. Plus 7 property tests (winning
+raises rating, losing lowers it, draws vs. equal-rated opponents are a wash, an upset win is worth more
+than a expected one, RD always shrinks after a game and grows during idle periods, symmetric results
+produce symmetric outcomes). `RatingHistoryEntry` records one row per player per completed rated game
+(rating/RD/volatility snapshot, opponent, result, timestamp) — enough for a rating-over-time graph later,
+not just the current number.
+
+**Simplification, stated plainly:** the paper's "rating period" formally can contain many games; this
+treats each individual game as its own one-opponent period, the standard adaptation for continuous
+real-time play (games arrive one at a time) rather than the batch/tournament setting Glickman's paper
+assumes. Documented in `glicko2.ts`'s module comment.
+
+**3. Provisional status.** `gamesPlayed < 20` (within the plan's "15-20" range) marks a pool
+`provisional: true` in the API response — verified directly: a pool stays provisional through 19 games
+and clears at the 20th.
+
+**4. Endpoint.** `GET /rating/:userId` → current rating/RD/volatility/provisional per pool. `GET
+/rating/:userId/history` → full history, optionally narrowed with `?variant=&timeControl=` query params.
+
+**Wired into game completion**: `game.gateway.ts`'s `handleGameOver`, in the same non-tournament
+authenticated-PvP branch that already updates the legacy ELO field, now also calls
+`ratingService.recordGameResult(...)` for the game's actual `(room.rules.variant, room.timeControl.name)`
+pool. The legacy single `user.rating` field is **left in place, not replaced** — `/rankings` and
+`/users/stats` (from the Phase 0 cleanup) already read it, and reconciling a single-number ranking page
+with 8 separate pools is a real design question (which pool should "the" leaderboard show?) better
+handled as its own follow-up than folded into this phase.
+
+**9 unit tests**: `glicko2.spec.ts` (3 reference-value tests + 7 property tests — 10 total, one file),
+`rating.service.spec.ts` (7 tests against a real in-memory sqlite database: pool creation defaults, pool
+isolation across variant/time-control, provisional threshold crossing, win/loss/draw updates both sides
+and records history correctly, history filtering by pool).
+
+### Live verification (not just tests)
+
+Registered two real users, launched both real servers, matched them into a real PvP room exactly as in
+Phase 5's verification, and had one **resign** (a real socket event, not a simulated game-over call) to
+reach a decisive result quickly. Then queried the real running server's `/rating/:userId` endpoint:
+
+- Winner: `1500 → 1662.31` rating, `RD 350 → 290.32` (more confidence after a game), `gamesPlayed: 1`,
+  `provisional: true`, pool correctly labeled `american/blitz` (the variant/time-control actually played).
+- Loser: `1500 → 1337.69` rating, same RD reduction.
+- `/rating/1/history` showed exactly one entry: `result: "win"`, `opponentUserId: 2`, matching numbers.
+
+Zero console errors on either browser throughout.
 
 ## Repo cleanup notes (Phase 0)
 
