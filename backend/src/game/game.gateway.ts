@@ -22,6 +22,7 @@ import { AnticheatService } from '../anticheat/anticheat.service';
 import { GameRules } from './engine/engine.service';
 import { SeekEntry, sweepMatches } from './matchmaking';
 import { TimeControl, TimeControlName, TIME_CONTROLS, resolveTimeControl } from './time-control';
+import { RatingService } from '../rating/rating.service';
 
 // How long a disconnected player has to reconnect before their opponent is awarded the
 // win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
@@ -77,6 +78,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly historyService: HistoryService,
     private readonly tournamentsService: TournamentsService,
     private readonly anticheatService: AnticheatService,
+    private readonly ratingService: RatingService,
   ) {}
 
   @WebSocketServer()
@@ -814,6 +816,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
               await this.usersService.updateRating(p1.id, deltaP1, p1Result);
               await this.usersService.updateRating(p2.id, deltaP2, p2Result);
             }
+
+            // Glicko-2, in its own per-(variant, time control) pool — see
+            // rating.service.ts. Kept alongside the legacy single ELO field above
+            // rather than replacing it, since /rankings and /users/stats already
+            // read that field; reconciling the two is a follow-up, not this phase.
+            const glickoResult = winner === PieceColor.LIGHT ? 'p1win' : winner === PieceColor.DARK ? 'p2win' : 'draw';
+            await this.ratingService.recordGameResult(
+              { userId: p1.id },
+              { userId: p2.id },
+              room.rules.variant ?? 'international',
+              room.timeControl.name,
+              glickoResult,
+            );
           }
        }
     } catch(err) {

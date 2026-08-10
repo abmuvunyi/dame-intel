@@ -6,6 +6,7 @@ import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
 import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
+import { RatingService } from '../rating/rating.service';
 
 // Minimal stand-in for socket.io's Server: just enough surface for the gateway's
 // `this.server.to(...).emit(...)` and `this.server.sockets.sockets.get(...).join(...)`
@@ -33,7 +34,8 @@ describe('GameGateway', () => {
         { provide: UsersService, useValue: {} },
         { provide: HistoryService, useValue: {} },
         { provide: TournamentsService, useValue: {} },
-        { provide: AnticheatService, useValue: {} }
+        { provide: AnticheatService, useValue: {} },
+        { provide: RatingService, useValue: {} },
       ],
     }).compile();
 
@@ -139,6 +141,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
         { provide: HistoryService, useValue: { saveGame: async () => {} } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
       ],
     }).compile();
 

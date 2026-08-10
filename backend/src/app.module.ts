@@ -12,6 +12,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { FriendsModule } from './friends/friends.module';
 import { AnticheatModule } from './anticheat/anticheat.module';
+import { RatingModule } from './rating/rating.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AnticheatModule } from './anticheat/anticheat.module';
     TournamentsModule,
     FriendsModule,
     AnticheatModule,
+    RatingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
