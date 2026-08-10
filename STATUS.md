@@ -5,8 +5,10 @@ Living source of truth for what's real vs. stub in dame-intel. Update this at th
 Generated during Phase 0 repo cleanup (2026-08-09). Verified during Phase 1 (2026-08-10) by actually
 running the backend test suite, type-checking both apps, and **launching both servers and driving them
 with a headless browser** — not just reading code. Rules engine rebuilt test-first during Phase 2
-(2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). See "How this was
-verified" below for exact method, and "Phase 2"/"Phase 3" below for those phases specifically.
+(2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). Frontend board rebuilt
+in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks, and disconnect/reconnect
+built in Phase 5 (2026-08-10). See "How this was verified" below for exact method, and the per-phase
+sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -17,19 +19,21 @@ verified" below for exact method, and "Phase 2"/"Phase 3" below for those phases
 | Friends | Y | Y | Y | N | Not exercised live this pass (no UI page hits it directly in the flows tested). Test coverage still just 2 tests, happy-path only. |
 | Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
 | Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. |
-| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3.** Fixed 3 spots building `GameRules` object literals that no longer matched the engine's shape, and in doing so found and fixed a real latent bug: the fallback default was hardcoded `{boardSize: 8, forceMajorityCapture: true}`, which is wrong for 8x8 (majority-capture should default false there). Now resolves defaults through the engine itself. Added 2 tests confirming a requested game actually gets the right variant's rules. |
+| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5** — see "Phase 5" below for the full breakdown. |
+| `matchmaking.ts` (rating-band seek pairing) | Y | Y | Y | Y | **New in Phase 5.** Pure, framework-independent pairing logic (same design pattern as the engine) — 15 tests. |
+| `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
 | Anticheat | Y | Y | Y | N | Not exercised live this pass. No TODO/stub markers in source. |
 | Tournaments | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. |
 | Puzzles | Y | Y | Y | Y | Live-verified: `/puzzles` rendered real seeded data ("Puzzle #4 - Difficulty: 1 - Find the best move for Dark") — dynamic, not hardcoded. |
 | History | Y | Y | Y | N | Not exercised live this pass (no game was completed/saved in the test session). |
 
-**Test run:** `npx jest` from `backend/` → 16 suites, 51 tests, all passing, ~1.6s (up from 44 as of Phase
-2 — the +7 are the AI self-play pair, the 2 gateway rules-resolution tests, and the 3 new analysis
-tests, minus consolidation). `tsc --noEmit` is fully clean again as of Phase 3 (was failing on
-`game.gateway.ts` as of Phase 2, expected and now resolved). No `TODO`/`FIXME`/`not implemented`/
-`placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
-unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
+**Test run:** `npx jest` from `backend/` → 17 suites, 73 tests, all passing, ~1.6s (up from 51 as of
+Phase 3 — the +22 are `matchmaking.spec.ts`'s 15 pairing tests plus 7 new gateway tests for clocks/
+matchmaking-wiring/reconnect, see "Phase 5" below). `tsc --noEmit` clean across the whole backend.
+No `TODO`/`FIXME`/`not implemented`/`placeholder` markers anywhere in `backend/src`. Caveat on the
+remaining unbolded modules above is unchanged from Phase 0/1: their test coverage is still thin, mostly
+happy-path only.
 
 ## Frontend (Next.js)
 
@@ -47,10 +51,12 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
 | `/analysis/[id]` | Y | Y (2 API calls) | N | Not driven live this pass (needs a real game ID with saved history). |
 | `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
-| `Timer.tsx` | Y | N/A | Y | **Wired in during Phase 4** — no longer an orphaned component (Phase 0/1's flagged gap is resolved). See "Phase 4" below for the important caveat: it's a client-only cosmetic clock, not yet server-authoritative. |
-| Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in Phase 4's scope (board/game-page rebuild only). |
+| `Timer.tsx` | Y | Y | Y | Wired in during Phase 4 (was orphaned since Phase 0); **as of Phase 5, genuinely server-authoritative** — it's fed a live-computed snapshot of the backend's real clock/turnStartedAt on every move, not a fixed cosmetic constant. See "Phase 5" below. |
+| Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in scope for Phases 4 or 5. |
+| Direct-challenge-by-user-ID UI | N | — | — | **Backend flow exists (Phase 5), no frontend UI for it yet** — no button/modal to challenge a specific friend. Scoped out: Phase 5's brief is backend real-time infrastructure; adding a challenge UI is a Phase-4-style frontend task better done as its own slice. |
 
-**Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors.
+**Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
+not just the type-check) → succeeds, all 9 routes generated, zero build errors.
 
 ## How this was verified (Phase 1 method)
 
@@ -271,6 +277,86 @@ scenario.** Confirmed the full round-trip (frontend click/drag → `makeMove` so
 `DraughtsEngine.makeMove` validation → `gameState` broadcast with the applied move → frontend re-render
 and animation) by reading the real move notation that appeared in the move list after each interaction
 (e.g. `21-17`, `9-14`, `22-18`, `14x21` for the 8x8 game) — not just "no error was thrown."
+
+## Phase 5: real-time PvP matchmaking, server clocks, disconnect/reconnect (2026-08-10)
+
+Read `game.gateway.ts` and STATUS.md fully before building, per the brief. The prior matchmaking was a
+single-pass check against whoever else happened to already be in the queue when you joined — no rating
+awareness, no time control, no periodic re-check, and disconnecting from a real PvP game triggered an
+immediate, client-side-only "you win" claim with no way to actually reconnect. Built all 5 items the
+plan asked for:
+
+**1. Seek queue with rating-band widening.** New `matchmaking.ts` — pure, framework-independent pairing
+logic (same design as the rules engine: no I/O, no `Date.now()` called internally, fully unit-testable).
+A player's acceptable rating gap starts at ±100 and widens by 50 every 5 seconds waited, capped at 1000.
+Matching requires **mutual** consent — the gap must fit within *both* players' current bands, so a
+long-waiting player can't be force-matched against someone who just joined and hasn't widened yet. Time
+control bands (`time-control.ts`): bullet (2min+1s), blitz (5min+3s), rapid (10min+5s), correspondence
+(1 day base). The gateway sweeps the queue both immediately after someone joins (so an already-waiting
+opponent matches instantly) and on a 2-second interval (so two players who are both still waiting can
+match purely from their bands widening, without either taking any new action). **15 unit tests** in
+`matchmaking.spec.ts`.
+
+**2. Match → room → engine.** Unchanged in spirit from before, refactored into a shared
+`createPvpRoom()` used by both matchmaking and accepted direct challenges — both clients get `gameStart`
+with the real board/legal-moves/clocks from a freshly-constructed `DraughtsEngine(rules)`.
+
+**3. Disconnection/reconnection.** This was the piece that didn't exist at all before. An authenticated
+player whose socket drops now gets a 60-second grace period (`DISCONNECT_GRACE_MS`): the room stays
+alive, the opponent is told via `opponentDisconnected` (not a fake win), and the seat is held open. On
+reconnect — which happens **automatically** the moment the same authenticated user's socket reconnects
+with a valid token, no client-side action required beyond what it already does — the server resyncs full
+game state (`gameResync`: board, turn, legal moves if it's their turn, full move history, clocks) and
+tells the opponent via `opponentReconnected`. If the grace period expires with no reconnect, the opponent
+is awarded the win (`gameOver` with `reason: 'abandonment'`). Anonymous (unauthenticated) players have no
+stable identity across a new socket connection, so they keep the old immediate-departure behavior — this
+is a real, documented limitation, not an oversight. vs-AI games get a shorter no-consequence version (just
+keeps the room alive briefly for a quick reload, no "opponent" to award a win to).
+
+**4. Server-authoritative clocks.** Each room tracks `clocks: {L, D}` (seconds remaining) and
+`turnStartedAt`. On every move (human or AI), the mover's actual elapsed thinking time is deducted from
+their own clock and their increment applied — never trusting anything the client reports. A `flagTimer`
+is scheduled for exactly the current player's remaining time; if it fires before their move arrives, the
+opponent wins by `flag-fall`. The frontend's `Timer.tsx` (wired in during Phase 4 as a cosmetic
+placeholder) now displays this real data — `GameBoard.tsx` computes a live-ticking snapshot from the
+server's `clocks`/`turnStartedAt` on every sync, only recomputing when that snapshot actually changes
+(not on unrelated re-renders, which would otherwise jitter the display). The display is just that — a
+display; enforcement is 100% server-side via the flag timer, exactly as required.
+
+**5. Direct challenge by user ID.** `challengePlayer({targetUserId, rules, timeControl})` looks up
+whether that user is currently online (`userIdToSocket`, maintained across all authenticated
+connections) and sends them a `challengeReceived` event; `respondToChallenge({challengeId, accept})`
+either creates a room via the same `createPvpRoom()` matchmaking uses, or notifies the challenger it was
+declined. Backend-only — see the frontend table above for why the UI for this wasn't built in this pass.
+
+**Testing note:** the first test run after this change hung on a real (non-fake) 300-second timer left
+running by the *existing* Phase 3 gateway tests, which create vs-AI rooms that now schedule a real
+flag-fall timeout — Jest doesn't exit until every timer clears, and the timer fired *after* the test run
+had already reported results ("Cannot log after tests are done"). Fixed by adding proper `afterEach`
+teardown to `game.gateway.spec.ts` that clears every room's timers — a good instance of a new feature
+exposing a pre-existing test-hygiene gap in older tests, not just needing its own tests.
+
+**7 new gateway tests** (`game.gateway.spec.ts`), using Jest fake timers to simulate the 60-second grace
+period and 300-second flag-fall without real waiting: matchmaking wired end-to-end into real rooms, clock
+initialization + flag-fall, disconnect keeps the game alive + notifies the opponent, full resync on
+reconnect under a new socket id, abandonment win after grace expires, and reconnecting *after* the grace
+period already expired correctly does nothing (no zombie resurrection).
+
+### How the reconnect flow was verified
+
+Beyond the fake-timer gateway tests above (which prove the *state machine* is correct), this was verified
+**live, end-to-end, with two real authenticated browser sessions**: registered two real users via
+`POST /auth/register`, launched both real servers, opened two Playwright browser contexts each with a
+different user's JWT already in `localStorage` (matching exactly how the app authenticates a real
+socket connection), and had both click "Play Multiplayer" — real matchmaking paired them into a real
+room. Both played real moves via the click-click interaction (`21-17`, `9-13`), confirmed in the move
+list and via a real server-computed clock increment (`5:02` after one move each, matching 300s base + 3s
+increment). Then the Dark player's **entire browser page was closed** (a real dropped connection, not a
+simulated event) — the Light player's screen correctly showed "Opponent disconnected — game is still
+live" rather than an instant fake win. A **fresh page for the same authenticated user** was opened, which
+**automatically** (no manual rejoin action) resynced into the game: same board, same move history, same
+clocks, board correctly still oriented for Dark. The Light player's screen then showed "Opponent
+reconnected." **Zero console errors on any of the three pages throughout.**
 
 ## Repo cleanup notes (Phase 0)
 

@@ -7,6 +7,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
+import { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { DraughtsEngine, PieceColor } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
@@ -19,11 +20,39 @@ import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
 
 import { GameRules } from './engine/engine.service';
+import { SeekEntry, sweepMatches } from './matchmaking';
+import { TimeControl, TimeControlName, TIME_CONTROLS, resolveTimeControl } from './time-control';
+
+// How long a disconnected player has to reconnect before their opponent is awarded the
+// win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
+const DISCONNECT_GRACE_MS = 60_000;
+// How often the matchmaking queue is re-swept for matches that only became possible
+// because someone's rating band widened with wait time (no new player needed to join).
+const MATCHMAKING_SWEEP_MS = 2_000;
+
+interface QueuedPlayer extends SeekEntry {
+  fullRules: GameRules;
+}
+
+interface PendingChallenge {
+  challengeId: string;
+  fromSocketId: string;
+  fromUserId: number;
+  toUserId: number;
+  rules: GameRules;
+  timeControl: TimeControl;
+  createdAt: number;
+}
 
 interface GameRoom {
   roomId: string;
   engine: DraughtsEngine;
   rules: GameRules;
+  timeControl: TimeControl;
+  clocks: { [PieceColor.LIGHT]: number; [PieceColor.DARK]: number }; // seconds remaining
+  turnStartedAt: number; // ms epoch the current mover's clock started running
+  flagTimer?: ReturnType<typeof setTimeout>;
+  disconnectTimers: Partial<Record<PieceColor, ReturnType<typeof setTimeout>>>;
   players: {
     [PieceColor.LIGHT]?: string; // Socket ID
     [PieceColor.DARK]?: string;  // Socket ID
@@ -40,7 +69,7 @@ interface GameRoom {
 }
 
 @WebSocketGateway({ cors: true })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly aiService: AiService,
     private readonly jwtService: JwtService,
@@ -53,10 +82,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number, rules: GameRules }[] = [];
+  private waitingPlayers: QueuedPlayer[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
+  private userIdToSocket: Map<number, string> = new Map(); // For direct challenges & reconnect
+  private userIdToRoom: Map<number, string> = new Map(); // For reconnect lookup after a fresh connection
+  private pendingChallenges: Map<string, PendingChallenge> = new Map();
+  private matchmakingInterval?: ReturnType<typeof setInterval>;
+
+  onModuleInit() {
+    this.matchmakingInterval = setInterval(() => this.runMatchmakingSweep(), MATCHMAKING_SWEEP_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.matchmakingInterval) clearInterval(this.matchmakingInterval);
+  }
 
   async handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
@@ -70,7 +111,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (user) {
           const { passwordHash, ...profile } = user;
           this.socketToUser.set(client.id, profile);
+          this.userIdToSocket.set(profile.id, client.id);
           console.log(`Authenticated user connected: ${profile.username}`);
+          this.attemptRejoin(client, profile.id);
         }
       } catch (err) {
         console.warn('Invalid token on websocket connection');
@@ -78,38 +121,156 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // Auto-rejoin: if this authenticated user has a game they were disconnected from
+  // (still within its grace period), silently restore them to it — no action required
+  // from the client beyond connecting with a valid token, exactly as it already does.
+  private attemptRejoin(client: Socket, userId: number): boolean {
+    const roomId = this.userIdToRoom.get(userId);
+    if (!roomId) return false;
+
+    const room = this.activeGames.get(roomId);
+    if (!room) {
+      this.userIdToRoom.delete(userId);
+      return false;
+    }
+
+    const color = room.playerProfiles[PieceColor.LIGHT]?.id === userId
+      ? PieceColor.LIGHT
+      : room.playerProfiles[PieceColor.DARK]?.id === userId ? PieceColor.DARK : null;
+    if (!color) return false;
+
+    // Only a genuine reconnect if that seat is actually mid-grace-period right now.
+    if (!room.disconnectTimers[color]) return false;
+
+    clearTimeout(room.disconnectTimers[color]);
+    delete room.disconnectTimers[color];
+
+    room.players[color] = client.id;
+    this.socketToRoom.set(client.id, roomId);
+    client.join(roomId);
+
+    client.emit('gameResync', {
+      roomId,
+      color,
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      legalMoves: room.engine.getCurrentTurn() === color ? room.engine.getLegalMoves() : [],
+      moves: room.moves,
+      clocks: room.clocks,
+      turnStartedAt: room.turnStartedAt,
+      timeControl: room.timeControl.name,
+    });
+
+    const opponentColor = color === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+    const opponentSocketId = room.players[opponentColor];
+    if (opponentSocketId) {
+      this.server.to(opponentSocketId).emit('opponentReconnected', { color });
+    }
+
+    return true;
+  }
+
   handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
 
-    // Remove from matchmaking queue
-    this.waitingPlayers = this.waitingPlayers.filter(p => p.socketId !== client.id);
+    this.waitingPlayers = this.waitingPlayers.filter(p => p.id !== client.id);
 
-    // Handle disconnecting from an active game
+    const profile = this.socketToUser.get(client.id);
+    if (profile && this.userIdToSocket.get(profile.id) === client.id) {
+      this.userIdToSocket.delete(profile.id);
+    }
+
     const roomId = this.socketToRoom.get(client.id);
     if (roomId) {
       const room = this.activeGames.get(roomId);
       if (room) {
-        // Find which color this player was
-        if (room.players[PieceColor.LIGHT] === client.id) {
-          room.players[PieceColor.LIGHT] = undefined;
-        } else if (room.players[PieceColor.DARK] === client.id) {
-          room.players[PieceColor.DARK] = undefined;
+        let color: PieceColor | null = null;
+        if (room.players[PieceColor.LIGHT] === client.id) color = PieceColor.LIGHT;
+        else if (room.players[PieceColor.DARK] === client.id) color = PieceColor.DARK;
+
+        if (color) {
+          this.handlePlayerLeft(roomId, room, color);
         } else {
-          // Remove from spectators
           room.spectators = room.spectators.filter(s => s !== client.id);
-        }
-
-        // Notify others
-        this.server.to(roomId).emit('playerDisconnected', { id: client.id });
-
-        // Clean up empty rooms
-        if (!room.players[PieceColor.LIGHT] && !room.players[PieceColor.DARK] && room.spectators.length === 0) {
-           this.activeGames.delete(roomId);
         }
       }
       this.socketToRoom.delete(client.id);
     }
     this.socketToUser.delete(client.id);
+  }
+
+  // A player's socket dropped. Authenticated players get a grace period to reconnect
+  // (see attemptRejoin) rather than an instant loss; anonymous players have no stable
+  // identity to reconnect with, so they fall back to leaving immediately.
+  private handlePlayerLeft(roomId: string, room: GameRoom, color: PieceColor) {
+    const opponentColor = color === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+    const userId = room.playerProfiles[color]?.id;
+
+    if (!userId) {
+      // Anonymous player: no way to recognize them on reconnect.
+      room.players[color] = undefined;
+      this.server.to(roomId).emit('playerDisconnected', { color });
+      if (!room.players[PieceColor.LIGHT] && !room.players[PieceColor.DARK] && room.spectators.length === 0) {
+        this.clearRoomTimers(room);
+        this.activeGames.delete(roomId);
+      }
+      return;
+    }
+
+    if (room.aiDifficulty) {
+      // vs-AI: just keep the room alive briefly in case of a quick reload; no
+      // "opponent" to award a win to.
+      room.disconnectTimers[color] = setTimeout(() => {
+        delete room.disconnectTimers[color];
+        this.activeGames.delete(roomId);
+        this.userIdToRoom.delete(userId);
+      }, DISCONNECT_GRACE_MS);
+      return;
+    }
+
+    // Real PvP, authenticated: hold the seat open and let the opponent know, rather
+    // than declaring a winner immediately.
+    this.server.to(roomId).emit('opponentDisconnected', { color, graceMs: DISCONNECT_GRACE_MS });
+    room.disconnectTimers[color] = setTimeout(() => {
+      delete room.disconnectTimers[color];
+      const stillActive = this.activeGames.get(roomId);
+      if (stillActive) this.handleGameOver(roomId, stillActive, opponentColor, 'abandonment');
+    }, DISCONNECT_GRACE_MS);
+  }
+
+  private clearRoomTimers(room: GameRoom) {
+    if (room.flagTimer) clearTimeout(room.flagTimer);
+    for (const color of [PieceColor.LIGHT, PieceColor.DARK]) {
+      const t = room.disconnectTimers[color];
+      if (t) clearTimeout(t);
+    }
+  }
+
+  // --- Server-authoritative clocks ---
+
+  private scheduleFlagFall(roomId: string, room: GameRoom) {
+    if (room.flagTimer) clearTimeout(room.flagTimer);
+    const turn = room.engine.getCurrentTurn();
+    const ms = Math.max(0, room.clocks[turn] * 1000);
+    room.flagTimer = setTimeout(() => this.handleFlagFall(roomId), ms);
+  }
+
+  private handleFlagFall(roomId: string) {
+    const room = this.activeGames.get(roomId);
+    if (!room) return;
+    if (room.engine.isGameOver()) return; // already resolved some other way
+
+    const flaggedColor = room.engine.getCurrentTurn();
+    const winner = flaggedColor === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+    this.handleGameOver(roomId, room, winner, 'flag-fall');
+  }
+
+  // Deducts the time the mover actually spent thinking from their own clock and applies
+  // their increment. Must be called with the CURRENT (pre-switch) turn color.
+  private applyClockForMove(room: GameRoom, moverColor: PieceColor) {
+    const elapsedSeconds = (Date.now() - room.turnStartedAt) / 1000;
+    room.clocks[moverColor] = Math.max(0, room.clocks[moverColor] - elapsedSeconds) + room.timeControl.incrementSeconds;
+    room.turnStartedAt = Date.now();
   }
 
   @SubscribeMessage('getActiveGames')
@@ -141,7 +302,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: null, // Spectator has no color
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: [] // Spectators can't move
+      legalMoves: [], // Spectators can't move
+      clocks: room.clocks,
+      turnStartedAt: room.turnStartedAt,
+      timeControl: room.timeControl.name,
     });
 
     this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
@@ -179,9 +343,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!room) return;
 
     if (room.players[PieceColor.LIGHT] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.DARK);
+       this.handleGameOver(roomId, room, PieceColor.DARK, 'resignation');
     } else if (room.players[PieceColor.DARK] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.LIGHT);
+       this.handleGameOver(roomId, room, PieceColor.LIGHT, 'resignation');
     }
   }
 
@@ -216,7 +380,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Validate client is actually a player
     if (room.players[PieceColor.LIGHT] === client.id || room.players[PieceColor.DARK] === client.id) {
-       this.handleGameOver(roomId, room, 'DRAW');
+       this.handleGameOver(roomId, room, 'DRAW', 'agreement');
     }
   }
 
@@ -237,7 +401,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: Partial<GameRules> }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: Partial<GameRules>, timeControl?: string }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -251,11 +415,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // hardcoding a single-variant default here.
     const engine = new DraughtsEngine(data.rules || {});
     const rules = engine.getRules();
+    const timeControl = resolveTimeControl(data.timeControl);
 
     const room: GameRoom = {
       roomId,
       engine,
       rules,
+      timeControl,
+      clocks: { [PieceColor.LIGHT]: timeControl.baseSeconds, [PieceColor.DARK]: timeControl.baseSeconds },
+      turnStartedAt: Date.now(),
+      disconnectTimers: {},
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
@@ -271,8 +440,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.activeGames.set(roomId, room);
     this.socketToRoom.set(client.id, roomId);
 
+    const p1Profile = room.playerProfiles[PieceColor.LIGHT];
+    if (p1Profile) this.userIdToRoom.set(p1Profile.id, roomId);
+
     // Join socket.io room
     this.server.sockets.sockets.get(client.id)?.join(roomId);
+    this.scheduleFlagFall(roomId, room);
 
     // Notify player
     this.server.to(client.id).emit('gameStart', {
@@ -280,94 +453,170 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       color: PieceColor.LIGHT,
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
-      legalMoves: room.engine.getLegalMoves()
+      legalMoves: room.engine.getLegalMoves(),
+      clocks: room.clocks,
+      turnStartedAt: room.turnStartedAt,
+      timeControl: timeControl.name,
     });
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules> }) {
-    if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules>, timeControl?: string }) {
+    if (this.waitingPlayers.find(p => p.id === client.id)) return;
 
-    // Remove from existing game if any
-    const existingRoom = this.socketToRoom.get(client.id);
-    if(existingRoom) {
-      // (Optional) handle leaving cleanly
+    const fullRules = new DraughtsEngine(data?.rules || {}).getRules();
+    const timeControl = resolveTimeControl(data?.timeControl);
+    const profile = this.socketToUser.get(client.id);
+    const rating = profile?.rating ?? 1200; // anonymous players seek at the platform default
+
+    this.waitingPlayers.push({
+      id: client.id,
+      rating,
+      joinedAt: Date.now(),
+      variant: { boardSize: fullRules.boardSize, forceMajorityCapture: fullRules.forceMajorityCapture },
+      timeControl: timeControl.name,
+      tournamentId: data?.tournamentId,
+      fullRules,
+    });
+
+    client.emit('waitingForOpponent');
+    this.runMatchmakingSweep();
+  }
+
+  // Pairs up everyone currently in the queue that it can. Runs both right after a
+  // player joins (so an already-waiting opponent gets matched instantly) and on a
+  // fixed interval (so two players who are both still waiting get matched purely from
+  // their rating bands widening over time, without either of them taking any action).
+  private runMatchmakingSweep() {
+    if (this.waitingPlayers.length < 2) return;
+
+    const { pairs, unmatched } = sweepMatches(this.waitingPlayers, Date.now());
+    if (pairs.length === 0) return;
+
+    this.waitingPlayers = unmatched as QueuedPlayer[];
+    for (const [a, b] of pairs) {
+      const qa = a as QueuedPlayer;
+      const qb = b as QueuedPlayer;
+      const timeControl = TIME_CONTROLS[qa.timeControl];
+      this.createPvpRoom(qa.id, qb.id, qa.fullRules, timeControl, qa.tournamentId);
+    }
+  }
+
+  // --- Direct challenges ---
+
+  @SubscribeMessage('challengePlayer')
+  handleChallengePlayer(@ConnectedSocket() client: Socket, @MessageBody() data: { targetUserId: number, rules?: Partial<GameRules>, timeControl?: string }) {
+    const fromProfile = this.socketToUser.get(client.id);
+    if (!fromProfile) {
+      client.emit('challengeFailed', { reason: 'You must be logged in to challenge a player.' });
+      return;
     }
 
-    // Resolve to the engine's variant-correct defaults, same reasoning as playVsAi above.
-    const rules = new DraughtsEngine(data?.rules || {}).getRules();
-
-    this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
-
-    // Look for a match
-    let matchIdx = -1;
-    for (let i = 0; i < this.waitingPlayers.length; i++) {
-       const p = this.waitingPlayers[i];
-       // Match if tournament ID matches, AND if the requested rulesets match
-       const rulesMatch = p.rules?.boardSize === rules.boardSize && p.rules?.forceMajorityCapture === rules.forceMajorityCapture;
-
-       if (p.socketId !== client.id && p.tournamentId === data?.tournamentId && rulesMatch) {
-          matchIdx = i;
-          break;
-       }
+    const targetSocketId = this.userIdToSocket.get(data.targetUserId);
+    if (!targetSocketId) {
+      client.emit('challengeFailed', { reason: 'That player is not online.' });
+      return;
     }
 
-    if (matchIdx !== -1) {
-      // Match found
-      const opponent = this.waitingPlayers.splice(matchIdx, 1)[0];
-      const meIndex = this.waitingPlayers.findIndex(p => p.socketId === client.id);
-      const me = this.waitingPlayers.splice(meIndex, 1)[0];
+    const rules = new DraughtsEngine(data.rules || {}).getRules();
+    const timeControl = resolveTimeControl(data.timeControl);
+    const challengeId = `chal_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-      const player1Id = opponent.socketId;
-      const player2Id = me.socketId;
+    this.pendingChallenges.set(challengeId, {
+      challengeId,
+      fromSocketId: client.id,
+      fromUserId: fromProfile.id,
+      toUserId: data.targetUserId,
+      rules,
+      timeControl,
+      createdAt: Date.now(),
+    });
 
-      const roomId = data?.tournamentId ? `tourney_${data.tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    this.server.to(targetSocketId).emit('challengeReceived', {
+      challengeId,
+      fromUser: { id: fromProfile.id, username: fromProfile.username },
+      rules,
+      timeControl: timeControl.name,
+    });
+  }
 
-      const room: GameRoom = {
-        roomId,
-        engine: new DraughtsEngine(rules),
-        rules,
-        players: {
-          [PieceColor.LIGHT]: player1Id,
-          [PieceColor.DARK]: player2Id,
-        },
-        spectators: [],
-        playerProfiles: {
-          [PieceColor.LIGHT]: this.socketToUser.get(player1Id),
-          [PieceColor.DARK]: this.socketToUser.get(player2Id),
-        },
-        moves: [],
-        tournamentId: data?.tournamentId,
-      };
+  @SubscribeMessage('respondToChallenge')
+  handleRespondToChallenge(@ConnectedSocket() client: Socket, @MessageBody() data: { challengeId: string, accept: boolean }) {
+    const challenge = this.pendingChallenges.get(data.challengeId);
+    if (!challenge) return;
+    this.pendingChallenges.delete(data.challengeId);
 
-      this.activeGames.set(roomId, room);
-      this.socketToRoom.set(player1Id, roomId);
-      this.socketToRoom.set(player2Id, roomId);
+    const responderProfile = this.socketToUser.get(client.id);
+    if (!responderProfile || responderProfile.id !== challenge.toUserId) return; // not this challenge's target
 
-      // Join socket.io rooms
-      this.server.sockets.sockets.get(player1Id)?.join(roomId);
-      this.server.sockets.sockets.get(player2Id)?.join(roomId);
-
-      // Notify players
-      this.server.to(player1Id).emit('gameStart', {
-        roomId,
-        color: PieceColor.LIGHT,
-        board: room.engine.getBoard(),
-        turn: room.engine.getCurrentTurn(),
-        legalMoves: room.engine.getLegalMoves()
-      });
-
-      this.server.to(player2Id).emit('gameStart', {
-        roomId,
-        color: PieceColor.DARK,
-        board: room.engine.getBoard(),
-        turn: room.engine.getCurrentTurn(),
-        // Only send legal moves to the player whose turn it is
-        legalMoves: []
-      });
-    } else {
-      client.emit('waitingForOpponent');
+    if (!data.accept) {
+      this.server.to(challenge.fromSocketId).emit('challengeDeclined', { challengeId: data.challengeId });
+      return;
     }
+
+    // The challenger may have reconnected under a new socket id since issuing the challenge.
+    const challengerSocketId = this.userIdToSocket.get(challenge.fromUserId);
+    if (!challengerSocketId) {
+      client.emit('challengeFailed', { reason: 'The challenger is no longer online.' });
+      return;
+    }
+
+    this.createPvpRoom(challengerSocketId, client.id, challenge.rules, challenge.timeControl);
+  }
+
+  // Shared by matchmaking and accepted direct challenges.
+  private createPvpRoom(player1Id: string, player2Id: string, rules: GameRules, timeControl: TimeControl, tournamentId?: number): GameRoom {
+    const roomId = tournamentId ? `tourney_${tournamentId}_${Date.now()}` : `game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    const room: GameRoom = {
+      roomId,
+      engine: new DraughtsEngine(rules),
+      rules,
+      timeControl,
+      clocks: { [PieceColor.LIGHT]: timeControl.baseSeconds, [PieceColor.DARK]: timeControl.baseSeconds },
+      turnStartedAt: Date.now(),
+      disconnectTimers: {},
+      players: {
+        [PieceColor.LIGHT]: player1Id,
+        [PieceColor.DARK]: player2Id,
+      },
+      spectators: [],
+      playerProfiles: {
+        [PieceColor.LIGHT]: this.socketToUser.get(player1Id),
+        [PieceColor.DARK]: this.socketToUser.get(player2Id),
+      },
+      moves: [],
+      tournamentId,
+    };
+
+    this.activeGames.set(roomId, room);
+    this.socketToRoom.set(player1Id, roomId);
+    this.socketToRoom.set(player2Id, roomId);
+
+    const p1Profile = room.playerProfiles[PieceColor.LIGHT];
+    const p2Profile = room.playerProfiles[PieceColor.DARK];
+    if (p1Profile) this.userIdToRoom.set(p1Profile.id, roomId);
+    if (p2Profile) this.userIdToRoom.set(p2Profile.id, roomId);
+
+    // Join socket.io rooms
+    this.server.sockets.sockets.get(player1Id)?.join(roomId);
+    this.server.sockets.sockets.get(player2Id)?.join(roomId);
+
+    this.scheduleFlagFall(roomId, room);
+
+    const basePayload = {
+      roomId,
+      board: room.engine.getBoard(),
+      turn: room.engine.getCurrentTurn(),
+      clocks: room.clocks,
+      turnStartedAt: room.turnStartedAt,
+      timeControl: timeControl.name,
+    };
+
+    this.server.to(player1Id).emit('gameStart', { ...basePayload, color: PieceColor.LIGHT, legalMoves: room.engine.getLegalMoves() });
+    this.server.to(player2Id).emit('gameStart', { ...basePayload, color: PieceColor.DARK, legalMoves: [] });
+
+    return room;
   }
 
   @SubscribeMessage('makeMove')
@@ -399,14 +648,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (success && exactLegalMove) {
       room.moves.push(exactLegalMove);
+      this.applyClockForMove(room, color);
       const currentTurn = room.engine.getCurrentTurn();
 
       // Broadcast updated state, including the move that was just applied so
-      // clients can animate it deterministically rather than diffing board states.
+      // clients can animate it deterministically rather than diffing board states,
+      // and the current clocks so they can display an accurate live countdown.
       this.server.to(roomId).emit('gameState', {
         board: room.engine.getBoard(),
         turn: currentTurn,
         move: exactLegalMove,
+        clocks: room.clocks,
+        turnStartedAt: room.turnStartedAt,
       });
 
       // Send specific legal moves to players
@@ -425,7 +678,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const winner = room.engine.getWinner();
       if (winner) {
         this.handleGameOver(roomId, room, winner);
+      } else if (room.engine.isDraw()) {
+        this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined);
       } else {
+        this.scheduleFlagFall(roomId, room);
         // If playing against AI and it's AI's turn
         if (room.aiColor === currentTurn) {
           this.triggerAiTurn(roomId, room);
@@ -450,12 +706,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const success = room.engine.makeMove(bestMove);
         if (success) {
           room.moves.push(bestMove);
+          this.applyClockForMove(room, room.aiColor!);
           const newTurn = room.engine.getCurrentTurn();
 
           this.server.to(roomId).emit('gameState', {
             board: room.engine.getBoard(),
             turn: newTurn,
             move: bestMove,
+            clocks: room.clocks,
+            turnStartedAt: room.turnStartedAt,
           });
 
           // Send legal moves back to human player
@@ -466,9 +725,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const winner = room.engine.getWinner();
           if (winner) {
             this.handleGameOver(roomId, room, winner);
+          } else if (room.engine.isDraw()) {
+            this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined);
           } else if (newTurn === room.aiColor) {
             // Multi-jump scenarios: If the engine didn't switch turns, AI goes again
             this.triggerAiTurn(roomId, room);
+          } else {
+            this.scheduleFlagFall(roomId, room);
           }
         }
       } else {
@@ -481,8 +744,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }, 500); // 500ms delay
   }
 
-  private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW') {
-    this.server.to(roomId).emit('gameOver', { winner });
+  private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW', reason?: string) {
+    this.clearRoomTimers(room);
+    this.server.to(roomId).emit('gameOver', { winner, reason });
 
     // Save to database
     try {
@@ -555,6 +819,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch(err) {
        console.error('Failed to save game history:', err);
     }
+
+    const p1id = room.playerProfiles[PieceColor.LIGHT]?.id;
+    const p2id = room.playerProfiles[PieceColor.DARK]?.id;
+    if (p1id && this.userIdToRoom.get(p1id) === roomId) this.userIdToRoom.delete(p1id);
+    if (p2id && this.userIdToRoom.get(p2id) === roomId) this.userIdToRoom.delete(p2id);
 
     this.activeGames.delete(roomId);
   }

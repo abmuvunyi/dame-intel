@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react';
 
-// Client-only countdown display. There is no server-side time control yet (see
-// GameBoard.tsx's COSMETIC_CLOCK_SECONDS comment / STATUS.md Phase 4 notes) — this
-// component doesn't know or care where its time comes from, so it'll work unchanged
-// once a real server-authoritative clock (Phase 5) starts feeding it.
+// Display-only countdown. As of Phase 5 the seconds it's fed (`initialTime`) come
+// from the server's authoritative clock (see game.gateway.ts's clocks/turnStartedAt
+// and GameBoard.tsx's displayClocks) and reset to a fresh server snapshot on every
+// move — but this component still doesn't know or enforce anything on its own; the
+// server's own flag-fall timer is what actually ends the game on timeout, not this.
 interface TimerProps {
   initialTime: number; // in seconds
   isActive: boolean;
