@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { BoardState, Move, Piece, PieceColor } from '@/lib/draughts';
 import Board from './Board';
@@ -13,12 +13,7 @@ import Timer from './Timer';
 export { PieceColor, PieceType } from '@/lib/draughts';
 export type { Piece, BoardPosition, BoardState, Position, Move } from '@/lib/draughts';
 
-// No time-control data exists server-side yet (that's Phase 5's job — "server-
-// authoritative clocks"). This is a client-only, cosmetic per-turn countdown so the
-// UI has a clock slot ready; it does not enforce anything and can drift from any
-// future server clock. onTimeout is deliberately a no-op for the same reason: a
-// client-only "loss on time" the server doesn't know about would just be broken.
-const COSMETIC_CLOCK_SECONDS = 600;
+type Clocks = { [PieceColor.LIGHT]: number; [PieceColor.DARK]: number };
 
 export default function GameBoard() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -34,6 +29,12 @@ export default function GameBoard() {
     [PieceColor.LIGHT]: [],
     [PieceColor.DARK]: [],
   });
+  // Server-authoritative clock snapshot: `clocks` is the seconds each side had
+  // remaining as of `turnStartedAt`. The active side's clock has been ticking down in
+  // real wall-clock time ever since — see `displayClocks` below, which is the only
+  // thing recomputed on a timer; these two never get locally decremented themselves.
+  const [clocks, setClocks] = useState<Clocks>({ [PieceColor.LIGHT]: 0, [PieceColor.DARK]: 0 });
+  const [turnStartedAt, setTurnStartedAt] = useState<number>(Date.now());
   const [roomId, setRoomId] = useState<string | null>(null);
   const [activeGames, setActiveGames] = useState<any[]>([]);
   const [spectatorCount, setSpectatorCount] = useState(0);
@@ -42,10 +43,12 @@ export default function GameBoard() {
   const [drawOfferPending, setDrawOfferPending] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [manualFlip, setManualFlip] = useState(false);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  const [timeControl, setTimeControl] = useState<'bullet' | 'blitz' | 'rapid' | 'correspondence'>('blitz');
 
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
   const tIdStr = searchParams.get('tournamentId');
@@ -74,25 +77,42 @@ export default function GameBoard() {
 
     newSocket.on('waitingForOpponent', () => setStatus('Waiting in matchmaking queue...'));
 
-    newSocket.on('gameStart', (data: { roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor, legalMoves: Move[] }) => {
+    const applyGameStart = (data: {
+      roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor,
+      legalMoves: Move[], clocks: Clocks, turnStartedAt: number,
+    }, spectating: string) => {
       setRoomId(data.roomId);
       setMyColor(data.color);
       setBoard(data.board);
       setCurrentTurn(data.turn);
       setLegalMoves(data.legalMoves || []);
+      setClocks(data.clocks);
+      setTurnStartedAt(data.turnStartedAt);
       setLastMove(null); // fresh position, nothing to animate from
-      setMoveHistory([]);
       setCaptured({ [PieceColor.LIGHT]: [], [PieceColor.DARK]: [] });
       setGameOver(false);
       setManualFlip(false);
-      if (data.color) {
-        setStatus(`Game Started! You are ${data.color === PieceColor.LIGHT ? 'Light (Bottom)' : 'Dark (Top)'}.`);
-      } else {
-        setStatus('Spectating match...');
-      }
+      setOpponentDisconnected(false);
+      setStatus(data.color
+        ? `Game Started! You are ${data.color === PieceColor.LIGHT ? 'Light (Bottom)' : 'Dark (Top)'}.`
+        : spectating);
+    };
+
+    newSocket.on('gameStart', (data: any) => {
+      setMoveHistory([]);
+      applyGameStart(data, 'Spectating match...');
     });
 
-    newSocket.on('gameState', (data: { board: BoardState, turn: PieceColor, move?: Move }) => {
+    // Full-state resync after reconnecting mid-game (see game.gateway.ts's
+    // attemptRejoin — fires automatically once the socket reconnects with a valid
+    // auth token, no action needed from this client beyond having one).
+    newSocket.on('gameResync', (data: any) => {
+      setMoveHistory(data.moves || []);
+      applyGameStart(data, 'Reconnected.');
+      setStatus('Reconnected to your game.');
+    });
+
+    newSocket.on('gameState', (data: { board: BoardState, turn: PieceColor, move?: Move, clocks: Clocks, turnStartedAt: number }) => {
       setBoard(prevBoard => {
         // Tally exactly which piece (color + type) was captured by looking it up on
         // the board as it was just before this update — the only point we still have
@@ -113,6 +133,8 @@ export default function GameBoard() {
         return data.board;
       });
       setCurrentTurn(data.turn);
+      setClocks(data.clocks);
+      setTurnStartedAt(data.turnStartedAt);
       if (data.move) {
         setLastMove(data.move);
         setMoveHistory(prev => [...prev, data.move!]);
@@ -121,18 +143,34 @@ export default function GameBoard() {
 
     newSocket.on('legalMoves', (moves: Move[]) => setLegalMoves(moves));
 
-    newSocket.on('gameOver', (data: { winner: PieceColor | 'DRAW' }) => {
+    newSocket.on('gameOver', (data: { winner: PieceColor | 'DRAW', reason?: string }) => {
       setGameOver(true);
+      setOpponentDisconnected(false);
+      const reasonTxt = data.reason ? ` (${data.reason.replace('-', ' ')})` : '';
       setStatus(
         data.winner === 'DRAW'
-          ? 'Game Over! Draw.'
-          : `Game Over! Winner: ${data.winner === PieceColor.LIGHT ? 'Light' : 'Dark'}`,
+          ? `Game Over! Draw${reasonTxt}.`
+          : `Game Over! Winner: ${data.winner === PieceColor.LIGHT ? 'Light' : 'Dark'}${reasonTxt}`,
       );
     });
 
+    // Anonymous opponent left for good (no reconnect is possible without an account) —
+    // the game truly ends here, unlike the grace-period case below.
     newSocket.on('playerDisconnected', () => {
       setGameOver(true);
       setStatus('Opponent disconnected. You win!');
+    });
+
+    // Authenticated opponent's socket dropped, but they have a grace period to
+    // reconnect (see game.gateway.ts) — the game is still live, not over.
+    newSocket.on('opponentDisconnected', (data: { graceMs: number }) => {
+      setOpponentDisconnected(true);
+      setStatus(`Opponent disconnected — waiting up to ${Math.round(data.graceMs / 1000)}s for them to reconnect...`);
+    });
+
+    newSocket.on('opponentReconnected', () => {
+      setOpponentDisconnected(false);
+      setStatus('Opponent reconnected.');
     });
 
     newSocket.on('invalidMove', () => {
@@ -156,11 +194,11 @@ export default function GameBoard() {
   }, []);
 
   const handleFindMatch = () => {
-    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture } });
+    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture }, timeControl });
   };
 
   const handlePlayAI = (difficulty: number) => {
-    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture } });
+    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture }, timeControl });
   };
 
   const handleWatchGame = (roomIdToWatch: string) => {
@@ -201,6 +239,21 @@ export default function GameBoard() {
     socket?.emit('makeMove', move);
   };
 
+  // Server-authoritative display clocks: `clocks`/`turnStartedAt` are only a snapshot
+  // from the last server message, so the actively-ticking side needs the elapsed
+  // wall-clock time subtracted locally for a live display. Recomputed only when the
+  // snapshot itself changes (not on unrelated re-renders) so it doesn't jitter — see
+  // Timer.tsx, which then free-runs its own 1s countdown from this starting point.
+  // The server's flag-fall timer is what actually enforces the clock; this is display only.
+  const displayClocks = useMemo(() => {
+    const elapsed = (Date.now() - turnStartedAt) / 1000;
+    return {
+      [PieceColor.LIGHT]: Math.max(0, clocks[PieceColor.LIGHT] - (currentTurn === PieceColor.LIGHT ? elapsed : 0)),
+      [PieceColor.DARK]: Math.max(0, clocks[PieceColor.DARK] - (currentTurn === PieceColor.DARK ? elapsed : 0)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clocks, turnStartedAt, currentTurn]);
+
   if (!board) {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
@@ -230,6 +283,19 @@ export default function GameBoard() {
                 className="rounded"
               />
               Force Majority Capture
+            </label>
+            <label className="text-sm flex justify-between items-center text-gray-600">
+              Time Control:
+              <select
+                value={timeControl}
+                onChange={e => setTimeControl(e.target.value as typeof timeControl)}
+                className="ml-2 border rounded p-1 text-sm bg-white"
+              >
+                <option value="bullet">Bullet (2+1)</option>
+                <option value="blitz">Blitz (5+3)</option>
+                <option value="rapid">Rapid (10+5)</option>
+                <option value="correspondence">Correspondence</option>
+              </select>
             </label>
           </div>
 
@@ -298,10 +364,19 @@ export default function GameBoard() {
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : 'Waiting for opponent...')}
         </p>
 
+        {opponentDisconnected && (
+          <div className="bg-orange-100 border border-orange-400 text-orange-800 px-4 py-2 rounded text-sm font-medium">
+            ⚠️ Opponent disconnected — game is still live, waiting for them to reconnect.
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
-          <Timer initialTime={COSMETIC_CLOCK_SECONDS} isActive={currentTurn === PieceColor.DARK && !gameOver} />
+          {/* Server-authoritative: seconds-remaining snapshot comes from the backend
+              on every move; the flag-fall timer that actually ends the game on
+              timeout also lives there (game.gateway.ts). These just display it. */}
+          <Timer initialTime={displayClocks[PieceColor.DARK]} isActive={currentTurn === PieceColor.DARK && !gameOver} />
           <span className="text-xs text-gray-400">vs</span>
-          <Timer initialTime={COSMETIC_CLOCK_SECONDS} isActive={currentTurn === PieceColor.LIGHT && !gameOver} />
+          <Timer initialTime={displayClocks[PieceColor.LIGHT]} isActive={currentTurn === PieceColor.LIGHT && !gameOver} />
         </div>
 
         <div className="flex gap-4">
