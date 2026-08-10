@@ -2,6 +2,10 @@
 
 import { useState, useEffect } from 'react';
 
+// Client-only countdown display. There is no server-side time control yet (see
+// GameBoard.tsx's COSMETIC_CLOCK_SECONDS comment / STATUS.md Phase 4 notes) — this
+// component doesn't know or care where its time comes from, so it'll work unchanged
+// once a real server-authoritative clock (Phase 5) starts feeding it.
 interface TimerProps {
   initialTime: number; // in seconds
   isActive: boolean;

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useParams, useRouter } from 'next/navigation';
-import { PieceColor, PieceType } from '@/components/game/GameBoard';
+import { PieceColor, PieceType } from '@/lib/draughts';
 
 // Simplified local engine state just for replaying moves
 class ReplayEngine {
