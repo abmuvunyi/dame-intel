@@ -5,8 +5,8 @@ Living source of truth for what's real vs. stub in dame-intel. Update this at th
 Generated during Phase 0 repo cleanup (2026-08-09). Verified during Phase 1 (2026-08-10) by actually
 running the backend test suite, type-checking both apps, and **launching both servers and driving them
 with a headless browser** — not just reading code. Rules engine rebuilt test-first during Phase 2
-(2026-08-10). See "How this was verified" below for exact method, and "Phase 2" below for the engine
-rebuild specifically.
+(2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). See "How this was
+verified" below for exact method, and "Phase 2"/"Phase 3" below for those phases specifically.
 
 ## Backend (NestJS)
 
@@ -15,19 +15,21 @@ rebuild specifically.
 | Auth | Y | Y | Y | Y | Controller + service + JWT guard. 1 test only (shallow). Live-verified indirectly: unauthenticated `/profile` correctly redirects to `/login` client-side. |
 | Users | Y | Y | Y | Y | `GET /users/rankings` and `/users/stats` confirmed **live** — routes registered in the running Nest app, hit by the `/rankings` page with zero failed requests. Returns correct empty-state shape (no seeded rating data in a fresh DB, not an error). Core CRUD/ELO methods have 2 tests. |
 | Friends | Y | Y | Y | N | Not exercised live this pass (no UI page hits it directly in the flows tested). Test coverage still just 2 tests, happy-path only. |
-| Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). **Known gap**: `backend/src/game/game.gateway.ts` (and nowhere else) now fails `tsc --noEmit` — it builds `GameRules` object literals missing the engine's new required fields. `npx jest` still passes everywhere (ts-jest doesn't catch it), but a strict build would not. This is expected, deliberate breakage — reconnecting callers to the rebuilt engine is Phase 3's explicit job, not fixed here per the Phase 2 prompt's "do not touch any other module" instruction. |
-| Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | Live-verified: AI opponent responded with a legal-looking move immediately after the player's move, for both variants, with no errors. |
-| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | Live-verified: real Socket.IO connection ("Connected to server"), vs-AI game creation, live move exchange. Not mocked. |
+| Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
+| Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. |
+| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3.** Fixed 3 spots building `GameRules` object literals that no longer matched the engine's shape, and in doing so found and fixed a real latent bug: the fallback default was hardcoded `{boardSize: 8, forceMajorityCapture: true}`, which is wrong for 8x8 (majority-capture should default false there). Now resolves defaults through the engine itself. Added 2 tests confirming a requested game actually gets the right variant's rules. |
+| Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
 | Anticheat | Y | Y | Y | N | Not exercised live this pass. No TODO/stub markers in source. |
 | Tournaments | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. |
 | Puzzles | Y | Y | Y | Y | Live-verified: `/puzzles` rendered real seeded data ("Puzzle #4 - Difficulty: 1 - Find the best move for Dark") — dynamic, not hardcoded. |
 | History | Y | Y | Y | N | Not exercised live this pass (no game was completed/saved in the test session). |
 
-**Test run:** `npx jest` from `backend/` → 15 suites, 44 tests, all passing, ~1.4s (up from 21 tests as of
-Phase 1 — the +23 are all in the rebuilt engine spec, see "Phase 2" below). `tsc --noEmit` now fails on
-`game.gateway.ts` only, for the reason noted in the engine row above — expected until Phase 3.
-No `TODO`/`FIXME`/`not implemented`/`placeholder` markers anywhere in `backend/src`. Caveat on the other
-9 modules is unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
+**Test run:** `npx jest` from `backend/` → 16 suites, 51 tests, all passing, ~1.6s (up from 44 as of Phase
+2 — the +7 are the AI self-play pair, the 2 gateway rules-resolution tests, and the 3 new analysis
+tests, minus consolidation). `tsc --noEmit` is fully clean again as of Phase 3 (was failing on
+`game.gateway.ts` as of Phase 2, expected and now resolved). No `TODO`/`FIXME`/`not implemented`/
+`placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
+unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
 ## Frontend (Next.js)
 
@@ -141,6 +143,71 @@ easy-to-miss FMJD 4.6 behavior (a naive implementation checking only "continue s
 entirely). Combined with 4.13, this also means the 3 other landing choices along the original diagonal
 are **not legal** — only the 2-capture path is. **Engine output:** `getLegalMoves()` returns exactly one
 move, (5,4)→(4,9), capturing both. Matches.
+
+## Phase 3: reconnect backend modules to the rebuilt engine (2026-08-10)
+
+Checked the 3 modules the plan doc named, in order, without rebuilding anything that was already fine.
+
+**1. `game.gateway.ts`** — 3 spots built `GameRules` object literals by hand (`{boardSize: 8,
+forceMajorityCapture: true}`) that no longer satisfied the engine's fully-resolved `GameRules` type.
+Fixed by constructing the engine from the client's `Partial<GameRules>` and reading back
+`engine.getRules()` for the room's stored rules, rather than hand-assembling a literal. This also fixed
+a **real latent bug**: the old hardcoded fallback always set `forceMajorityCapture: true`, which is
+wrong for the 8x8 American default (should be `false`) — it just hadn't mattered before because the old
+engine ignored variant-specific defaults entirely. Added 2 tests (`game.gateway.spec.ts`) that create a
+vs-AI game for each variant and check the room's resolved rules and the emitted board size are correct.
+
+**2. `ai.service.ts`** — needed zero source changes. It already builds its search engine via
+`new DraughtsEngine(engine.getRules())` and only calls `getLegalMoves()` / `makeMove()` /
+`loadBoard()` / `isGameOver()` / `getCurrentTurn()` / `getBoard()`, none of which changed signature in
+the Phase 2 rebuild. Verified this is actually true, not just plausible, with a real AI-vs-AI self-play
+test per variant — see transcripts below.
+
+**3. `analysis.controller.ts`** — found and fixed a **real, pre-existing bug** (not caused by the Phase
+2 rebuild, just newly discovered while checking this file): `analyze()` constructed `new
+DraughtsEngine()` with no rules argument at all, silently defaulting to an 8x8 board no matter what was
+submitted. Because `getLegalMoves()`'s piece-scanning loop is itself bounded by `rules.boardSize`, any
+piece on row 8 or 9 of a submitted 10x10 board was invisible to move generation — every game analyzed
+via `/analysis` for the International variant was silently getting incomplete results. Fixed to derive
+board size (and accept an optional explicit `rules` object) from the submitted position. This file had
+zero test coverage before this pass; added 3 tests, and confirmed the regression test actually catches
+the bug by temporarily reverting the fix and watching it fail before restoring it.
+
+**Full backend suite:** 16 suites, 51 tests, all passing. `tsc --noEmit` clean across the whole backend
+— no outstanding compile errors anywhere.
+
+### AI self-play transcripts (both variants play to genuine completion, zero illegal moves)
+
+Both games were driven by the real `AiService.getBestMove()` (difficulty 1 / search depth 2 — deep
+enough to prove correctness, shallow enough to run fast) against the real `DraughtsEngine`, with a hard
+assertion after every single half-move that `engine.makeMove()` returned `true`. Neither game hit the
+300-half-move safety cap — both ended via the engine's own draw detection.
+
+**8x8 American:** 84 half-moves, ended by **threefold repetition**. Last few moves — the two sides
+settle into a repeating king shuffle once neither can make further progress, exactly the sort of
+worn-down endgame the FMJD 6.1-style repetition rule exists to catch:
+```
+79. L (0,1)->(1,0)
+80. D (4,1)->(5,2)
+81. L (1,0)->(0,1)
+82. D (5,2)->(4,1)
+83. L (0,1)->(1,0)
+84. D (4,1)->(5,2)
+```
+
+**10x10 International:** 174 half-moves, also ended by **threefold repetition**, after a much longer
+game including multiple multi-piece captures throughout (e.g. move 24, `D (2,3)->(6,3) x2`). Same
+shuffle-to-draw pattern at the end:
+```
+169. L (3,2)->(5,4)
+170. D (3,4)->(2,3)
+171. L (5,4)->(4,3)
+172. D (2,3)->(4,5)
+173. L (4,3)->(3,2)
+174. D (4,5)->(3,4)
+```
+
+Both transcripts are reproducible by running `npx jest src/game/ai/ai/ai.service.spec.ts --verbose`.
 
 ## Repo cleanup notes (Phase 0)
 

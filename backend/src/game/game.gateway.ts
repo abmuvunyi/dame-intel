@@ -53,7 +53,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private waitingPlayers: { socketId: string, tournamentId?: number, rules?: GameRules }[] = [];
+  private waitingPlayers: { socketId: string, tournamentId?: number, rules: GameRules }[] = [];
   private activeGames: Map<string, GameRoom> = new Map();
   private socketToRoom: Map<string, string> = new Map();
   private socketToUser: Map<string, any> = new Map(); // Store authenticated users
@@ -237,7 +237,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('playVsAi')
-  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: GameRules }) {
+  handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: Partial<GameRules> }) {
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -246,11 +246,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const roomId = `ai_game_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const rules = data.rules || { boardSize: 8, forceMajorityCapture: true };
+    // Let the engine apply its own variant-correct defaults (e.g. forceMajorityCapture
+    // defaults to false for 8x8 American, true for 10x10 International) rather than
+    // hardcoding a single-variant default here.
+    const engine = new DraughtsEngine(data.rules || {});
+    const rules = engine.getRules();
 
     const room: GameRoom = {
       roomId,
-      engine: new DraughtsEngine(rules),
+      engine,
       rules,
       players: {
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
@@ -281,7 +285,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: GameRules }) {
+  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules> }) {
     if (this.waitingPlayers.find(p => p.socketId === client.id)) return;
 
     // Remove from existing game if any
@@ -290,7 +294,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (Optional) handle leaving cleanly
     }
 
-    const rules = data?.rules || { boardSize: 8, forceMajorityCapture: true };
+    // Resolve to the engine's variant-correct defaults, same reasoning as playVsAi above.
+    const rules = new DraughtsEngine(data?.rules || {}).getRules();
 
     this.waitingPlayers.push({ socketId: client.id, tournamentId: data?.tournamentId, rules });
 
