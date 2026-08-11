@@ -1,135 +1,150 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { BoardState, Move, PieceColor } from '@/lib/draughts';
+import Board from '@/components/game/Board';
 
-export enum PieceColor {
-  LIGHT = 'L',
-  DARK = 'D',
-}
-export enum PieceType {
-  MAN = 'M',
-  KING = 'K',
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+interface PublicPuzzle {
+  id: number;
+  difficulty: number;
+  board: BoardState;
+  turnToMove: PieceColor;
+  boardSize: number;
+  status: string;
+  rating: number;
 }
 
 export default function PuzzlesPage() {
-  const [puzzle, setPuzzle] = useState<any>(null);
-  const [selectedPos, setSelectedPos] = useState<any>(null);
+  const [puzzle, setPuzzle] = useState<PublicPuzzle | null>(null);
+  const [board, setBoard] = useState<BoardState | null>(null);
+  const [turn, setTurn] = useState<PieceColor | null>(null);
+  const [legalMoves, setLegalMoves] = useState<Move[]>([]);
+  const [lastMove, setLastMove] = useState<Move | null>(null);
+  const [moveIndex, setMoveIndex] = useState(0);
   const [status, setStatus] = useState<string>('Loading puzzle...');
-  const [solved, setSolved] = useState<boolean>(false);
+  const [solved, setSolved] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [myRating, setMyRating] = useState<number | null>(null);
   const router = useRouter();
 
-  const loadRandomPuzzle = async () => {
+  // The server never sends the solution — only the starting position and, on
+  // request, the real legal moves at the current ply (see puzzles.service.ts's
+  // getLegalMoves). Every attempted move is validated server-side against the real
+  // rules engine, never compared against a value already sitting in the browser.
+  const loadLegalMoves = useCallback(async (puzzleId: number, atMoveIndex: number) => {
+    const res = await axios.get(`${API_URL}/puzzles/${puzzleId}/legal-moves`, { params: { moveIndex: atMoveIndex } });
+    setBoard(res.data.board);
+    setTurn(res.data.turn);
+    setLegalMoves(res.data.legalMoves);
+  }, []);
+
+  const loadRandomPuzzle = useCallback(async () => {
     try {
       setStatus('Loading puzzle...');
       setSolved(false);
-      setSelectedPos(null);
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/puzzles/random`);
+      setFailed(false);
+      setLastMove(null);
+      setMoveIndex(0);
+      const res = await axios.get<PublicPuzzle>(`${API_URL}/puzzles/random`);
       setPuzzle(res.data);
-      setStatus(`Puzzle #${res.data.id} - Difficulty: ${res.data.difficulty} - Find the best move for ${res.data.turnToMove === 'L' ? 'Light' : 'Dark'}`);
+      setStatus(`Puzzle #${res.data.id} (rating ${Math.round(res.data.rating)}) — Find the best move for ${res.data.turnToMove === 'L' ? 'Light' : 'Dark'}`);
+      await loadLegalMoves(res.data.id, 0);
     } catch (err) {
       setStatus('Failed to load puzzle.');
     }
-  };
+  }, [loadLegalMoves]);
+
+  const loadMyRating = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await axios.get(`${API_URL}/puzzles/rating`, { headers: { Authorization: `Bearer ${token}` } });
+      setMyRating(Math.round(res.data.rating));
+    } catch {
+      // not logged in / no rating yet — fine, just don't show one
+    }
+  }, []);
 
   useEffect(() => {
     loadRandomPuzzle();
-  }, []);
+    loadMyRating();
+  }, [loadRandomPuzzle, loadMyRating]);
 
-  const handleSquareClick = (r: number, c: number) => {
-    if (!puzzle || solved) return;
+  const handleMove = async (move: Move) => {
+    if (!puzzle || solved || failed) return;
+    const token = localStorage.getItem('token');
 
-    if (selectedPos) {
-      // Trying to move
-      const move = {
-        from: { row: selectedPos.row, col: selectedPos.col },
-        to: { row: r, col: c }
-      };
+    try {
+      const res = await axios.post(
+        `${API_URL}/puzzles/${puzzle.id}/attempt`,
+        { moveIndex, move },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+      );
+      const result = res.data;
 
-      const correct = puzzle.correctMove;
-      if (move.from.row === correct.from.row && move.from.col === correct.from.col &&
-          move.to.row === correct.to.row && move.to.col === correct.to.col) {
+      if (!result.correct) {
+        setFailed(true);
+        setStatus('Incorrect. That was not the best move.');
+        loadMyRating();
+        return;
+      }
 
-        // Apply move locally just to show it
-        const newBoard = JSON.parse(JSON.stringify(puzzle.board));
-        newBoard[move.to.row][move.to.col] = newBoard[move.from.row][move.from.col];
-        newBoard[move.from.row][move.from.col] = null;
+      setBoard(result.board);
+      setTurn(result.turn);
+      setLastMove(result.opponentMove ?? move); // animate whichever move the board actually last reflects
+      setMoveIndex(result.nextMoveIndex);
 
-        // Remove captured pieces if any
-        if (correct.captured) {
-           for (const cap of correct.captured) {
-              newBoard[cap.row][cap.col] = null;
-           }
-        }
-
-        setPuzzle({ ...puzzle, board: newBoard });
+      if (result.solved) {
         setSolved(true);
+        setLegalMoves([]);
         setStatus('Correct! You solved the puzzle.');
+        loadMyRating();
       } else {
-        setStatus('Incorrect move. Try again!');
-        setSelectedPos(null);
+        setStatus('Correct so far — keep going!');
+        await loadLegalMoves(puzzle.id, result.nextMoveIndex);
       }
-    } else {
-      // Select piece
-      const piece = puzzle.board[r][c];
-      if (piece && piece.color === puzzle.turnToMove) {
-        setSelectedPos({ row: r, col: c });
-      }
+    } catch (err) {
+      setStatus('Something went wrong submitting that move.');
     }
   };
 
-  if (!puzzle) return <div className="p-10 text-center">{status}</div>;
+  if (!puzzle || !board) return <div className="p-10 text-center">{status}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10">
-      <h1 className="text-3xl font-bold mb-4">Draughts Puzzles</h1>
-      <p className="text-lg mb-6">{status}</p>
-
-      <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-6">
-        {puzzle.board.map((row: any[], r: number) => (
-          <div key={r} className="flex">
-            {row.map((cell: any, c: number) => {
-              const isDarkSquare = (r + c) % 2 !== 0;
-              const isSelected = selectedPos?.row === r && selectedPos?.col === c;
-
-              let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
-              if (isSelected) squareBg = 'bg-yellow-400';
-
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  onClick={() => handleSquareClick(r, c)}
-                  className={`w-16 h-16 flex items-center justify-center ${squareBg} cursor-pointer transition-colors`}
-                >
-                  {cell && (
-                    <div className={`
-                      w-12 h-12 rounded-full shadow-md flex items-center justify-center text-white font-bold
-                      ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-4 border-slate-300 text-slate-800' : 'bg-slate-800 border-4 border-slate-900 text-slate-200'}
-                      ${cell.type === PieceType.KING ? 'ring-2 ring-yellow-500' : ''}
-                    `}>
-                      {cell.type === PieceType.KING && 'K'}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 gap-4">
+      <div className="flex items-center gap-4">
+        <h1 className="text-3xl font-bold">Draughts Puzzles</h1>
+        {myRating !== null && (
+          <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-semibold">
+            Puzzle rating: {myRating}
+          </span>
+        )}
       </div>
+      <p className="text-lg text-center max-w-lg">{status}</p>
 
-      <div className="flex gap-4">
-        {solved && (
-          <button
-            onClick={loadRandomPuzzle}
-            className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          >
+      <Board
+        board={board}
+        myColor={solved || failed ? null : puzzle.turnToMove}
+        currentTurn={solved || failed ? null : turn}
+        legalMoves={legalMoves}
+        lastMove={lastMove}
+        flipped={puzzle.turnToMove === PieceColor.DARK}
+        onMove={handleMove}
+      />
+
+      <div className="flex gap-4 mt-2">
+        {(solved || failed) && (
+          <button onClick={loadRandomPuzzle} className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700">
             Next Puzzle
           </button>
         )}
-        <button
-          onClick={() => router.push('/')}
-          className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-        >
+        <button onClick={() => router.push('/puzzles/rush')} className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
+          Puzzle Storm 🔥
+        </button>
+        <button onClick={() => router.push('/')} className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
           Back to Dashboard
         </button>
       </div>

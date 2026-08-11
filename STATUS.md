@@ -7,8 +7,9 @@ running the backend test suite, type-checking both apps, and **launching both se
 with a headless browser** — not just reading code. Rules engine rebuilt test-first during Phase 2
 (2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). Frontend board rebuilt
 in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks, and disconnect/reconnect
-built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). See "How this was
-verified" below for exact method, and the per-phase sections below for each phase specifically.
+built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). Puzzle solving,
+rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). See "How this was verified"
+below for exact method, and the per-phase sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -25,18 +26,21 @@ verified" below for exact method, and the per-phase sections below for each phas
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
 | Anticheat | Y | Y | Y | N | Not exercised live this pass. No TODO/stub markers in source. |
 | Tournaments | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. |
-| Puzzles | Y | Y | Y | Y | Live-verified: `/puzzles` rendered real seeded data ("Puzzle #4 - Difficulty: 1 - Find the best move for Dark") — dynamic, not hardcoded. |
-| History | Y | Y | Y | N | Not exercised live this pass (no game was completed/saved in the test session). |
-| `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. See "Phase 6" below. |
+| Puzzles (`puzzles.service.ts` + entity) | Y | Y | Y | Y | **Rebuilt in Phase 7 (2026-08-11)** — real engine-validated solving, its own Glicko-2 rating pool, Storm mode, and a generation pipeline. See "Phase 7" below for the full breakdown, including a real bug fixed: the previous version sent the puzzle's solution straight to the client and validated moves with a client-side coordinate comparison, meaning it could be read out of the network tab and solved without knowing draughts at all. |
+| History | Y | Y | Y | Y | **Live-verified in Phase 7**: a real PvP game's resignation correctly produced a `GameHistory` row, confirmed by querying `/history/player/:id` on the running server. |
+| `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. Reused as-is for puzzle ratings in Phase 7. See "Phase 6" below. |
 | `rating/rating.service.ts` + entities (`PlayerRating`, `RatingHistoryEntry`) | Y | Y | Y | Y | **New in Phase 6.** Per-(variant, time control) rating pools, provisional status, rating history. 7 tests against a real in-memory sqlite DB. |
 | `GET /rating/:userId`, `GET /rating/:userId/history` | Y | Y | Y | Y | **New in Phase 6.** Live-verified against a real completed PvP game — see "Phase 6" below for the actual before/after numbers. |
+| `puzzles/puzzle-generator.service.ts` | Y | Y | Y | Y | **New in Phase 7.** Scans completed games for a missed 2+-piece capture; flags `pending` candidates for review. See "Phase 7" below for the worked example. |
+| `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
+| `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 19 suites, 90 tests, all passing, ~1.8s (up from 73 as of
-Phase 5 — the +17 are `glicko2.spec.ts`'s 10 tests, including exact reproduction of the algorithm's own
-published reference example, plus `rating.service.spec.ts`'s 7 pooling/persistence tests, see "Phase 6"
-below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/`placeholder`
-markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is unchanged from
-Phase 0/1: their test coverage is still thin, mostly happy-path only.
+**Test run:** `npx jest` from `backend/` → 21 suites, 110 tests, all passing, ~1.6s (up from 90 as of
+Phase 6 — the +20 are Phase 7's `puzzles.service.spec.ts` (11), `puzzle-generator.service.spec.ts` (4),
+and `puzzle-rush.service.spec.ts` (6), minus the 1 trivial pre-existing puzzle test consolidated into the
+real suite). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+`placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
+unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
 ## Frontend (Next.js)
 
@@ -50,7 +54,8 @@ Phase 0/1: their test coverage is still thin, mostly happy-path only.
 | `ConnectionStatus.tsx` | Y | Y | Y | **New in Phase 4.** Reflects real socket connect/disconnect events. |
 | `/login` | Y | Y (1 API call) | Y | Renders correctly, zero console errors. |
 | `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). |
-| `/puzzles` | Y | Y (1 API call) | Y | Confirmed live, renders real dynamic puzzle data, zero console errors. |
+| `/puzzles` | Y | Y | Y | **Rebuilt in Phase 7.** Reuses `Board.tsx` (Phase 4) instead of its own bespoke board — real drag/click, real legal-move highlighting fetched from `GET /puzzles/:id/legal-moves`, moves validated via `POST /puzzles/:id/attempt`. Confirmed live: the solution never appears in any network response (checked every `/puzzles/*` response body across a full solve), zero console errors. |
+| `/puzzles/rush` (Puzzle Storm) | Y | Y | Y | **New in Phase 7.** Live-verified: real countdown, score, and streak UI backed by the server-authoritative rush session. |
 | `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
 | `/analysis/[id]` | Y | Y (2 API calls) | N | Not driven live this pass (needs a real game ID with saved history). |
 | `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
@@ -59,7 +64,7 @@ Phase 0/1: their test coverage is still thin, mostly happy-path only.
 | Direct-challenge-by-user-ID UI | N | — | — | **Backend flow exists (Phase 5), no frontend UI for it yet** — no button/modal to challenge a specific friend. Scoped out: Phase 5's brief is backend real-time infrastructure; adding a challenge UI is a Phase-4-style frontend task better done as its own slice. |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
-not just the type-check) → succeeds, all 9 routes generated, zero build errors.
+not just the type-check) → succeeds, all 10 routes generated (Phase 7 adds `/puzzles/rush`), zero build errors.
 
 ## How this was verified (Phase 1 method)
 
@@ -423,6 +428,99 @@ reach a decisive result quickly. Then queried the real running server's `/rating
 - `/rating/1/history` showed exactly one entry: `result: "win"`, `opponentUserId: 2`, matching numbers.
 
 Zero console errors on either browser throughout.
+
+## Phase 7: puzzle solving, rating, Storm mode, generation pipeline (2026-08-11)
+
+Checked the existing puzzles module first, per the brief. What existed was thin scaffolding with a real
+security/integrity problem, not something to extend as-is: `GET /puzzles/random` sent the puzzle's
+`correctMove` straight to the client, and the frontend compared a submitted move against it with a bare
+coordinate check — meaning a puzzle could be solved by reading the network tab, without knowing any
+draughts. That's fixed as the foundation for everything else in this phase, not a side effect of it.
+
+**1. Puzzle solving flow.** `Puzzle.solution` is now a move *sequence* (solver ply, optional scripted
+opponent reply, solver ply, ...) rather than a single move, and the server never sends it to the client
+(`PuzzlesService.toPublic()` strips it). `POST /puzzles/:id/attempt` reconstructs the position by
+replaying the solution so far on a real `DraughtsEngine`, confirms the submitted move is both legal
+there *and* matches the prescribed move — not a hardcoded comparison — then auto-plays any scripted
+opponent reply and reports whether the whole sequence is solved. A new `GET /puzzles/:id/legal-moves`
+endpoint lets the frontend reuse Phase 4's `Board.tsx` (real drag/click, real highlighting) instead of
+a separate bespoke puzzle board.
+
+**Puzzle rating** reuses `rating/glicko2.ts` from Phase 6 as-is: each solve attempt is treated as a
+one-off Glicko-2 "game" between the player's own puzzle-rating pool (`PlayerPuzzleRating`, separate from
+their game rating — solving isolated tactics and playing full games are related but different skills)
+and the puzzle's own rating, chess.com/lichess-style — a correct solve raises the player's rating and
+lowers the puzzle's (it was "too easy" for them), a wrong one does the reverse, and both use pre-attempt
+snapshots applied together, same discipline as Phase 6's player-vs-player updates. An anonymous solver's
+attempt still calibrates the puzzle's own rating (treated as a nominal 1500 opponent) but persists no
+per-user rating, mirroring how anonymous PvP already works.
+
+**Known simplification, stated plainly**: the design is fully stateless per request (the client tracks
+`moveIndex`, the server always replays from scratch) — there's no server-side "this puzzle instance is
+already solved" flag, so resubmitting the same already-correct final move twice would score it twice.
+Real puzzle platforms solve this with a session/attempt id; not built here to keep this phase's scope to
+what the brief asked for. Worth fixing before puzzles are load-bearing for competitive ranking.
+
+**2. Puzzle Rush / Storm mode.** `PuzzleRushSession` + `PuzzleRushService`: a 3-minute (chess.com Storm's
+default) server-authoritative run — `startedAt` + `durationSeconds` is what actually ends it, never a
+client-reported timer, same principle as the Phase 5 game clocks. Tracks score, streak, and best streak;
+a wrong answer resets the streak but (Storm-style, not classic-Rush-style) doesn't end the run — it moves
+straight to the next puzzle. Difficulty scales up every 3 in a row.
+
+**3. Puzzle generation pipeline.** `PuzzleGeneratorService.scanGame(gameId)` replays a completed game
+move-by-move on a real engine; at every position where the side to move had a legal capture of 2+ pieces
+available but played something else (a shorter capture, or no capture available at all wasn't the
+trigger — only "a longer one existed and wasn't taken"), it saves that position as a `status: 'pending'`
+candidate puzzle linked back to the source game via `sourceGameId`. Never auto-published. This can only
+produce a genuine finding on American-rules games (`forceMajorityCapture: false`) — under International
+rules, only the maximal capture is ever legal in the first place (Phase 2), so "available but not taken"
+can't happen the same way there; that's a real rules difference, not a generator gap.
+
+**4. Admin review.** `GET /puzzles/admin/pending`, `POST /puzzles/admin/:id/approve`,
+`POST /puzzles/admin/:id/reject` — plus `POST /puzzles/admin/generate/:gameId` and
+`/admin/generate-recent` to trigger scanning. No admin-role system exists anywhere in this codebase (no
+`isAdmin` flag on `User`) — these endpoints just require being logged in, the same bar as the rest of
+the app's authenticated actions. A real admin gate is future work, not invented here as a side effect.
+
+**21 new tests**: `puzzles.service.spec.ts` (11 — solution validation including a genuine multi-move
+replay-not-original-board test, rating adjustment direction for both success and failure, anonymous
+solving, published-only random selection, admin review flow), `puzzle-generator.service.spec.ts` (4,
+against real engine-verified move sequences — see the worked example below), `puzzle-rush.service.spec.ts`
+(6, using backdated timestamps to simulate the clock running out without waiting).
+
+### Worked example: one generated candidate puzzle from a sample game
+
+This is the exact position `puzzle-generator.service.spec.ts` verifies (and the pipeline was separately
+confirmed to run cleanly end-to-end against a real completed game on the live server — see "Live
+verification" below). Reaching it requires 18 real, engine-legal moves from the standard American 8x8
+starting position (found by search, not hand-picked, then verified against the actual engine — full move
+list is in the test file). At that position:
+
+- **Available**: Light's man at (5,6) can fly... no — American kings aren't flying; this is a man chain:
+  (5,6) captures the Dark man at (4,5), continues to capture the Dark man at (2,3), landing at (1,2) — a
+  **2-piece capture**.
+- **Also legal** (American rules don't require the longest capture): a different Light man at (6,1)
+  could instead capture just the one Dark man at (5,2), landing at (4,3) — a **1-piece capture**.
+- **What gets "played"** in this scan: the 1-piece capture — completely legal under American rules, but
+  it leaves the better 2-piece line on the table.
+
+**Generator output**: one `pending` candidate puzzle, `difficulty: 2`, `turnToMove: 'L'`,
+`solution: [{ from: (5,6), to: (1,2), captured: [(4,5), (2,3)] }]`, `sourceGameId` pointing back to the
+source game. `scanGame` correctly does **not** flag the position if the 2-piece capture is what actually
+gets played instead (a second test confirms this directly on the identical position).
+
+### Live verification
+
+Beyond the test suite: hit the running server's `GET /puzzles/random` directly and confirmed the response
+contains no `solution` field anywhere. Drove `/puzzles` with headless Chromium: loaded a real puzzle,
+picked a real legal move from the server's own `/legal-moves` response (not a scripted shortcut), got
+"Correct! You solved the puzzle." back from real server validation, and independently captured every
+`/puzzles/*` network response body across the whole session to confirm the string `"solution"` never
+appeared in any of them. Loaded `/puzzles/rush` and confirmed the live countdown/score/streak UI. Played
+a real PvP game to a real resignation, confirmed a `GameHistory` row was actually created
+(`GET /history/player/1`), then called the live `/puzzles/admin/generate-recent` endpoint against it and
+confirmed the pipeline runs cleanly against real production data (0 candidates, expected — a
+zero-move resignation has no positions to scan). Zero console errors throughout.
 
 ## Repo cleanup notes (Phase 0)
 
