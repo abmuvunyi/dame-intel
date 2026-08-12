@@ -13,6 +13,13 @@ export class TournamentPlayer {
   @ManyToOne(() => User)
   user: User;
 
-  @Column({ default: 0 })
-  score: number; // e.g. 1 point for win, 0.5 for draw, 0 for loss
+  // Real pre-existing bug, found while building Phase 8b: without an explicit `'float'`
+  // type, TypeORM's sqlite driver defaulted this column to `integer` — every drawn
+  // game (Arena or Swiss) was silently truncating both players' +0.5 to +0. Every
+  // other fractional-value entity in this codebase (PlayerRating, RatingHistoryEntry,
+  // PlayerPuzzleRating, Puzzle's own rating fields) already used `'float'` correctly;
+  // this one predates that convention and was missed. Fixed here since it directly
+  // affects the organizer-configurable points system this phase adds.
+  @Column('float', { default: 0 })
+  score: number; // e.g. 1 point for win, 0.5 for draw, 0 for loss (or organizer-configured values — see Tournament.pointsWin/pointsDraw/pointsLoss)
 }

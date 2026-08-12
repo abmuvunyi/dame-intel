@@ -9,8 +9,9 @@ with a headless browser** — not just reading code. Rules engine rebuilt test-f
 in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks, and disconnect/reconnect
 built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). Puzzle solving,
 rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). Swiss-pairing tournaments built
-in Phase 8 (2026-08-11). See "How this was verified" below for exact method, and the per-phase sections
-below for each phase specifically.
+in Phase 8 (2026-08-11). Organizer-configurable tournament settings (registration caps, game
+format/duration, points system) built in Phase 8b (2026-08-12). See "How this was verified" below for
+exact method, and the per-phase sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -30,6 +31,7 @@ below for each phase specifically.
 | Tournaments — Swiss (`tournaments.service.ts` lifecycle/pairing methods) | Y | Y | Y | Y | **New in Phase 8 (2026-08-11).** Full SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED lifecycle, automatic round generation/advancement, Buchholz tiebreak standings. See "Phase 8" below. |
 | `tournaments/swiss-pairing.ts` | Y | Y | Y | Y | **New in Phase 8.** Pure, framework-independent pairing algorithm (same pattern as `matchmaking.ts`/`glicko2.ts`) — greedy score-sorted pairing, bye to the lowest score without one yet, avoids rematches where a fresh opponent exists in the pool. 10 tests, including a full printed 8-player/3-round walkthrough. Documented limitation: no backtracking, so a small field pushed over many rounds can occasionally be forced into a rematch — see "Phase 8" below. |
 | `SwissRound` / `SwissPairingRecord` entities | Y | Y (via service tests) | Y | Y | **New in Phase 8.** Persist each round and its pairings/results against real relational queries in `tournaments-swiss.service.spec.ts` (in-memory sqlite, not mocked repos). |
+| Tournament organizer settings (`Tournament.maxParticipants`/`timeControlName`/`boardSize`/`ruleVariant`/`pointsWin`/`pointsDraw`/`pointsLoss`) | Y | Y | Y | Y | **New in Phase 8b (2026-08-12).** Registration caps, per-tournament board variant + time control (overrides any individual player's request for a Swiss game), and a fully configurable points system. See "Phase 8b" below — including a real pre-existing scoring bug (drawn games always recorded 0 points instead of 0.5) found and fixed along the way. |
 | Puzzles (`puzzles.service.ts` + entity) | Y | Y | Y | Y | **Rebuilt in Phase 7 (2026-08-11)** — real engine-validated solving, its own Glicko-2 rating pool, Storm mode, and a generation pipeline. See "Phase 7" below for the full breakdown, including a real bug fixed: the previous version sent the puzzle's solution straight to the client and validated moves with a client-side coordinate comparison, meaning it could be read out of the network tab and solved without knowing draughts at all. |
 | History | Y | Y | Y | Y | **Live-verified in Phase 7**: a real PvP game's resignation correctly produced a `GameHistory` row, confirmed by querying `/history/player/:id` on the running server. |
 | `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. Reused as-is for puzzle ratings in Phase 7. See "Phase 6" below. |
@@ -39,10 +41,11 @@ below for each phase specifically.
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 23 suites, 138 tests, all passing, ~1.7s (up from 110 as of
-Phase 7 — the +28 are Phase 8's `swiss-pairing.spec.ts` (10), `tournaments-swiss.service.spec.ts` (17),
-and 1 new regression test in `game.gateway.spec.ts` for a real cross-cutting bug Phase 8 found — see
-"Phase 8" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 24 suites, 149 tests, all passing, ~1.8s (up from 138 as of
+Phase 8 — the +11 are Phase 8b's `tournaments-organizer-settings.service.spec.ts` (8 new tests), 2 new
+`game.gateway.spec.ts` tests for organizer-configured game format, and 1 new regression test in
+`tournaments-swiss.service.spec.ts` for a real scoring bug Phase 8b found — see "Phase 8b" below).
+`tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -673,6 +676,94 @@ its in-memory adapter, unrelated to Phase 8).
   10-second `@Cron` sweep Arena already uses — not independently tested with real elapsed time (would
   require either a 24h-long test or time-mocking infrastructure this phase didn't build); the code path
   itself is small and was read carefully rather than left completely unverified.
+
+## Phase 8b: organizer-configurable tournament settings (2026-08-12)
+
+User feedback on Phase 8's initial report: a real Swiss tournament organizer needs to control more than
+just round count — who can register (and how many), what format the games themselves are played in, and
+how tournament points are awarded. Scoped deliberately smaller than "build full multi-stage tournaments"
+(group stages → knockout, etc.) — that's a materially different, much larger undertaking (essentially the
+Arena/Knockout work the Phase 8 brief explicitly deferred) and was consciously left for its own future
+phase rather than folded in here. This phase adds organizer knobs to the Swiss format that already exists.
+
+**1. Registration caps.** `Tournament.maxParticipants` (nullable — `null` means unlimited, preserving
+Phase 8's original unlimited behavior for any tournament that doesn't set it). `joinTournament()` counts
+current registrations and throws `BadRequestException('Tournament is full')` once the cap is reached —
+deliberately a thrown exception rather than the silent `null` return the existing "wrong lifecycle stage"
+check uses, since "full" is a distinct, actionable condition worth its own message to the client. Re-joining
+an already-registered player is still a no-op and never counts twice against the cap.
+
+**2. Game format and duration.** `Tournament.boardSize` / `ruleVariant` (International 10x10 vs. American
+8x8 — reuses `engine.service.ts`'s existing `GameRules.variant`) and `timeControlName` (reuses Phase 5's
+`time-control.ts` bands). Previously, `tryJoinSwissPairing()` in `game.gateway.ts` built each Swiss game's
+rules from whatever the *connecting client* happened to pass in its `joinMatchmaking` call — meaning two
+different players in the same tournament could, in principle, request different formats, and neither was
+actually deciding for anyone but themselves. Now it derives the game entirely from the tournament's own
+configured settings and ignores whatever the client requests: the organizer sets the format once at
+creation, and it governs every single game in the event, live-verified below.
+
+**3. Configurable points system.** `Tournament.pointsWin` / `pointsDraw` / `pointsLoss` (defaults 1 / 0.5 / 0
+— Phase 8's original hardcoded values, so any unconfigured tournament scores identically to before).
+`updateTournamentScore()` now looks these up per-tournament instead of using literal constants.
+
+**4. `createTournament()` signature.** Extended to accept an options object (`CreateTournamentOptions`) for
+all of the above, while still accepting the original bare `totalRounds` number as a second, backward-
+compatible overload — every one of Phase 8's 17 existing service tests, and the gateway's Swiss integration,
+needed zero changes.
+
+**A real, pre-existing bug found and fixed, not introduced by this phase's own code.** Writing a test that
+asserted a drawn game's points landed correctly surfaced this: `TournamentPlayer.score` had no explicit
+`'float'` column type, so TypeORM's sqlite driver silently treated it as `integer` — confirmed directly by
+inspecting the actual generated table DDL (`"score" integer NOT NULL DEFAULT (0)`). Every drawn game, in
+Arena or Swiss, in every phase back to whenever the tournament system was first built, has been recording
+**0 points instead of 0.5** for both players — the `+= 0.5` in `updateTournamentScore` was executing
+correctly, but sqlite truncated the value on write. This predates Phase 8 entirely; it was never caught
+because no prior test round-tripped a fractional score through an actual database (only through in-memory
+JS objects, or with test setups that happened not to produce a draw). Every other fractional-value entity
+in this codebase — `PlayerRating`, `RatingHistoryEntry`, `PlayerPuzzleRating`, `Puzzle`'s own rating fields
+— already used `'float'` correctly (established in Phase 6); this one column was simply missed. Fixed by
+adding `'float'` to both `TournamentPlayer.score` and the three new `pointsWin`/`pointsDraw`/`pointsLoss`
+columns, confirmed with a standalone before/after repro script and a permanent regression test
+(`tournaments-swiss.service.spec.ts`: "awards exactly 0.5 points to both players in a drawn game, not 0").
+
+**11 new tests**: `tournaments-organizer-settings.service.spec.ts` (8, real in-memory sqlite — default
+values, the options object, the legacy bare-number call, registration-cap enforcement including the
+no-double-counting-a-rejoin case, and custom points including bye scoring), 2 new `game.gateway.spec.ts`
+tests (a Swiss game uses the tournament's configured 8x8/american/rapid format even when both connecting
+clients explicitly request 10x10/international/bullet; a Swiss `joinMatchmaking` call never falls through
+to the generic rating-band queue), and the 1 drawn-game regression test above.
+
+### Live verification
+
+Restarted the backend against a fresh sqlite DB and ran three scenarios as standalone Node scripts against
+the real running server (real HTTP registration/auth, real tournament REST calls, real `socket.io-client`
+WebSocket connections):
+
+- **Registration cap**: created a tournament with `maxParticipants: 2`, joined 2 real registered users
+  successfully, the 3rd real user's join was rejected live with `400 {"message":"Tournament is full"}`.
+- **Custom points**: created a "football rules" tournament (`pointsWin: 3, pointsDraw: 1, pointsLoss: 0`),
+  played a real game to a real resignation over a real WebSocket connection, confirmed the winner's live
+  standings entry read exactly `3` (not the old hardcoded `1`) and the loser's read `0`.
+- **Organizer-configured format overrides the client**: created an 8x8 American / rapid-clock tournament,
+  had both connecting players' `joinMatchmaking` calls explicitly request the *opposite* — 10x10
+  International / bullet — and confirmed the real `gameStart` payload both players received actually
+  contained an 8-row board and `timeControl: 'rapid'`, proving the client's request was genuinely ignored
+  in favor of the tournament's own setting, not just untested.
+- Re-ran Phase 8's original 8-player/3-round Swiss walkthrough end-to-end afterwards to confirm no
+  regression in the default (fully-unconfigured) path — identical correct output to Phase 8's report.
+- Backend log checked for errors during all of the above: none beyond the pre-existing, already-documented
+  Redis connection warnings.
+
+**Known simplifications, stated plainly:**
+- Settings are fixed at creation and cannot be edited afterwards (no `PATCH` endpoint) — same treatment as
+  Phase 8's `totalRounds`. An organizer who wants to change the cap or points system after creating the
+  tournament has to create a new one; editing mid-registration is a reasonable follow-up, not built here.
+- This phase intentionally does **not** touch tournament *format* variety (group stages, knockout brackets,
+  multi-stage progression) — only makes the Swiss format that exists more configurable. Multi-stage formats
+  remain out of scope, per the same boundary the Phase 8 brief itself drew around Arena/Knockout.
+- Arena tournaments now technically have the same points/format columns available on `Tournament` (for
+  schema simplicity, one shared entity) but nothing reads them for Arena — its scoring and format stay
+  exactly as hardcoded in `game.gateway.ts`'s Arena branch, untouched.
 
 ## Repo cleanup notes (Phase 0)
 

@@ -14,6 +14,19 @@ import { pairSwissRound, SwissPlayer, BYE } from './swiss-pairing';
 // generous on purpose, since games can be correspondence-paced, not just blitz.
 const ROUND_TIME_LIMIT_MS = 24 * 60 * 60 * 1000;
 
+// Organizer-configurable settings (Phase 8b), all optional — see tournament.entity.ts
+// for the defaults each one falls back to when omitted.
+export interface CreateTournamentOptions {
+  totalRounds?: number;
+  maxParticipants?: number | null;
+  timeControl?: string;
+  boardSize?: number;
+  variant?: string;
+  pointsWin?: number;
+  pointsDraw?: number;
+  pointsLoss?: number;
+}
+
 @Injectable()
 export class TournamentsService implements OnModuleInit {
   constructor(
@@ -74,6 +87,19 @@ export class TournamentsService implements OnModuleInit {
       where: { tournament: { id: tournamentId }, user: { id: userId } }
     });
     if (existing) return existing;
+
+    // Organizer-set registration cap (Phase 8b). This is a distinct, actionable
+    // condition worth its own message — thrown rather than silently returning null
+    // like the status checks above, so the client can tell "wrong stage" apart from
+    // "full" instead of both looking identical.
+    if (tournament.maxParticipants !== null) {
+      const registeredCount = await this.tournamentPlayerRepository.count({
+        where: { tournament: { id: tournamentId } },
+      });
+      if (registeredCount >= tournament.maxParticipants) {
+        throw new BadRequestException('Tournament is full');
+      }
+    }
 
     const player = this.tournamentPlayerRepository.create({ tournament, user, score: 0 });
     return this.tournamentPlayerRepository.save(player);
@@ -165,23 +191,50 @@ export class TournamentsService implements OnModuleInit {
     const player = await this.tournamentPlayerRepository.findOne({
        where: { user: { id: userId }, tournament: { id: tournamentId } }
     });
+    if (!player) return;
 
-    if (player) {
-       if (result === 'WIN') player.score += 1;
-       else if (result === 'DRAW') player.score += 0.5;
-       await this.tournamentPlayerRepository.save(player);
-    }
+    // Organizer-configurable points (Phase 8b) — defaults (1 / 0.5 / 0) reproduce the
+    // exact hardcoded values this always used before, so pre-existing/unconfigured
+    // tournaments score identically to Phase 8.
+    const tournament = await this.tournamentRepository.findOneBy({ id: tournamentId });
+    const pointsWin = tournament?.pointsWin ?? 1;
+    const pointsDraw = tournament?.pointsDraw ?? 0.5;
+    const pointsLoss = tournament?.pointsLoss ?? 0;
+
+    if (result === 'WIN') player.score += pointsWin;
+    else if (result === 'DRAW') player.score += pointsDraw;
+    else player.score += pointsLoss;
+
+    await this.tournamentPlayerRepository.save(player);
   }
 
   // --- Swiss lifecycle: SCHEDULED -> REGISTRATION_OPEN -> IN_PROGRESS -> COMPLETED ---
 
-  async createTournament(name: string, format: string, totalRounds?: number): Promise<Tournament> {
+  // Accepts either a bare `totalRounds` number (Phase 8's original signature — every
+  // existing caller keeps working unchanged) or a full options object for organizer
+  // control over registration caps, game format, and the points system (Phase 8b).
+  async createTournament(
+    name: string,
+    format: string,
+    totalRoundsOrOptions?: number | CreateTournamentOptions,
+  ): Promise<Tournament> {
     const isSwiss = format === 'Swiss';
+    const options: CreateTournamentOptions = typeof totalRoundsOrOptions === 'number'
+      ? { totalRounds: totalRoundsOrOptions }
+      : (totalRoundsOrOptions ?? {});
+
     const t = this.tournamentRepository.create({
       name,
       format,
       status: isSwiss ? 'SCHEDULED' : 'UPCOMING',
-      totalRounds: isSwiss ? (totalRounds ?? 3) : undefined,
+      totalRounds: isSwiss ? (options.totalRounds ?? 3) : undefined,
+      maxParticipants: options.maxParticipants ?? null,
+      timeControlName: options.timeControl ?? 'blitz',
+      boardSize: options.boardSize ?? 10,
+      ruleVariant: options.variant ?? 'international',
+      pointsWin: options.pointsWin ?? 1,
+      pointsDraw: options.pointsDraw ?? 0.5,
+      pointsLoss: options.pointsLoss ?? 0,
     });
     return this.tournamentRepository.save(t);
   }
