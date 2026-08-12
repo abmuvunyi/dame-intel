@@ -288,3 +288,96 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
     });
   });
 });
+
+describe('GameGateway: Swiss games use the organizer\'s tournament settings, not the client\'s (Phase 8b)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x' },
+  };
+
+  // A Swiss tournament the organizer deliberately configured to something OTHER than
+  // the platform defaults (10x10 international / blitz), so a test that asserts the
+  // resulting game used these values can't pass by accident just because they happen
+  // to match what a client would have requested anyway.
+  const TOURNAMENT = {
+    id: 42,
+    format: 'Swiss',
+    boardSize: 8,
+    ruleVariant: 'american',
+    timeControlName: 'rapid',
+  };
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
+        {
+          provide: TournamentsService,
+          useValue: {
+            getTournament: async (id: number) => (id === TOURNAMENT.id ? TOURNAMENT : null),
+            findSwissOpponent: async (_tournamentId: number, userId: number) => (userId === 1 ? 2 : userId === 2 ? 1 : null),
+            recordSwissPairingResult: async () => {},
+          },
+        },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  it('ignores a client-requested board/time control for a Swiss game and uses the tournament\'s own settings instead', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+
+    // Both request something deliberately different from TOURNAMENT's configuration —
+    // 10x10 international / bullet — to prove these get ignored for a Swiss game.
+    const request = { tournamentId: TOURNAMENT.id, rules: { boardSize: 10, variant: 'international' as const }, timeControl: 'bullet' };
+    await gw.handleJoinMatchmaking(mockSocket('p1') as any, request);
+    await gw.handleJoinMatchmaking(mockSocket('p2') as any, request);
+
+    const gameStart = mockServer.emitted.find((e: any) => e.event === 'gameStart');
+    expect(gameStart).toBeDefined();
+
+    const roomId = (gw as any).socketToRoom.get('p1');
+    const room = (gw as any).activeGames.get(roomId);
+    expect(room.rules.boardSize).toBe(TOURNAMENT.boardSize); // 8, not the requested 10
+    expect(room.rules.variant).toBe(TOURNAMENT.ruleVariant); // 'american', not 'international'
+    expect(room.timeControl.name).toBe(TOURNAMENT.timeControlName); // 'rapid', not 'bullet'
+    expect(room.tournamentId).toBe(TOURNAMENT.id);
+  });
+
+  it('does not fall through to the generic matchmaking queue for a Swiss tournament', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    // waitingForOpponent is emitted straight to the client socket (client.emit), not
+    // through the mock server's to()/emit() — pass `emitted` so mockSocket records it.
+    await gw.handleJoinMatchmaking(mockSocket('p1', undefined, mockServer.emitted) as any, { tournamentId: TOURNAMENT.id });
+
+    // Opponent (user 2) isn't connected yet, so p1 should be told to wait — NOT be
+    // pushed onto the generic rating-band queue (which would risk them being matched
+    // against a random non-Swiss player).
+    expect((gw as any).waitingPlayers.find((p: any) => p.id === 'p1')).toBeUndefined();
+    expect(mockServer.emitted.some((e: any) => e.room === 'p1' && e.event === 'waitingForOpponent')).toBe(true);
+  });
+});

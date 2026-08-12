@@ -232,6 +232,21 @@ describe('TournamentsService: Swiss lifecycle', () => {
         expect(w.buchholz).toBe(0);
       }
     });
+
+    // Regression (Phase 8b): TournamentPlayer.score had no explicit 'float' column
+    // type, so sqlite silently truncated every drawn game's +0.5 to +0 — a real,
+    // pre-existing bug (predating Phase 8) discovered while adding a configurable
+    // points system. Fixed in tournament-player.entity.ts.
+    it('awards exactly 0.5 points to both players in a drawn game, not 0', async () => {
+      const { tournament } = await makeSwissTournament(2, 1);
+      await service.startTournament(tournament.id);
+      const [pairing] = await service.getRoundPairings(tournament.id, 1);
+
+      await service.recordSwissPairingResult(tournament.id, pairing.player1Id, pairing.player2Id!, null); // draw
+
+      const standings = await service.getStandings(tournament.id);
+      expect(standings.every(s => s.score === 0.5)).toBe(true);
+    });
   });
 
   describe('findSwissOpponent (matchmaking integration)', () => {

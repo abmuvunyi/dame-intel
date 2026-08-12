@@ -466,7 +466,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   async handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules>, timeControl?: string }) {
     if (this.waitingPlayers.find(p => p.id === client.id)) return;
 
-    if (data?.tournamentId && await this.tryJoinSwissPairing(client, data.tournamentId, data.rules, data.timeControl)) {
+    if (data?.tournamentId && await this.tryJoinSwissPairing(client, data.tournamentId)) {
       return;
     }
 
@@ -496,7 +496,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // true if this request was handled here (whether paired immediately or left
   // waiting), false if the caller should fall through to generic matchmaking
   // (non-Swiss tournament, or no tournament at all).
-  private async tryJoinSwissPairing(client: Socket, tournamentId: number, rules?: Partial<GameRules>, timeControlName?: string): Promise<boolean> {
+  //
+  // Deliberately ignores any `rules`/`timeControl` the client itself requested for a
+  // Swiss game (Phase 8b): the organizer configured the tournament's board variant
+  // and clock when they created it (`Tournament.boardSize`/`ruleVariant`/
+  // `timeControlName`), and every game in the event should use that, not whatever an
+  // individual player happens to pass.
+  private async tryJoinSwissPairing(client: Socket, tournamentId: number): Promise<boolean> {
     const tournament = await this.tournamentsService.getTournament(tournamentId);
     if (!tournament || tournament.format !== 'Swiss') return false;
 
@@ -517,8 +523,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     // Re-checked as late as possible (right before creating the room) to narrow the
     // window for two concurrent joinMatchmaking calls to both try to seat the same pair.
     if (opponentSocketId && !this.socketToRoom.get(client.id) && !this.socketToRoom.get(opponentSocketId)) {
-      const fullRules = new DraughtsEngine(rules || {}).getRules();
-      const timeControl = resolveTimeControl(timeControlName);
+      const fullRules = new DraughtsEngine({ boardSize: tournament.boardSize, variant: tournament.ruleVariant as GameRules['variant'] }).getRules();
+      const timeControl = resolveTimeControl(tournament.timeControlName);
       this.createPvpRoom(client.id, opponentSocketId, fullRules, timeControl, tournamentId);
     } else {
       client.emit('waitingForOpponent'); // prescribed opponent isn't online (or the room won the race) — wait

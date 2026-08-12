@@ -33,8 +33,30 @@ export class TournamentsController {
 
   @UseGuards(AuthGuard)
   @Post()
-  async createTournament(@Body() body: { name: string, format: string, totalRounds?: number }) {
-    return this.tournamentsService.createTournament(body.name, body.format, body.totalRounds);
+  async createTournament(@Body() body: {
+    name: string,
+    format: string,
+    totalRounds?: number,
+    // Organizer settings (Swiss only for now — Phase 8b). All optional; omitting any
+    // of them falls back to the same defaults Phase 8 always used.
+    maxParticipants?: number,
+    timeControl?: string,
+    boardSize?: number,
+    variant?: string,
+    pointsWin?: number,
+    pointsDraw?: number,
+    pointsLoss?: number,
+  }) {
+    return this.tournamentsService.createTournament(body.name, body.format, {
+      totalRounds: body.totalRounds,
+      maxParticipants: body.maxParticipants,
+      timeControl: body.timeControl,
+      boardSize: body.boardSize,
+      variant: body.variant,
+      pointsWin: body.pointsWin,
+      pointsDraw: body.pointsDraw,
+      pointsLoss: body.pointsLoss,
+    });
   }
 
   @UseGuards(AuthGuard)
