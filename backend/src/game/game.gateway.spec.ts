@@ -257,4 +257,34 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
       expect(mockServer.emitted.some((e: any) => e.event === 'gameResync')).toBe(false);
     });
   });
+
+  // Regression: discovered during Phase 8 live verification. Two players staying
+  // connected straight through from one game into the next (e.g. consecutive Swiss
+  // rounds) got permanently stuck seeing 'waitingForOpponent' — socketToRoom kept
+  // pointing both sockets at the now-deleted room because handleGameOver never
+  // released it (only handleDisconnect did). Swiss's "are they already seated
+  // somewhere?" guard in tryJoinSwissPairing then always refused to re-pair them.
+  describe('post-game cleanup releases the socket->room mapping (Phase 8 regression)', () => {
+    it('lets both players be matched into a brand-new room immediately after a resignation, without disconnecting first', async () => {
+      const roomId = await matchTwoPlayers();
+
+      // handleGameOver is async (it awaits saveGame, rating lookups, etc.) but
+      // handleResignGame fires it without awaiting, so call the private method
+      // directly here and await it, rather than racing its internal microtasks.
+      const room = (gw as any).activeGames.get(roomId);
+      await (gw as any).handleGameOver(roomId, room, 'D', 'resignation');
+
+      expect((gw as any).socketToRoom.get('p1')).toBeUndefined();
+      expect((gw as any).socketToRoom.get('p2')).toBeUndefined();
+
+      // Same socket ids, still "connected", queue up again for a fresh game.
+      gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 } });
+      gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 } });
+
+      const newRoomId = (gw as any).socketToRoom.get('p1');
+      expect(newRoomId).toBeDefined();
+      expect(newRoomId).not.toBe(roomId);
+      expect((gw as any).activeGames.get(newRoomId).players['L']).toBe('p1');
+    });
+  });
 });

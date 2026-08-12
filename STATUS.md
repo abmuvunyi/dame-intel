@@ -8,8 +8,9 @@ with a headless browser** — not just reading code. Rules engine rebuilt test-f
 (2026-08-10). Callers reconnected to the rebuilt engine in Phase 3 (2026-08-10). Frontend board rebuilt
 in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks, and disconnect/reconnect
 built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). Puzzle solving,
-rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). See "How this was verified"
-below for exact method, and the per-phase sections below for each phase specifically.
+rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). Swiss-pairing tournaments built
+in Phase 8 (2026-08-11). See "How this was verified" below for exact method, and the per-phase sections
+below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -25,7 +26,10 @@ below for exact method, and the per-phase sections below for each phase specific
 | `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
 | Anticheat | Y | Y | Y | N | Not exercised live this pass. No TODO/stub markers in source. |
-| Tournaments | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. |
+| Tournaments (Arena — pre-existing) | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. Untouched by Phase 8; its exact original code paths (`updateTournamentScore` inline in `game.gateway.ts`, the `@Cron` auto-start logic) remain as-is. |
+| Tournaments — Swiss (`tournaments.service.ts` lifecycle/pairing methods) | Y | Y | Y | Y | **New in Phase 8 (2026-08-11).** Full SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED lifecycle, automatic round generation/advancement, Buchholz tiebreak standings. See "Phase 8" below. |
+| `tournaments/swiss-pairing.ts` | Y | Y | Y | Y | **New in Phase 8.** Pure, framework-independent pairing algorithm (same pattern as `matchmaking.ts`/`glicko2.ts`) — greedy score-sorted pairing, bye to the lowest score without one yet, avoids rematches where a fresh opponent exists in the pool. 10 tests, including a full printed 8-player/3-round walkthrough. Documented limitation: no backtracking, so a small field pushed over many rounds can occasionally be forced into a rematch — see "Phase 8" below. |
+| `SwissRound` / `SwissPairingRecord` entities | Y | Y (via service tests) | Y | Y | **New in Phase 8.** Persist each round and its pairings/results against real relational queries in `tournaments-swiss.service.spec.ts` (in-memory sqlite, not mocked repos). |
 | Puzzles (`puzzles.service.ts` + entity) | Y | Y | Y | Y | **Rebuilt in Phase 7 (2026-08-11)** — real engine-validated solving, its own Glicko-2 rating pool, Storm mode, and a generation pipeline. See "Phase 7" below for the full breakdown, including a real bug fixed: the previous version sent the puzzle's solution straight to the client and validated moves with a client-side coordinate comparison, meaning it could be read out of the network tab and solved without knowing draughts at all. |
 | History | Y | Y | Y | Y | **Live-verified in Phase 7**: a real PvP game's resignation correctly produced a `GameHistory` row, confirmed by querying `/history/player/:id` on the running server. |
 | `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. Reused as-is for puzzle ratings in Phase 7. See "Phase 6" below. |
@@ -35,10 +39,10 @@ below for exact method, and the per-phase sections below for each phase specific
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 21 suites, 110 tests, all passing, ~1.6s (up from 90 as of
-Phase 6 — the +20 are Phase 7's `puzzles.service.spec.ts` (11), `puzzle-generator.service.spec.ts` (4),
-and `puzzle-rush.service.spec.ts` (6), minus the 1 trivial pre-existing puzzle test consolidated into the
-real suite). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 23 suites, 138 tests, all passing, ~1.7s (up from 110 as of
+Phase 7 — the +28 are Phase 8's `swiss-pairing.spec.ts` (10), `tournaments-swiss.service.spec.ts` (17),
+and 1 new regression test in `game.gateway.spec.ts` for a real cross-cutting bug Phase 8 found — see
+"Phase 8" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -521,6 +525,154 @@ a real PvP game to a real resignation, confirmed a `GameHistory` row was actuall
 (`GET /history/player/1`), then called the live `/puzzles/admin/generate-recent` endpoint against it and
 confirmed the pipeline runs cleanly against real production data (0 candidates, expected — a
 zero-move resignation has no positions to scan). Zero console errors throughout.
+
+## Phase 8: Swiss-pairing tournaments (2026-08-11)
+
+The brief was explicit that Arena and Knockout formats are out of scope for this phase — Arena's existing
+code paths (`updateTournamentScore` calls inline in `game.gateway.ts`'s `handleGameOver`, the `@Cron`
+auto-start logic) are untouched; the Swiss work below is entirely additive alongside it.
+
+**1. Pairing algorithm.** `tournaments/swiss-pairing.ts`: pure, framework-independent (no NestJS/TypeORM
+imports), same design pattern as `matchmaking.ts` and `rating/glicko2.ts`. Sorts players by score
+(desc, id as tiebreak), gives a bye to the lowest-scoring player who hasn't had one yet if the field is
+odd, then greedily pairs the rest — for each player, searches the *entire* remaining pool for an opponent
+they haven't already faced before falling back to a rematch. **Documented, not hidden, limitation**: this
+is a simplified greedy algorithm, not the full FIDE Dutch system with backtracking — with a small field
+pushed over many rounds relative to its size, the greedy selection order can occasionally trap a player
+into a forced rematch even though a valid rematch-free assignment exists elsewhere in the search space.
+Proven clean at 8 players / 3 rounds (both in the pure-algorithm test and live, see below); a dedicated
+service-level test intentionally uses 8 players rather than a smaller field for exactly this reason, with
+the limitation spelled out in a comment rather than either weakening the assertion or over-building a full
+backtracking solver beyond what the brief asked for.
+
+**2. Lifecycle.** `Tournament.status` for Swiss now runs SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS →
+COMPLETED (`totalRounds`/`currentRound` columns added, Swiss-only — Arena keeps its original
+UPCOMING/IN_PROGRESS/COMPLETED states and columns untouched). `openRegistration()` and `startTournament()`
+enforce the transitions (`BadRequestException` on an out-of-order call, or starting with fewer than 2
+players); `joinTournament()` was extended to also accept `REGISTRATION_OPEN` as a valid join state
+alongside Arena's existing `UPCOMING`.
+
+**3. Round generation and automatic progression.** `generateNextRound()` persists a `SwissRound` plus one
+`SwissPairingRecord` per pairing (bye pairings get `player2Id: null` and an immediate full point via
+`updateTournamentScore` — no game to wait for). `recordSwissPairingResult()` is the single entry point a
+finished game reports through: it locates the pairing regardless of which player is passed as "player1"
+vs "player2", is a no-op if the pairing was already resolved (double-recording guard) or doesn't exist for
+that pair this round, updates both players' scores itself, and then calls `checkRoundCompletion()` — which
+marks the round `COMPLETED` once every pairing in it has a result, and either generates the next round or
+(if that was the final round) marks the whole tournament `COMPLETED`. The existing `@Cron` job gained a
+Swiss-only branch: any pairing still unresolved after a 24h time limit is force-resolved as a `DRAW` so a
+missing/AFK player can never permanently stall a round.
+
+**4. Standings with Buchholz tiebreak.** `getStandingsWithTiebreak()` sums each player's faced opponents'
+*current* scores (a bye contributes 0) as the tiebreak, sorts by score desc then Buchholz desc. Using
+current (not final) scores means it's a genuinely live-updating tiebreak, at the standard cost that it can
+fluctuate as the tournament progresses — the normal trade-off for a live Buchholz display, not a bug.
+
+**5. Matchmaking integration.** `findSwissOpponent(tournamentId, userId)` tells `game.gateway.ts`'s
+`joinMatchmaking` handler exactly who a Swiss entrant is supposed to play this round (or `null` if they
+have a bye, their pairing is already resolved, or the tournament isn't Swiss at all) — critical because
+routing Swiss players onto the *generic* matchmaking queue would risk pairing them against any other
+entrant queuing for the same tournament, not the specific opponent the algorithm actually assigned. New
+`tryJoinSwissPairing()` in the gateway checks this first and, if it applies, seats the prescribed pair
+into a real game room (or tells the client to wait if the opponent isn't connected yet) instead of falling
+through to the rating-band queue from Phase 5. `handleGameOver` branches on `tournament.format === 'Swiss'`
+to call `recordSwissPairingResult` (which owns scoring itself) instead of Arena's inline WIN/LOSS/DRAW
+calls.
+
+**A real bug found and fixed, not just new code.** Live verification (below) surfaced a genuine
+pre-existing defect, not something introduced by Phase 8's own logic: `game.gateway.ts`'s `socketToRoom`
+map (socket id → active room id) was only ever cleared in `handleDisconnect`, never in `handleGameOver`.
+Two players who stayed connected straight from one game into the next — exactly what happens between
+Swiss rounds — kept a stale mapping pointing at their just-finished, now-deleted room. Swiss's
+`tryJoinSwissPairing` guard (checking neither player is "already in a room" right before seating them)
+then read that stale entry as "still occupied" and refused to pair them, leaving both stuck on
+`waitingForOpponent` forever. Fixed by releasing `socketToRoom` for both seats' current sockets at the end
+of `handleGameOver`, alongside the `userIdToRoom` cleanup that was already there. Added a regression test
+(`game.gateway.spec.ts`, "Phase 8 regression" block) that fails without the fix: two players resign
+straight into a second `joinMatchmaking` call, same socket ids, no disconnect in between, and must land in
+a brand-new room. This bug would also have affected non-Swiss rematches under the same conditions had
+anything else started checking `socketToRoom` as an occupancy guard — the fix is general, not Swiss-specific.
+
+**27 new tests**: `swiss-pairing.spec.ts` (10 — bye assignment, no-rematch search, and a full printed
+8-player/3-round walkthrough), `tournaments-swiss.service.spec.ts` (17, against real in-memory sqlite —
+lifecycle transitions, round generation/pairing correctness, bye handling and scoring, result recording
+via both argument orders, double-recording and wrong-pair no-ops, auto-advance through to tournament
+completion, no-illegal-rematches at 8 players, Buchholz, and `findSwissOpponent` in every branch), plus the
+1 `game.gateway.spec.ts` regression test above.
+
+### Worked example: 8-player, 3-round Swiss tournament
+
+Pairings and results below are **from a live run against the actual running server** (not the unit test):
+8 real registered users (real `/auth/register` + JWT), a real Swiss tournament created and opened via the
+real HTTP API, all 8 joined and the tournament started via `POST /tournaments/:id/start`, then each round's
+players connected with real `socket.io-client` WebSocket connections, called the real `joinMatchmaking`
+event, and one side of each pairing issued a real `resignGame` — the server decided everything else
+(pairing, scoring, round advancement) on its own:
+
+```
+--- Round 1 ---
+  p1 vs p2  ->  winner: p1 (resignation)
+  p3 vs p4  ->  winner: p3 (resignation)
+  p5 vs p6  ->  winner: p5 (resignation)
+  p7 vs p8  ->  winner: p7 (resignation)
+  [round 1 complete -> tournament status=IN_PROGRESS, currentRound=2]
+
+--- Round 2 ---
+  p1 vs p3  ->  winner: p1 (resignation)
+  p5 vs p7  ->  winner: p5 (resignation)
+  p2 vs p4  ->  winner: p2 (resignation)
+  p6 vs p8  ->  winner: p6 (resignation)
+  [round 2 complete -> tournament status=IN_PROGRESS, currentRound=3]
+
+--- Round 3 ---
+  p1 vs p5  ->  winner: p1 (resignation)
+  p2 vs p3  ->  winner: p2 (resignation)
+  p6 vs p7  ->  winner: p6 (resignation)
+  p4 vs p8  ->  winner: p4 (resignation)
+  [round 3 complete -> tournament status=COMPLETED, currentRound=3]
+
+--- Final standings (live server, with Buchholz tiebreak) ---
+  1. p1: 3 pts  (Buchholz: 5)
+  2. p5: 2 pts  (Buchholz: 6)
+  3. p2: 2 pts  (Buchholz: 5)
+  4. p6: 2 pts  (Buchholz: 3)
+  5. p3: 1 pts  (Buchholz: 6)
+  6. p7: 1 pts  (Buchholz: 4)
+  7. p4: 1 pts  (Buchholz: 3)
+  8. p8: 0 pts  (Buchholz: 4)
+```
+
+Every round pairs winners against winners and losers against losers (correct Swiss behavior), no player
+faced the same opponent twice across all 3 rounds (independently re-verified by re-fetching all three
+rounds' pairings from the live API after the tournament finished and checking for duplicate pairs), the
+tournament transitioned SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED entirely on its own after
+each round's results came in — no manual intervention beyond the resignations themselves — and the final
+Buchholz-based ordering is consistent with the actual strength of schedule each player faced.
+
+### Live verification
+
+Beyond the two test suites above: killed and restarted the backend against a fresh sqlite DB, then ran the
+worked example above as a standalone Node script using real HTTP (`node-fetch`) for registration/auth and
+tournament REST calls and real `socket.io-client` WebSocket connections (not Playwright — this is a
+fundamentally socket-driven flow, and orchestrating 8 simultaneous real browser actors would add
+complexity without adding coverage) for the actual gameplay. This is what surfaced the `socketToRoom`
+staleness bug described above: the first run genuinely hung on round 2 with both players stuck on
+`waitingForOpponent`, diagnosed from the gateway source (not guessed), fixed, backend restarted fresh
+again, and the full 3-round tournament re-run end-to-end to confirm the fix — the transcript above is from
+that clean second run. Backend log checked for errors during the run: none beyond the pre-existing,
+already-documented Redis connection warnings (no Redis running in dev; the gateway already falls back to
+its in-memory adapter, unrelated to Phase 8).
+
+**Known simplifications, stated plainly:**
+- The pairing algorithm has no backtracking (see above) — an occasional forced rematch in a small field
+  pushed over many rounds is possible and accepted, not silently swept under a weaker test.
+- No admin-role system exists anywhere in this codebase (same situation as Phase 7's puzzle admin routes):
+  `createTournament`/`openRegistration`/`startTournament` just require being logged in, not any specific
+  role. A real admin gate is future work, not invented here as a side effect.
+- The 24h Swiss round time-limit fallback (force-draw any pairing still unresolved) is checked on the same
+  10-second `@Cron` sweep Arena already uses — not independently tested with real elapsed time (would
+  require either a 24h-long test or time-mocking infrastructure this phase didn't build); the code path
+  itself is small and was read carefully rather than left completely unverified.
 
 ## Repo cleanup notes (Phase 0)
 

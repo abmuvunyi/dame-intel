@@ -463,8 +463,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules>, timeControl?: string }) {
+  async handleJoinMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() data?: { tournamentId?: number, rules?: Partial<GameRules>, timeControl?: string }) {
     if (this.waitingPlayers.find(p => p.id === client.id)) return;
+
+    if (data?.tournamentId && await this.tryJoinSwissPairing(client, data.tournamentId, data.rules, data.timeControl)) {
+      return;
+    }
 
     const fullRules = new DraughtsEngine(data?.rules || {}).getRules();
     const timeControl = resolveTimeControl(data?.timeControl);
@@ -483,6 +487,43 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     client.emit('waitingForOpponent');
     this.runMatchmakingSweep();
+  }
+
+  // Swiss tournaments hand out a specific, prescribed opponent each round (see
+  // TournamentsService.findSwissOpponent) — pairing on the generic queue below would
+  // risk matching a player against ANY other Swiss entrant queuing for the same
+  // tournament, not the one the pairing algorithm actually assigned them. Returns
+  // true if this request was handled here (whether paired immediately or left
+  // waiting), false if the caller should fall through to generic matchmaking
+  // (non-Swiss tournament, or no tournament at all).
+  private async tryJoinSwissPairing(client: Socket, tournamentId: number, rules?: Partial<GameRules>, timeControlName?: string): Promise<boolean> {
+    const tournament = await this.tournamentsService.getTournament(tournamentId);
+    if (!tournament || tournament.format !== 'Swiss') return false;
+
+    const profile = this.socketToUser.get(client.id);
+    if (!profile) {
+      client.emit('error', { message: 'You must be logged in to play in a Swiss tournament.' });
+      return true;
+    }
+
+    const opponentUserId = await this.tournamentsService.findSwissOpponent(tournamentId, profile.id);
+    if (opponentUserId === null) {
+      // No unresolved pairing for them this round yet (or ever) — nothing to do but wait.
+      client.emit('waitingForOpponent');
+      return true;
+    }
+
+    const opponentSocketId = this.userIdToSocket.get(opponentUserId);
+    // Re-checked as late as possible (right before creating the room) to narrow the
+    // window for two concurrent joinMatchmaking calls to both try to seat the same pair.
+    if (opponentSocketId && !this.socketToRoom.get(client.id) && !this.socketToRoom.get(opponentSocketId)) {
+      const fullRules = new DraughtsEngine(rules || {}).getRules();
+      const timeControl = resolveTimeControl(timeControlName);
+      this.createPvpRoom(client.id, opponentSocketId, fullRules, timeControl, tournamentId);
+    } else {
+      client.emit('waitingForOpponent'); // prescribed opponent isn't online (or the room won the race) — wait
+    }
+    return true;
   }
 
   // Pairs up everyone currently in the queue that it can. Runs both right after a
@@ -752,7 +793,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Save to database
     try {
-       await this.historyService.saveGame(
+       const savedGame = await this.historyService.saveGame(
           room.playerProfiles[PieceColor.LIGHT] || null,
           room.playerProfiles[PieceColor.DARK] || null,
           winner as 'L'|'D'|'DRAW',
@@ -776,8 +817,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
        if (p1 && p2 && !room.aiDifficulty) {
           if (room.tournamentId) {
-             // It's a tournament match, update tournament scores instead of raw ELO
-             if (winner === PieceColor.LIGHT) {
+             const tournament = await this.tournamentsService.getTournament(room.tournamentId);
+             if (tournament?.format === 'Swiss') {
+                // Swiss owns scoring itself (see recordSwissPairingResult) — it also
+                // records the pairing's result and checks whether the round (and
+                // possibly the tournament) can now auto-advance, so this is the only
+                // call needed for a Swiss game, unlike Arena below.
+                const winnerUserId = winner === PieceColor.LIGHT ? p1.id : winner === PieceColor.DARK ? p2.id : null;
+                await this.tournamentsService.recordSwissPairingResult(room.tournamentId, p1.id, p2.id, winnerUserId, savedGame.id);
+             } else if (winner === PieceColor.LIGHT) {
+                // Arena (unchanged): update tournament scores instead of raw ELO
                 await this.tournamentsService.updateTournamentScore(p1.id, room.tournamentId, 'WIN');
                 await this.tournamentsService.updateTournamentScore(p2.id, room.tournamentId, 'LOSS');
              } else if (winner === PieceColor.DARK) {
@@ -839,6 +888,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     const p2id = room.playerProfiles[PieceColor.DARK]?.id;
     if (p1id && this.userIdToRoom.get(p1id) === roomId) this.userIdToRoom.delete(p1id);
     if (p2id && this.userIdToRoom.get(p2id) === roomId) this.userIdToRoom.delete(p2id);
+
+    // Also release the socket->room mapping for whichever sockets currently occupy
+    // each seat (players[color] tracks the live socket id, which can differ from
+    // whoever originally joined if they reconnected under a new one). Without this,
+    // a player who stays connected across games — e.g. straight into their next
+    // Swiss-tournament round — keeps a stale mapping to this now-deleted room,
+    // which then trips "are they already in a room?" guards for their next pairing.
+    const lightSocketId = room.players[PieceColor.LIGHT];
+    const darkSocketId = room.players[PieceColor.DARK];
+    if (lightSocketId && this.socketToRoom.get(lightSocketId) === roomId) this.socketToRoom.delete(lightSocketId);
+    if (darkSocketId && this.socketToRoom.get(darkSocketId) === roomId) this.socketToRoom.delete(darkSocketId);
 
     this.activeGames.delete(roomId);
   }
