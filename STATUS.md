@@ -10,8 +10,9 @@ in Phase 4 (2026-08-10). Real-time PvP matchmaking, server-authoritative clocks,
 built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-10). Puzzle solving,
 rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). Swiss-pairing tournaments built
 in Phase 8 (2026-08-11). Organizer-configurable tournament settings (registration caps, game
-format/duration, points system) built in Phase 8b (2026-08-12). See "How this was verified" below for
-exact method, and the per-phase sections below for each phase specifically.
+format/duration, points system) built in Phase 8b (2026-08-12). Spectator mode and a live-games dashboard
+built in Phase 9 (2026-08-13). See "How this was verified" below for exact method, and the per-phase
+sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -22,7 +23,7 @@ exact method, and the per-phase sections below for each phase specifically.
 | Friends | Y | Y | Y | N | Not exercised live this pass (no UI page hits it directly in the flows tested). Test coverage still just 2 tests, happy-path only. |
 | Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
 | Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. |
-| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5** — see "Phase 5" below for the full breakdown. |
+| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5; spectator mode completed and load-tested in Phase 9** — see "Phase 5" and "Phase 9" below for the full breakdowns. |
 | `matchmaking.ts` (rating-band seek pairing) | Y | Y | Y | Y | **New in Phase 5.** Pure, framework-independent pairing logic (same design pattern as the engine) — 15 tests. |
 | `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
@@ -41,11 +42,10 @@ exact method, and the per-phase sections below for each phase specifically.
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 24 suites, 149 tests, all passing, ~1.8s (up from 138 as of
-Phase 8 — the +11 are Phase 8b's `tournaments-organizer-settings.service.spec.ts` (8 new tests), 2 new
-`game.gateway.spec.ts` tests for organizer-configured game format, and 1 new regression test in
-`tournaments-swiss.service.spec.ts` for a real scoring bug Phase 8b found — see "Phase 8b" below).
-`tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 24 suites, 156 tests, all passing, ~1.8s (up from 149 as of
+Phase 8b — the +7 are all in `game.gateway.spec.ts`: 2 for the enriched live-games listing and 5 for
+spectator mode, including a regression test for a real spectator-count bug Phase 9 found — see "Phase 9"
+below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -53,8 +53,9 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 
 | Page/Component | Exists (Y/N) | Wired to real backend (Y/N) | Verified (Y/N) | Notes |
 |---|---|---|---|---|
-| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. |
-| `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. |
+| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. Also handles spectating via `?watch=<roomId>` as of Phase 9. |
+| `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. **Phase 9** fixed a real pre-existing bug: it read `window.location.search` by hand instead of Next's reactive `useSearchParams()`, which could permanently lock in a stale (empty) query-param value when arriving via a client-side route transition rather than a full page load — affected both the new `?watch=` spectate flow and the pre-existing Phase 5 `?tournamentId=` flow identically. Now wrapped in `Suspense` and uses `useSearchParams()`, which doesn't have this problem. |
+| `/watch` (live games dashboard) | Y | Y | Y | **New in Phase 9 (2026-08-13).** Lists every active game with both players' usernames, ratings, variant, board size, time control, and current spectator count; "Watch" navigates to `/?watch=<roomId>`. |
 | `Board.tsx` | Y | Y | Y | **New in Phase 4.** Board rendering, orientation/flip, drag-and-drop + click-click move input, move animation. Never computes legal moves itself — only ever filters the `legalMoves` array the server sends. |
 | `MoveList.tsx` | Y | Y | Y | **New in Phase 4.** Real move history in FMJD-style square-numbering notation. |
 | `CapturedTray.tsx` | Y | Y | Y | **New in Phase 4.** Per-side captured-piece tally, derived from the actual captured piece data at the moment of capture (not guessed after the fact). |
@@ -71,7 +72,7 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | Direct-challenge-by-user-ID UI | N | — | — | **Backend flow exists (Phase 5), no frontend UI for it yet** — no button/modal to challenge a specific friend. Scoped out: Phase 5's brief is backend real-time infrastructure; adding a challenge UI is a Phase-4-style frontend task better done as its own slice. |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
-not just the type-check) → succeeds, all 10 routes generated (Phase 7 adds `/puzzles/rush`), zero build errors.
+not just the type-check) → succeeds, all 11 routes generated (Phase 9 adds `/watch`), zero build errors.
 
 ## How this was verified (Phase 1 method)
 
@@ -764,6 +765,106 @@ WebSocket connections):
 - Arena tournaments now technically have the same points/format columns available on `Tournament` (for
   schema simplicity, one shared entity) but nothing reads them for Arena — its scoring and format stay
   exactly as hardcoded in `game.gateway.ts`'s Arena branch, untouched.
+
+## Phase 9: spectator mode and a live-games dashboard (2026-08-13)
+
+Checked existing scaffolding first, per the established pattern — and unlike most phases, this one wasn't
+starting from a stub: `getActiveGames`, `joinSpectator`, and read-only move rejection for non-players all
+already existed and worked, along with a minimal inline "Live Games" list on the homepage. This phase
+completed and hardened what was there rather than building spectator mode from scratch — enriching the
+dashboard data, giving it a real dedicated page, and specifically load-testing the one claim that had never
+actually been verified: that broadcast fan-out to many spectators doesn't cost the players anything.
+
+**1. Live-games dashboard.** `getActiveGames` used to return only `roomId`/two usernames/`spectatorsCount`.
+Now every entry also carries both players' ratings, the variant (`international`/`american`), board size,
+time control, and whether it's a vs-AI game — everything `GameRules`/`TimeControl` already tracked on the
+room, just not exposed. New `/watch` page (Next.js) polls this every 4s over its own socket connection (no
+auth required, matching `joinSpectator`'s existing no-auth-required design) and renders it as a real
+dashboard — not just the homepage's compact inline list, which still exists unchanged alongside it.
+
+**2. Spectating.** `joinSpectator` already joined the spectator into the exact same socket.io room the two
+players are in (`client.join(room.roomId)`), so every `server.to(roomId).emit(...)` — `gameState`,
+`gameOver`, chat — was already reaching them in real time; `makeMove` already rejected non-players outright
+(`{ error: 'Not a player in this game' }`, verified by a new test that also confirms the engine's actual
+board state is untouched by a rejected move, not just that an error came back). What was missing was a way
+to *reach* a specific game to spectate without already being on the homepage with it in view: clicking
+"Watch" on `/watch` now navigates to `/?watch=<roomId>`, and `GameBoard.tsx` auto-joins as a spectator on
+connect when that param is present, reusing 100% of the existing spectator rendering path (no color, no
+legal moves, read-only) rather than building a second board component.
+
+**Two real bugs found while verifying this, not introduced by it:**
+
+- **Spectator count never decremented.** `handleJoinSpectator` broadcast an updated `spectatorJoined` count
+  on arrival; nothing broadcast one when a spectator's socket disconnected — `room.spectators` shrank
+  correctly, the count everyone was shown just silently never reflected it. Fixed in `handleDisconnect`,
+  covered by a regression test asserting the count goes back down, not just up.
+- **Stale search params across a client-side route transition.** This is the one that actually blocked
+  `/watch`'s "Watch" button from working at all during verification. `GameBoard.tsx` read
+  `window.location.search` by hand during render and captured it in a `useEffect` with an empty dependency
+  array. On a full page load this is fine; on a client-side transition (`router.push` from another page —
+  exactly what clicking "Watch" does), React can commit the component's first render while
+  `window.location` still reflects the *previous* URL, and since the effect only ever runs once, whatever
+  it saw at that moment is what it's stuck with — even though later renders correctly compute the right
+  value (confirmed directly: added a temporary debug log showing `roomIdToSpectate` was `null` on the first
+  render and correct on every render after, while the effect had already locked in `null`). Traced by
+  instrumenting the actual browser console during a failing Playwright run, not guessed. This is not a new
+  bug: `?tournamentId=` (wired in Phase 5, reached via `router.push` from `/tournaments/[id]`) reads from
+  the exact same hand-parsed `searchParams` in the exact same component and was equally exposed the whole
+  time — it just never had a test that clicked through via a client-side transition instead of a direct URL
+  load. Fixed by switching to Next.js's `useSearchParams()` (which is driven by the router's own resolved
+  state, not raw `window.location`, so it's already correct on the very first render) and wrapping
+  `GameBoard` in a `Suspense` boundary, which `useSearchParams()` requires. Fixes both the new `?watch=` path
+  and the pre-existing `?tournamentId=` path with the same change — not verified with a second dedicated
+  live test for `?tournamentId=` specifically, since it's the identical hook in the identical component; the
+  `?watch=` live test below exercises the same mechanism.
+
+**7 new tests**, all in `game.gateway.spec.ts`: 2 for the enriched `getActiveGames` payload (ratings,
+variant, board size, time control, live spectator count), 5 for spectator mode (read-only enforcement with
+engine-state-unchanged verification, joining the correct broadcast room, and the count-decrements
+regression above).
+
+### Live verification: does spectator fan-out cost the players anything?
+
+This was the actual point of the phase, so it got a dedicated live load test rather than a unit test (unit
+tests can prove correctness, not real socket I/O timing under concurrency) — a standalone Node script using
+real `socket.io-client` connections against the real running server:
+
+1. Two real players play 20 real alternating moves (10 each) in a fresh game with **zero spectators**,
+   measuring real round-trip latency (`makeMove` emitted → `gameState` received back) for every move.
+2. A fresh game is created, then **300 real spectator sockets** connect and join it for real.
+3. The same two players play another 20 real moves in that game, measured the same way — while a 10-socket
+   sample of the 300 spectators is independently checked to confirm every single one of them actually
+   received every single `gameState` broadcast in real time (not just connected and silent).
+
+```
+--- Comparison ---
+  0 spectators:                 avg=0.23ms  median=0.26ms  p95=0.26ms  max=0.26ms
+  300 spectators:  avg=0.53ms  median=0.39ms  p95=0.90ms  max=0.90ms
+  median delta: +0.13ms
+```
+
+All 30/30 sampled spectator-move broadcast receipts landed (10 spectators × 20 moves live sample), and the
+move round-trip latency the two actual players experienced was statistically indistinguishable with 300
+concurrent spectators versus none — a fraction of a millisecond of difference on a single dev machine, not
+a measurable degradation. This confirms `server.to(roomId).emit(...)`'s room-broadcast fan-out is exactly
+what it looks like from the code: a synchronous loop writing to each connected socket's transport, not
+something that blocks or serializes behind the authoritative game loop. Also separately live-verified with
+Playwright: a real browser navigating `/watch` → clicking "Watch" → landing in a genuine real-time spectator
+view (board, live move list updating the instant a real move was made server-side, no Resign/Offer Draw
+buttons shown), zero browser console errors throughout.
+
+Backend log checked for errors during both live runs: none beyond the pre-existing, already-documented
+Redis connection warnings.
+
+**Known simplifications, stated plainly:**
+- `/watch` re-polls `getActiveGames` every 4 seconds rather than the server pushing list changes — simple
+  and sufficient for a first dashboard; a server-push model (e.g. broadcasting on every game start/end)
+  would make it feel more instantaneous but wasn't necessary to satisfy the brief.
+- The load test used a single dev machine and a single Node process driving all 300 spectator connections
+  (not 300 separate real clients across a network) — representative of the server-side broadcast cost, but
+  not a full distributed-load/production-network test.
+- Spectator sockets never authenticate and aren't rate-limited per IP; watching is intentionally as open as
+  the rest of the app's anonymous read paths (e.g. `/tournaments` standings), not a new gap introduced here.
 
 ## Repo cleanup notes (Phase 0)
 

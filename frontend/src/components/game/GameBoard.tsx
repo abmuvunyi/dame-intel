@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import { BoardState, Move, Piece, PieceColor } from '@/lib/draughts';
 import Board from './Board';
@@ -15,7 +16,18 @@ export type { Piece, BoardPosition, BoardState, Position, Move } from '@/lib/dra
 
 type Clocks = { [PieceColor.LIGHT]: number; [PieceColor.DARK]: number };
 
+// useSearchParams() requires a Suspense boundary somewhere above it in the App
+// Router — this wrapper is that boundary, keeping the exported component's own
+// signature/usage (`<GameBoard />`) unchanged for page.tsx.
 export default function GameBoard() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen text-gray-500">Loading...</div>}>
+      <GameBoardInner />
+    </Suspense>
+  );
+}
+
+function GameBoardInner() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
@@ -50,9 +62,25 @@ export default function GameBoard() {
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
   const [timeControl, setTimeControl] = useState<'bullet' | 'blitz' | 'rapid' | 'correspondence'>('blitz');
 
-  const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  // Real bug found verifying Phase 9, not introduced by it: this used to parse
+  // `window.location.search` by hand, read once during render. On a client-side
+  // transition (e.g. router.push from another page), that first render can commit
+  // while `window.location` still reflects the PREVIOUS url — and since the
+  // useEffect below that reads these has an empty dependency array, whatever it saw
+  // at that first commit is what it's permanently stuck with, even though later
+  // renders correctly show the right value. `tournamentId` (wired in Phase 5, linked
+  // to via router.push from /tournaments/[id]) had this exact same latent bug the
+  // whole time — it just never had a test that clicked through via a client-side
+  // transition rather than a direct URL load. `useSearchParams()` is the App
+  // Router's reactive alternative and doesn't have this problem: it's driven by the
+  // router's own resolved state, not raw browser location, so it's already correct
+  // on the very first render of the newly-mounted route.
+  const searchParams = useSearchParams();
   const tIdStr = searchParams.get('tournamentId');
   const tournamentIdToJoin = tIdStr ? parseInt(tIdStr, 10) : null;
+  // Arriving from the /watch dashboard (Phase 9) with a specific game to spectate —
+  // see WatchPage's "Watch" button, which links here as `/?watch=<roomId>`.
+  const roomIdToSpectate = searchParams.get('watch');
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -63,12 +91,16 @@ export default function GameBoard() {
 
     newSocket.on('connect', () => {
       setConnected(true);
-      if (tournamentIdToJoin) {
+      if (roomIdToSpectate) {
+        setStatus('Connecting to spectate...');
+        newSocket.emit('joinSpectator', { roomId: roomIdToSpectate });
+      } else if (tournamentIdToJoin) {
         setStatus(`Connected. Click 'Find Tournament Match' to join the Arena.`);
+        newSocket.emit('getActiveGames');
       } else {
         setStatus('Connected to server. Click Find Match to begin.');
+        newSocket.emit('getActiveGames');
       }
-      newSocket.emit('getActiveGames');
     });
 
     newSocket.on('disconnect', () => setConnected(false));
@@ -175,6 +207,13 @@ export default function GameBoard() {
 
     newSocket.on('invalidMove', () => {
       console.warn('Server rejected move as invalid.');
+    });
+
+    // Most relevant when arriving via /watch's "Watch" link (Phase 9): the game may
+    // have already ended (or the roomId was stale/mistyped) by the time this loads —
+    // without this, the user would be stuck on "Connecting to spectate..." forever.
+    newSocket.on('error', (data: { message: string }) => {
+      if (roomIdToSpectate) setStatus(`Couldn't join as spectator: ${data.message}`);
     });
 
     newSocket.on('spectatorJoined', (data: { count: number }) => setSpectatorCount(data.count));
@@ -339,6 +378,12 @@ export default function GameBoard() {
             </ul>
           </div>
         )}
+
+        {/* Full dashboard (Phase 9): ratings, variant, board size, and time control
+            per game — more than fits in this compact inline list. */}
+        <a href="/watch" className="mt-4 text-sm text-blue-600 hover:underline">
+          View full Live Games dashboard →
+        </a>
       </div>
     );
   }

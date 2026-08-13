@@ -193,7 +193,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         if (color) {
           this.handlePlayerLeft(roomId, room, color);
         } else {
+          // Real bug found while verifying Phase 9: a departing spectator was removed
+          // from room.spectators, but no updated count was ever broadcast — only
+          // handleJoinSpectator's *increment* was. Everyone still watching (and both
+          // players) would see the spectator count only ever go up, never down.
           room.spectators = room.spectators.filter(s => s !== client.id);
+          this.server.to(roomId).emit('spectatorJoined', { count: room.spectators.length });
         }
       }
       this.socketToRoom.delete(client.id);
@@ -275,13 +280,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     room.turnStartedAt = Date.now();
   }
 
+  // Phase 9: the live-games dashboard needs enough to decide what's worth watching —
+  // not just who's playing, but their ratings, what variant/board they're on, and the
+  // clock — so this now mirrors everything the room itself already tracks instead of
+  // just the two usernames it exposed before.
   @SubscribeMessage('getActiveGames')
   handleGetActiveGames(@ConnectedSocket() client: Socket) {
     const games = Array.from(this.activeGames.values()).map(room => ({
       roomId: room.roomId,
       player1: room.playerProfiles[PieceColor.LIGHT]?.username || 'Player 1',
+      player1Rating: room.playerProfiles[PieceColor.LIGHT]?.rating ?? null,
       player2: room.aiDifficulty ? 'AI' : (room.playerProfiles[PieceColor.DARK]?.username || 'Player 2'),
+      player2Rating: room.aiDifficulty ? null : (room.playerProfiles[PieceColor.DARK]?.rating ?? null),
       spectatorsCount: room.spectators.length,
+      variant: room.rules.variant,
+      boardSize: room.rules.boardSize,
+      timeControl: room.timeControl.name,
+      isVsAi: !!room.aiDifficulty,
     }));
     client.emit('activeGamesList', games);
   }
