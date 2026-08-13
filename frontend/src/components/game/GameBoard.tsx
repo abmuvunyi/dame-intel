@@ -293,83 +293,84 @@ function GameBoardInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clocks, turnStartedAt, currentTurn]);
 
-  if (!board) {
+    if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
+      <div className="flex flex-col items-center justify-center w-full h-full pt-8">
         <div className="absolute top-4 right-4"><ConnectionStatus connected={connected} /></div>
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-              Board Size:
-              <select
-                value={boardSize}
-                onChange={e => setBoardSize(parseInt(e.target.value))}
-                className="ml-2 border rounded p-1 text-sm bg-white"
-              >
-                <option value={8}>8x8 (Standard)</option>
-                <option value={10}>10x10 (International)</option>
-              </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceMajorityCapture}
-                onChange={e => setForceMajorityCapture(e.target.checked)}
-                className="rounded"
-              />
-              Force Majority Capture
-            </label>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-              Time Control:
-              <select
-                value={timeControl}
-                onChange={e => setTimeControl(e.target.value as typeof timeControl)}
-                className="ml-2 border rounded p-1 text-sm bg-white"
-              >
-                <option value="bullet">Bullet (2+1)</option>
-                <option value="blitz">Blitz (5+3)</option>
-                <option value="rapid">Rapid (10+5)</option>
-                <option value="correspondence">Correspondence</option>
-              </select>
-            </label>
+        <div className="w-full max-w-md bg-[#262421] rounded text-white overflow-hidden shadow-lg border border-[#3a3835]">
+          <div className="p-4 border-b border-[#3a3835]">
+            <h2 className="text-xl font-bold text-center">Play Draughts</h2>
           </div>
+          <div className="p-4 space-y-4">
+             <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setBoardSize(8)}
+                  className={`p-3 text-sm rounded transition-colors ${boardSize === 8 ? 'bg-[#312e2b] border border-[#81b64c]' : 'bg-[#1b1918] border border-transparent hover:bg-[#312e2b]'}`}
+                >
+                  8x8 (Standard)
+                </button>
+                <button
+                  onClick={() => setBoardSize(10)}
+                  className={`p-3 text-sm rounded transition-colors ${boardSize === 10 ? 'bg-[#312e2b] border border-[#81b64c]' : 'bg-[#1b1918] border border-transparent hover:bg-[#312e2b]'}`}
+                >
+                  10x10 (International)
+                </button>
+             </div>
 
-          <button
-            onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
-          </button>
+             <div className="grid grid-cols-4 gap-2 mt-4">
+                {['bullet', 'blitz', 'rapid', 'correspondence'].map(tc => (
+                   <button
+                     key={tc}
+                     onClick={() => setTimeControl(tc as 'bullet'|'blitz'|'rapid'|'correspondence')}
+                     className={`p-2 text-xs rounded transition-colors ${timeControl === tc ? 'bg-[#312e2b] border border-[#81b64c]' : 'bg-[#1b1918] border border-transparent hover:bg-[#312e2b]'}`}
+                   >
+                     {tc}
+                   </button>
+                ))}
+             </div>
 
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
+             <button
+               onClick={() => {
+                 const is10x10 = boardSize === 10;
+                 setForceMajorityCapture(is10x10);
+                 handleFindMatch();
+               }}
+               className="w-full py-4 mt-6 bg-[#81b64c] hover:bg-[#a3d160] text-white font-bold rounded shadow-lg text-lg transition-colors"
+             >
+               Play Multiplayer
+             </button>
 
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
-              >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
-              </button>
-            ))}
+             <div className="text-center pt-2 text-sm text-[#989795] font-medium">OR</div>
+
+             <div className="grid grid-cols-2 gap-2">
+               {[1, 2, 3, 4, 5, 6, 7].map(level => (
+                 <button
+                   key={level}
+                   onClick={() => {
+                     const is10x10 = boardSize === 10;
+                     setForceMajorityCapture(is10x10);
+                     handlePlayAI(level);
+                   }}
+                   className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-[#312e2b] hover:bg-[#433f3c] border border-[#3a3835]'}`}
+                 >
+                   AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                 </button>
+               ))}
+             </div>
           </div>
         </div>
 
         {activeGames.length > 0 && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
+          <div className="mt-8 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-4 text-center text-white">Live Games</h3>
             <ul className="space-y-2">
               {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                  <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
+                <li key={i} className="flex justify-between items-center bg-[#262421] p-3 rounded border border-[#3a3835]">
+                  <span className="font-medium text-white">{game.player1} vs {game.player2}</span>
                   <button
                     onClick={() => handleWatchGame(game.roomId)}
-                    className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                    className="px-4 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
                   >
                     Watch ({game.spectatorsCount} 👀)
                   </button>
@@ -378,12 +379,7 @@ function GameBoardInner() {
             </ul>
           </div>
         )}
-
-        {/* Full dashboard (Phase 9): ratings, variant, board size, and time control
-            per game — more than fits in this compact inline list. */}
-        <a href="/watch" className="mt-4 text-sm text-blue-600 hover:underline">
-          View full Live Games dashboard →
-        </a>
+        <p className="mt-4 text-[#989795] text-sm">{status}</p>
       </div>
     );
   }
@@ -394,18 +390,18 @@ function GameBoardInner() {
   const flipped = autoFlip !== manualFlip;
 
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 w-full mx-auto px-4 text-white min-h-[calc(100vh-2rem)] items-start pt-16">
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
         <div className="w-full flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
+          <h1 className="text-2xl font-bold text-white">Game Room</h1>
           <ConnectionStatus connected={connected} />
         </div>
         <div className="flex space-x-4 text-sm text-gray-500 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
+        <p className="text-md text-[#989795]">{status}</p>
+        <p className="text-xl font-semibold text-[#81b64c]">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : 'Waiting for opponent...')}
         </p>
 
@@ -425,15 +421,15 @@ function GameBoardInner() {
         </div>
 
         <div className="flex gap-4">
-          <button onClick={() => setManualFlip(f => !f)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded shadow-sm hover:bg-slate-200 text-xs font-semibold transition">
+          <button onClick={() => setManualFlip(f => !f)} className="px-3 py-1.5 bg-[#312e2b] text-white rounded border border-[#3a3835] hover:bg-[#433f3c] text-xs font-semibold transition">
             ⇅ Flip Board
           </button>
           {myColor && !gameOver && (
             <>
-              <button onClick={handleOfferDraw} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-sm font-semibold transition">
+              <button onClick={handleOfferDraw} className="px-4 py-2 bg-[#312e2b] text-white rounded border border-[#3a3835] hover:bg-[#433f3c] text-sm font-semibold transition">
                 Offer Draw
               </button>
-              <button onClick={handleResign} className="px-4 py-2 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-sm font-semibold transition">
+              <button onClick={handleResign} className="px-4 py-2 bg-red-900/50 text-red-200 rounded border border-red-900 hover:bg-red-800/60 text-sm font-semibold transition">
                 Resign
               </button>
             </>
@@ -468,22 +464,22 @@ function GameBoardInner() {
       </div>
 
       {/* Side Column: moves + chat */}
-      <div className="w-full md:w-80 flex flex-col gap-4">
+      <div className="w-full lg:w-96 flex flex-col gap-4 text-white">
         <MoveList moves={moveHistory} boardSize={board.length} />
 
-        <div className="flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-72">
-          <div className="bg-slate-800 text-white p-4 rounded-t-lg">
+        <div className="flex flex-col bg-[#262421] rounded shadow-xl border border-[#3a3835] h-72">
+          <div className="bg-[#21201d] text-white p-4 rounded-t border-b border-[#3a3835]">
             <h3 className="font-bold">Live Chat</h3>
           </div>
 
-          <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+          <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#262421]">
             {chatMessages.length === 0 ? (
-              <p className="text-center text-gray-400 text-sm mt-10">No messages yet. Say hi!</p>
+              <p className="text-center text-[#989795] text-sm mt-10">No messages yet. Say hi!</p>
             ) : (
               chatMessages.map((msg, i) => (
                 <div key={i} className="flex flex-col">
-                  <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                  <span className="bg-white p-2 rounded shadow-sm text-sm border border-gray-100 inline-block w-fit max-w-[90%] break-words">
+                  <span className="text-xs font-semibold text-[#989795]">{msg.sender}</span>
+                  <span className="bg-[#312e2b] p-2 rounded shadow-sm text-sm border border-[#3a3835] inline-block w-fit max-w-[90%] break-words">
                     {msg.message}
                   </span>
                 </div>
@@ -491,16 +487,16 @@ function GameBoardInner() {
             )}
           </div>
 
-          <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
+          <div className="p-3 border-t border-[#3a3835] bg-[#21201d] rounded-b">
             <form onSubmit={handleSendMessage} className="flex gap-2">
               <input
                 type="text"
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 placeholder="Type a message..."
-                className="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 text-sm bg-[#312e2b] border border-[#3a3835] rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#81b64c]"
               />
-              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700 transition">
+              <button type="submit" className="bg-[#81b64c] text-white px-4 py-2 rounded text-sm font-semibold hover:bg-[#a3d160] transition">
                 Send
               </button>
             </form>
