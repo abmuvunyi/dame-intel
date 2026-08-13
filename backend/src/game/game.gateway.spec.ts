@@ -381,3 +381,158 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
     expect(mockServer.emitted.some((e: any) => e.room === 'p1' && e.event === 'waitingForOpponent')).toBe(true);
   });
 });
+
+describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+
+  // Ratings kept within matchmaking.ts's INITIAL_BAND (100) so they pair immediately,
+  // same as every other matchTwoPlayers()-style helper in this file — but still
+  // distinct values, so the getActiveGames test can tell player1Rating and
+  // player2Rating apart rather than both accidentally being the same number.
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1450, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1500, passwordHash: 'x' },
+  };
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  async function matchTwoPlayers(rules: any = { boardSize: 10, variant: 'international' }, timeControl = 'rapid') {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+    await gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules, timeControl });
+    await gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules, timeControl });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    expect(roomId).toBeDefined();
+    return roomId as string;
+  }
+
+  describe('live games dashboard (getActiveGames)', () => {
+    it('lists an active game with both players\' usernames, ratings, variant, board size, and time control', async () => {
+      await matchTwoPlayers({ boardSize: 10, variant: 'international' }, 'rapid');
+      const emitted: any[] = [];
+      gw.handleGetActiveGames(mockSocket('viewer', undefined, emitted) as any);
+
+      const list = emitted.find(e => e.event === 'activeGamesList')?.payload;
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        player1: 'alice',
+        player1Rating: 1450,
+        player2: 'bob',
+        player2Rating: 1500,
+        variant: 'international',
+        boardSize: 10,
+        timeControl: 'rapid',
+        isVsAi: false,
+        spectatorsCount: 0,
+      });
+    });
+
+    it('reflects the current spectator count', async () => {
+      const roomId = await matchTwoPlayers();
+      gw.handleJoinSpectator(mockSocket('watcher1') as any, { roomId });
+      gw.handleJoinSpectator(mockSocket('watcher2') as any, { roomId });
+
+      const emitted: any[] = [];
+      gw.handleGetActiveGames(mockSocket('viewer', undefined, emitted) as any);
+      expect(emitted.find(e => e.event === 'activeGamesList')?.payload[0].spectatorsCount).toBe(2);
+    });
+  });
+
+  describe('spectating is read-only and receives the live broadcast channel', () => {
+    it('sends a spectator the current position with no color and no legal moves to submit', async () => {
+      const roomId = await matchTwoPlayers();
+      const emitted: any[] = [];
+      gw.handleJoinSpectator(mockSocket('watcher', undefined, emitted) as any, { roomId });
+
+      const gameStart = emitted.find(e => e.event === 'gameStart')?.payload;
+      expect(gameStart).toBeDefined();
+      expect(gameStart.color).toBeNull();
+      expect(gameStart.legalMoves).toEqual([]);
+      expect(gameStart.board).toBeDefined();
+      expect(gameStart.roomId).toBe(roomId);
+    });
+
+    it('joins the same broadcast room the players are in, so it receives the same server.to(roomId) events', async () => {
+      const roomId = await matchTwoPlayers();
+      gw.handleJoinSpectator(mockSocket('watcher') as any, { roomId });
+      expect((gw as any).socketToRoom.get('watcher')).toBe(roomId);
+
+      const room = (gw as any).activeGames.get(roomId);
+      expect(room.spectators).toContain('watcher');
+    });
+
+    it('rejects a move submitted by a spectator and leaves the game state completely unchanged', async () => {
+      const roomId = await matchTwoPlayers();
+      gw.handleJoinSpectator(mockSocket('watcher') as any, { roomId });
+      const room = (gw as any).activeGames.get(roomId);
+      const boardBefore = JSON.stringify(room.engine.getBoard());
+      const movesBefore = room.moves.length;
+
+      const legalMove = room.engine.getLegalMoves()[0];
+      const result = gw.handleMakeMove(mockSocket('watcher') as any, legalMove);
+
+      expect(result).toEqual({ error: 'Not a player in this game' });
+      expect(JSON.stringify(room.engine.getBoard())).toBe(boardBefore); // engine state untouched
+      expect(room.moves.length).toBe(movesBefore); // nothing recorded
+    });
+
+    // Regression, found while verifying this phase: handleJoinSpectator broadcasts an
+    // updated count on arrival, but nothing broadcast an updated count on departure —
+    // room.spectators shrank correctly, the count everyone was shown just never
+    // reflected it. Fixed in handleDisconnect.
+    it('broadcasts an updated spectator count when a spectator disconnects, not just when one joins', async () => {
+      const roomId = await matchTwoPlayers();
+      gw.handleJoinSpectator(mockSocket('watcher1') as any, { roomId });
+      gw.handleJoinSpectator(mockSocket('watcher2') as any, { roomId });
+      mockServer.emitted.length = 0;
+
+      gw.handleDisconnect(mockSocket('watcher1') as any);
+
+      const room = (gw as any).activeGames.get(roomId);
+      expect(room.spectators).toEqual(['watcher2']);
+      const update = mockServer.emitted.find((e: any) => e.event === 'spectatorJoined');
+      expect(update?.payload.count).toBe(1); // not still 2
+    });
+
+    it('does not treat a departing spectator as a player leaving (game stays live, no winner declared)', async () => {
+      const roomId = await matchTwoPlayers();
+      gw.handleJoinSpectator(mockSocket('watcher') as any, { roomId });
+      mockServer.emitted.length = 0;
+
+      gw.handleDisconnect(mockSocket('watcher') as any);
+
+      expect((gw as any).activeGames.get(roomId)).toBeDefined();
+      expect(mockServer.emitted.some((e: any) => e.event === 'gameOver')).toBe(false);
+      expect(mockServer.emitted.some((e: any) => e.event === 'opponentDisconnected')).toBe(false);
+    });
+  });
+});
