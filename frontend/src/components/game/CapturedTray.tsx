@@ -12,18 +12,18 @@ interface CapturedTrayProps {
 export default function CapturedTray({ captured, label }: CapturedTrayProps) {
   if (captured.length === 0) {
     return (
-      <div className="flex items-center gap-2 text-xs text-gray-400">
+      <div className="flex items-center gap-2 text-xs text-[#989795]">
         <span className="font-semibold">{label}:</span> none captured
       </div>
     );
   }
 
   const color = captured[0]?.color;
-  const dotBase = color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-400' : 'bg-slate-800 border-slate-950';
+  const dotBase = color === PieceColor.LIGHT ? 'bg-[#f5f5f5] border-[#dcdcdc]' : 'bg-[#333333] border-[#1a1a1a]';
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-xs font-semibold text-gray-500">{label}:</span>
+      <span className="text-xs font-semibold text-[#989795]">{label}:</span>
       {captured.map((p, i) => (
         <div
           key={i}

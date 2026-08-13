@@ -22,17 +22,17 @@ export default function MoveList({ moves, boardSize }: MoveListProps) {
   }
 
   return (
-    <div className="flex flex-col bg-white rounded-lg shadow border border-gray-200 h-64">
-      <div className="bg-slate-800 text-white px-4 py-2 rounded-t-lg text-sm font-bold">Moves</div>
+    <div className="flex flex-col bg-[#262421] rounded shadow border border-[#3a3835] h-64 text-white">
+      <div className="bg-[#21201d] text-white px-4 py-2 rounded-t text-sm font-bold border-b border-[#3a3835]">Moves</div>
       <div className="flex-1 overflow-y-auto p-2 font-mono text-sm">
         {pairs.length === 0 ? (
-          <p className="text-center text-gray-400 text-sm mt-6">No moves yet.</p>
+          <p className="text-center text-[#989795] text-sm mt-6">No moves yet.</p>
         ) : (
           pairs.map(p => (
-            <div key={p.num} className="flex gap-2 px-2 py-1 odd:bg-gray-50 rounded">
-              <span className="text-gray-400 w-6 text-right">{p.num}.</span>
-              <span className="w-16 text-slate-700">{p.light ? formatMove(p.light, boardSize) : ''}</span>
-              <span className="w-16 text-slate-900 font-semibold">{p.dark ? formatMove(p.dark, boardSize) : ''}</span>
+            <div key={p.num} className="flex gap-2 px-2 py-1 odd:bg-[#312e2b] rounded">
+              <span className="text-[#989795] w-6 text-right">{p.num}.</span>
+              <span className="w-16 text-white">{p.light ? formatMove(p.light, boardSize) : ''}</span>
+              <span className="w-16 text-[#989795] font-semibold">{p.dark ? formatMove(p.dark, boardSize) : ''}</span>
             </div>
           ))
         )}

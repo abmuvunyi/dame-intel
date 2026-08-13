@@ -162,21 +162,21 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
   }, [drag?.id]);
 
   const is10x10 = size === 10;
-  const cellPx = is10x10 ? 48 : 64;
-  const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
+  const cellPx = is10x10 ? 56 : 72;
+  const pieceClass = is10x10 ? 'w-12 h-12 border-4' : 'w-14 h-14 border-4';
   const stackClass = is10x10
-    ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1'
-    : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-  const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
+    ? 'w-12 h-12 border-4 absolute -top-1 -left-1'
+    : 'w-14 h-14 border-4 absolute -top-1.5 -left-1.5';
+  const kingOffset = 'absolute bottom-1 right-1';
 
   const pieceStyle = (color: PieceColor) => ({
-    className: `${pieceClass} rounded-full shadow-md ${color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}`,
+    className: `${pieceClass} rounded-full shadow-md ${color === PieceColor.LIGHT ? 'bg-[#f5f5f5] border-[#dcdcdc]' : 'bg-[#333333] border-[#1a1a1a]'}`,
   });
 
   return (
     <div
       ref={boardRef}
-      className="relative border-[6px] border-slate-800 bg-slate-200 shadow-2xl rounded-sm select-none touch-none"
+      className="relative border-[6px] border-[#312e2b] bg-[#262421] shadow-2xl rounded-sm select-none touch-none"
       style={{ width: size * cellPx + 8, height: size * cellPx + 8, padding: 4 }}
     >
       {/* Squares (background grid + click/drop targets) */}
@@ -187,9 +187,9 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
           const isSelected = selectedPos?.row === row && selectedPos?.col === col;
           const isHighlighted = validDestinations.some(m => m.to.row === row && m.to.col === col);
 
-          let bg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]';
-          if (isSelected) bg = 'bg-yellow-400';
-          else if (isHighlighted) bg = 'bg-green-400/80';
+          let bg = isDarkSquare ? 'bg-[#739552]' : 'bg-[#ebecd0]';
+          if (isSelected) bg = 'bg-[#f6f669]';
+          else if (isHighlighted) bg = 'bg-[#f6f669]/60';
 
           return (
             <div
@@ -202,7 +202,7 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               style={{ width: cellPx, height: cellPx, left: dc * cellPx + 4, top: dr * cellPx + 4 }}
             >
               {isHighlighted && !board[row][col] && (
-                <div className="w-1/3 h-1/3 rounded-full bg-green-700/40 pointer-events-none" />
+                <div className="w-1/3 h-1/3 rounded-full bg-black/20 pointer-events-none" />
               )}
             </div>
           );

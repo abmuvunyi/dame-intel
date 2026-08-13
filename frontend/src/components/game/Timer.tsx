@@ -48,7 +48,7 @@ export default function Timer({ initialTime, isActive, onTimeout }: TimerProps) 
   const isLowTime = timeLeft < 30;
 
   return (
-    <div className={`px-4 py-2 rounded font-mono text-2xl font-bold ${isActive ? (isLowTime ? 'bg-red-500 text-white animate-pulse' : 'bg-yellow-400 text-slate-900') : 'bg-slate-200 text-slate-500'}`}>
+    <div className={`px-4 py-2 rounded font-mono text-2xl font-bold ${isActive ? (isLowTime ? 'bg-red-900/80 text-white animate-pulse' : 'bg-[#312e2b] text-white border border-[#81b64c]') : 'bg-[#262421] text-[#989795] border border-[#3a3835]'}`}>
       {formatTime(timeLeft)}
     </div>
   );
