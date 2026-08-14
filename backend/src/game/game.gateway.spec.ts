@@ -7,6 +7,7 @@ import { HistoryService } from '../history/history.service';
 import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
 import { RatingService } from '../rating/rating.service';
+import { PresenceService } from '../presence/presence.service';
 
 // Minimal stand-in for socket.io's Server: just enough surface for the gateway's
 // `this.server.to(...).emit(...)` and `this.server.sockets.sockets.get(...).join(...)`
@@ -30,6 +31,7 @@ describe('GameGateway', () => {
       providers: [
         GameGateway,
         AiService,
+        PresenceService,
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: {} },
         { provide: HistoryService, useValue: {} },
@@ -129,6 +131,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
       providers: [
         GameGateway,
         AiService,
+        PresenceService,
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         {
           provide: UsersService,
@@ -316,6 +319,7 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
       providers: [
         GameGateway,
         AiService,
+        PresenceService,
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -401,6 +405,7 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
       providers: [
         GameGateway,
         AiService,
+        PresenceService,
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -533,6 +538,137 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
       expect((gw as any).activeGames.get(roomId)).toBeDefined();
       expect(mockServer.emitted.some((e: any) => e.event === 'gameOver')).toBe(false);
       expect(mockServer.emitted.some((e: any) => e.event === 'opponentDisconnected')).toBe(false);
+    });
+  });
+});
+
+describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+  let presenceService: PresenceService;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x' },
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    presenceService = module.get<PresenceService>(PresenceService);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+  });
+
+  describe('presence (online-status for the friends list)', () => {
+    it('marks an authenticated user online on connect and offline on disconnect', async () => {
+      expect(presenceService.isOnline(1)).toBe(false);
+
+      await gw.handleConnection(mockSocket('p1', '1') as any);
+      expect(presenceService.isOnline(1)).toBe(true);
+
+      gw.handleDisconnect(mockSocket('p1') as any);
+      expect(presenceService.isOnline(1)).toBe(false);
+    });
+
+    it('never marks a user online for an anonymous (unauthenticated) connection', async () => {
+      await gw.handleConnection(mockSocket('anon') as any); // no token
+      expect(presenceService.getOnlineUserIds()).toEqual([]);
+    });
+
+    it('does not flicker a user offline if they already reconnected under a new socket', async () => {
+      await gw.handleConnection(mockSocket('p1-old', '1') as any);
+      await gw.handleConnection(mockSocket('p1-new', '1') as any); // reconnect before the old socket's disconnect fires
+      expect(presenceService.isOnline(1)).toBe(true);
+
+      gw.handleDisconnect(mockSocket('p1-old') as any); // stale disconnect event arrives late
+      expect(presenceService.isOnline(1)).toBe(true); // still online — the new socket is the current one
+    });
+  });
+
+  describe('chat: profanity filtering and spam rate-limiting', () => {
+    async function setUpRoom() {
+      await gw.handleConnection(mockSocket('p1', '1') as any);
+      await gw.handleConnection(mockSocket('p2', '2') as any);
+      gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 } });
+      gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 } });
+      const roomId = (gw as any).socketToRoom.get('p1');
+      (gw as any).activeGames.get(roomId)?.flagTimer && clearTimeout((gw as any).activeGames.get(roomId).flagTimer);
+      return roomId as string;
+    }
+
+    it('censors a profane word before broadcasting it, but still delivers the message', async () => {
+      const roomId = await setUpRoom();
+      gw.handleSendMessage(mockSocket('p1') as any, { roomId, message: 'this move is shit' });
+
+      const received = mockServer.emitted.find((e: any) => e.event === 'receiveMessage');
+      expect(received?.payload.message).toBe('this move is ****');
+      expect(received?.payload.sender).toBe('alice');
+    });
+
+    it('leaves a clean message completely unmodified', async () => {
+      const roomId = await setUpRoom();
+      gw.handleSendMessage(mockSocket('p1') as any, { roomId, message: 'good game!' });
+
+      const received = mockServer.emitted.find((e: any) => e.event === 'receiveMessage');
+      expect(received?.payload.message).toBe('good game!');
+    });
+
+    it('blocks a sender after too many messages in a short window, and does not broadcast the blocked one', async () => {
+      const roomId = await setUpRoom();
+      const emitted: { room: string, event: string, payload: any }[] = [];
+
+      for (let i = 0; i < 5; i++) {
+        gw.handleSendMessage(mockSocket('p1', undefined, emitted) as any, { roomId, message: `message ${i}` });
+      }
+      mockServer.emitted.length = 0; // only care about what happens on the NEXT (6th) attempt
+      gw.handleSendMessage(mockSocket('p1', undefined, emitted) as any, { roomId, message: 'one too many' });
+
+      expect(mockServer.emitted.some((e: any) => e.event === 'receiveMessage')).toBe(false); // never broadcast
+      expect(emitted.some(e => e.event === 'chatError')).toBe(true); // sender told why
+    });
+
+    it('does not rate-limit two different senders independently of each other', async () => {
+      const roomId = await setUpRoom();
+      for (let i = 0; i < 5; i++) {
+        gw.handleSendMessage(mockSocket('p1') as any, { roomId, message: `spam ${i}` });
+      }
+      mockServer.emitted.length = 0;
+
+      // p1 is now rate-limited, but p2 hasn't sent anything yet — their first message
+      // should go through normally.
+      gw.handleSendMessage(mockSocket('p2') as any, { roomId, message: 'hello from bob' });
+      const received = mockServer.emitted.find((e: any) => e.event === 'receiveMessage');
+      expect(received?.payload.sender).toBe('bob');
+      expect(received?.payload.message).toBe('hello from bob');
+    });
+
+    it('ignores an empty or whitespace-only message rather than broadcasting it', async () => {
+      const roomId = await setUpRoom();
+      gw.handleSendMessage(mockSocket('p1') as any, { roomId, message: '   ' });
+      expect(mockServer.emitted.some((e: any) => e.event === 'receiveMessage')).toBe(false);
     });
   });
 });

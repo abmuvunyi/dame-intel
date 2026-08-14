@@ -71,6 +71,18 @@ export default function Profile() {
     }
   };
 
+  const handleDeclineFriend = async (id: number) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/decline/${id}`, {}, {
+         headers: { Authorization: `Bearer ${token}` }
+      });
+      setFriends(friends.filter(f => f.id !== id));
+    } catch(err: any) {
+      alert(err.response?.data?.message || 'Error declining request');
+    }
+  };
+
   if (!profile) return <div className="text-center p-10">Loading profile...</div>;
 
   return (
@@ -168,22 +180,44 @@ export default function Profile() {
               {friends.length === 0 && <p className="text-gray-500">No friends added yet.</p>}
               {friends.map((f, i) => (
                 <li key={i} className="py-3 flex justify-between items-center">
-                  <span className="font-medium">{f.username}</span>
+                  <span className="font-medium flex items-center gap-2">
+                    {f.status === 'ACCEPTED' && (
+                      <span
+                        className={`inline-block w-2.5 h-2.5 rounded-full ${f.online ? 'bg-green-500' : 'bg-gray-300'}`}
+                        title={f.online ? 'Online' : 'Offline'}
+                      />
+                    )}
+                    {f.username}
+                  </span>
                   {f.status === 'ACCEPTED' ? (
-                     <span className="text-green-600 text-sm font-semibold">Friend</span>
+                     <span className={`text-sm font-semibold ${f.online ? 'text-green-600' : 'text-gray-400'}`}>
+                       {f.online ? 'Online' : 'Offline'}
+                     </span>
                   ) : f.isIncomingRequest ? (
-                     <button
-                       onClick={() => handleAcceptFriend(f.id)}
-                       className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
-                     >
-                       Accept Request
-                     </button>
+                     <div className="flex gap-2">
+                       <button
+                         onClick={() => handleAcceptFriend(f.id)}
+                         className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                       >
+                         Accept
+                       </button>
+                       <button
+                         onClick={() => handleDeclineFriend(f.id)}
+                         className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+                       >
+                         Decline
+                       </button>
+                     </div>
                   ) : (
                      <span className="text-gray-400 text-sm">Request Sent</span>
                   )}
                 </li>
               ))}
             </ul>
+
+            <div className="mt-6 pt-4 border-t border-gray-200">
+              <a href="/clubs" className="text-sm text-blue-600 hover:underline">Browse Clubs →</a>
+            </div>
           </>
         )}
       </div>

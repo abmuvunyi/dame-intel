@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Friendship } from './friendship.entity';
 import { UsersService } from '../users/users.service';
+import { PresenceService } from '../presence/presence.service';
 
 @Injectable()
 export class FriendsService {
@@ -10,6 +11,7 @@ export class FriendsService {
     @InjectRepository(Friendship)
     private friendshipRepository: Repository<Friendship>,
     private usersService: UsersService,
+    private presenceService: PresenceService,
   ) {}
 
   async sendFriendRequest(senderId: number, targetUsername: string) {
@@ -53,6 +55,24 @@ export class FriendsService {
     return this.friendshipRepository.save(friendship);
   }
 
+  // Declining (unlike accepting) deletes the request outright rather than marking it
+  // some 'DECLINED' status — sendFriendRequest's duplicate check above doesn't filter
+  // by status, so a permanently-kept 'DECLINED' row would silently block either side
+  // from ever sending a fresh request again. Deleting it means "no" isn't forever.
+  async declineFriendRequest(userId: number, friendshipId: number) {
+    const friendship = await this.friendshipRepository.findOne({
+      where: { id: friendshipId },
+      relations: ['user1', 'user2']
+    });
+
+    if (!friendship || friendship.user2.id !== userId || friendship.status !== 'PENDING') {
+      throw new BadRequestException('Invalid request');
+    }
+
+    await this.friendshipRepository.remove(friendship);
+    return { success: true };
+  }
+
   async getFriendsList(userId: number) {
     const friendships = await this.friendshipRepository.find({
       where: [
@@ -71,7 +91,11 @@ export class FriendsService {
         friendId: friend.id,
         username: friend.username,
         status: f.status,
-        isIncomingRequest: isPending && f.user2.id === userId
+        isIncomingRequest: isPending && f.user2.id === userId,
+        // Phase 10: "has a live socket right now", from the same in-memory registry
+        // GameGateway updates on every connect/disconnect — not persisted, so this is
+        // always a snapshot of the current moment, same as a real presence indicator.
+        online: this.presenceService.isOnline(friend.id),
       };
     });
   }

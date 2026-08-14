@@ -21,4 +21,9 @@ export class FriendsController {
   async acceptFriend(@Request() req: any, @Param('id') friendshipId: string) {
     return this.friendsService.acceptFriendRequest(req.user.sub, parseInt(friendshipId, 10));
   }
+
+  @Post('decline/:id')
+  async declineFriend(@Request() req: any, @Param('id') friendshipId: string) {
+    return this.friendsService.declineFriendRequest(req.user.sub, parseInt(friendshipId, 10));
+  }
 }

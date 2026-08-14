@@ -13,6 +13,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { FriendsModule } from './friends/friends.module';
 import { AnticheatModule } from './anticheat/anticheat.module';
 import { RatingModule } from './rating/rating.module';
+import { ClubsModule } from './clubs/clubs.module';
+import { PresenceModule } from './presence/presence.module';
 
 @Module({
   imports: [
@@ -51,6 +53,8 @@ import { RatingModule } from './rating/rating.module';
     FriendsModule,
     AnticheatModule,
     RatingModule,
+    ClubsModule,
+    PresenceModule,
   ],
   controllers: [AppController],
   providers: [AppService],
