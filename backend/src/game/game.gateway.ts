@@ -23,6 +23,8 @@ import { GameRules } from './engine/engine.service';
 import { SeekEntry, sweepMatches } from './matchmaking';
 import { TimeControl, TimeControlName, TIME_CONTROLS, resolveTimeControl } from './time-control';
 import { RatingService } from '../rating/rating.service';
+import { PresenceService } from '../presence/presence.service';
+import { filterMessage, pruneAndRecordTimestamp, isRateLimited } from './chat-filter';
 
 // How long a disconnected player has to reconnect before their opponent is awarded the
 // win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
@@ -79,6 +81,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly tournamentsService: TournamentsService,
     private readonly anticheatService: AnticheatService,
     private readonly ratingService: RatingService,
+    private readonly presenceService: PresenceService,
   ) {}
 
   @WebSocketServer()
@@ -91,6 +94,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private userIdToSocket: Map<number, string> = new Map(); // For direct challenges & reconnect
   private userIdToRoom: Map<number, string> = new Map(); // For reconnect lookup after a fresh connection
   private pendingChallenges: Map<string, PendingChallenge> = new Map();
+  // Phase 10: per-socket recent chat timestamps, for the sendMessage rate limit below.
+  private chatTimestamps: Map<string, number[]> = new Map();
   private matchmakingInterval?: ReturnType<typeof setInterval>;
 
   onModuleInit() {
@@ -114,6 +119,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           const { passwordHash, ...profile } = user;
           this.socketToUser.set(client.id, profile);
           this.userIdToSocket.set(profile.id, client.id);
+          this.presenceService.markOnline(profile.id); // Phase 10: friends list "online" indicator
           console.log(`Authenticated user connected: ${profile.username}`);
           this.attemptRejoin(client, profile.id);
         }
@@ -176,10 +182,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     console.log(`Client disconnected: ${client.id}`);
 
     this.waitingPlayers = this.waitingPlayers.filter(p => p.id !== client.id);
+    this.chatTimestamps.delete(client.id);
 
     const profile = this.socketToUser.get(client.id);
     if (profile && this.userIdToSocket.get(profile.id) === client.id) {
       this.userIdToSocket.delete(profile.id);
+      // Same guard as above: only mark them offline if THIS socket was still their
+      // current one — a user who already reconnected under a new socket id (e.g. a
+      // brief network blip) shouldn't be flickered offline by the old socket's
+      // disconnect event arriving after the fact.
+      this.presenceService.markOffline(profile.id);
     }
 
     const roomId = this.socketToRoom.get(client.id);
@@ -328,10 +340,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.server.to(room.roomId).emit('spectatorJoined', { count: room.spectators.length });
   }
 
+  // Phase 10: basic spam + profanity filtering — a simple sliding-window rate limit
+  // and wordlist censor (see chat-filter.ts), not a full moderation system.
   @SubscribeMessage('sendMessage')
   handleSendMessage(@ConnectedSocket() client: Socket, @MessageBody() data: { roomId: string, message: string }) {
     const room = this.activeGames.get(data.roomId);
     if (!room) return;
+    if (!data.message || !data.message.trim()) return;
+
+    const now = Date.now();
+    const recent = this.chatTimestamps.get(client.id) ?? [];
+    if (isRateLimited(recent, now)) {
+      client.emit('chatError', { message: 'You are sending messages too fast. Please slow down.' });
+      return;
+    }
+    this.chatTimestamps.set(client.id, pruneAndRecordTimestamp(recent, now));
 
     // Determine sender identity
     let senderName = 'Spectator';
@@ -345,9 +368,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        if (profile) senderName = profile.username;
     }
 
+    const { filtered } = filterMessage(data.message);
+
     this.server.to(data.roomId).emit('receiveMessage', {
       sender: senderName,
-      message: data.message,
+      message: filtered,
       timestamp: new Date().toISOString()
     });
   }

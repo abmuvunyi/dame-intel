@@ -11,8 +11,9 @@ built in Phase 5 (2026-08-10). Glicko-2 rating system built in Phase 6 (2026-08-
 rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). Swiss-pairing tournaments built
 in Phase 8 (2026-08-11). Organizer-configurable tournament settings (registration caps, game
 format/duration, points system) built in Phase 8b (2026-08-12). Spectator mode and a live-games dashboard
-built in Phase 9 (2026-08-13). See "How this was verified" below for exact method, and the per-phase
-sections below for each phase specifically.
+built in Phase 9 (2026-08-13). Social features — friends, in-game/club chat moderation, clubs, and direct
+challenges — built in Phase 10 (2026-08-14). See "How this was verified" below for exact method, and the
+per-phase sections below for each phase specifically.
 
 ## Backend (NestJS)
 
@@ -20,10 +21,14 @@ sections below for each phase specifically.
 |---|---|---|---|---|---|
 | Auth | Y | Y | Y | Y | Controller + service + JWT guard. 1 test only (shallow). Live-verified indirectly: unauthenticated `/profile` correctly redirects to `/login` client-side. |
 | Users | Y | Y | Y | Y | `GET /users/rankings` and `/users/stats` confirmed **live** — routes registered in the running Nest app, hit by the `/rankings` page with zero failed requests. Returns correct empty-state shape (no seeded rating data in a fresh DB, not an error). Core CRUD/ELO methods have 2 tests. |
-| Friends | Y | Y | Y | N | Not exercised live this pass (no UI page hits it directly in the flows tested). Test coverage still just 2 tests, happy-path only. |
+| Friends (`friends.service.ts`/`friends.controller.ts`) | Y | Y | Y | Y | **Extended in Phase 10 (2026-08-14)**, not rebuilt — send/accept already existed. Added `decline` (deletes the request outright rather than a permanent 'DECLINED' status, so a fresh request can be sent again later) and a live `online` field per friend, backed by the new `PresenceService`. 10 tests against real in-memory sqlite (was 1 trivial "should be defined" stub). Live-verified end-to-end, including real online-status flips as a real socket connects/disconnects. |
+| `presence/presence.service.ts` | Y | Y | Y | Y | **New in Phase 10.** Minimal in-memory online-status registry — `GameGateway` marks a user online/offline on real connect/disconnect (with the same "still their current socket?" guard used elsewhere for reconnect races), `FriendsService` reads it for the friends list. 4 tests, plus 3 gateway-integration tests. |
+| Clubs (`clubs.service.ts`/`clubs.controller.ts` + `Club`/`ClubMembership`/`ClubPost` entities) | Y | Y | Y | Y | **New in Phase 10.** Create/join/leave, member list, and a basic flat (no threading) club-only discussion feed — posting/reading both gated on real membership, not just being logged in. Reuses `chat-filter.ts`'s profanity filter for posts. 21 tests against real in-memory sqlite. A real (minor) ordering bug found and fixed: the feed originally sorted by `createdAt`, but sqlite's datetime column is only second-precision, so two posts made within the same second could tie and return in either order — fixed by sorting on `id` instead, which is strictly monotonic with insertion order. |
 | Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
 | Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. |
-| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5; spectator mode completed and load-tested in Phase 9** — see "Phase 5" and "Phase 9" below for the full breakdowns. |
+| Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5; spectator mode completed and load-tested in Phase 9; chat moderation + presence + challenge UI wiring in Phase 10** — see "Phase 5", "Phase 9", and "Phase 10" below for the full breakdowns. |
+| `game/chat-filter.ts` (profanity + spam filter) | Y | Y | Y | Y | **New in Phase 10.** Pure, framework-independent (same pattern as the engine/matchmaking) — word-boundary wordlist censor plus a sliding-window rate limit. 13 unit tests plus 5 gateway-integration tests proving it's actually wired into `sendMessage`. Reused as-is for club discussion posts. |
+| Direct challenges (`challengePlayer`/`respondToChallenge`) | Y | N (pre-existing) | — | Y | **Backend built in Phase 5, frontend UI built in Phase 10.** No new backend tests added this phase (mechanism itself untouched) — live-verified instead, including the full real two-browser accept flow. See "Phase 10" below. |
 | `matchmaking.ts` (rating-band seek pairing) | Y | Y | Y | Y | **New in Phase 5.** Pure, framework-independent pairing logic (same design pattern as the engine) — 15 tests. |
 | `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
@@ -42,10 +47,12 @@ sections below for each phase specifically.
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 24 suites, 156 tests, all passing, ~1.8s (up from 149 as of
-Phase 8b — the +7 are all in `game.gateway.spec.ts`: 2 for the enriched live-games listing and 5 for
-spectator mode, including a regression test for a real spectator-count bug Phase 9 found — see "Phase 9"
-below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 28 suites, 213 tests, all passing, ~1s (up from 156 as of
+Phase 9 — the +57 are Phase 10's `chat-filter.spec.ts` (11 new), `presence.service.spec.ts` (4 new),
+`clubs.service.spec.ts` (15 new), `clubs.controller.spec.ts` (6 new), `friends.service.spec.ts` rebuilt
+from a 1-test "should be defined" stub into 10 real tests (+9), `friends.controller.spec.ts` similarly
+rebuilt into 5 (+4), and 8 new tests in `game.gateway.spec.ts` for presence/chat-filter wiring — see
+"Phase 10" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -53,15 +60,16 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 
 | Page/Component | Exists (Y/N) | Wired to real backend (Y/N) | Verified (Y/N) | Notes |
 |---|---|---|---|---|
-| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. Also handles spectating via `?watch=<roomId>` as of Phase 9. |
-| `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. **Phase 9** fixed a real pre-existing bug: it read `window.location.search` by hand instead of Next's reactive `useSearchParams()`, which could permanently lock in a stale (empty) query-param value when arriving via a client-side route transition rather than a full page load — affected both the new `?watch=` spectate flow and the pre-existing Phase 5 `?tournamentId=` flow identically. Now wrapped in `Suspense` and uses `useSearchParams()`, which doesn't have this problem. |
+| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. Also handles spectating via `?watch=<roomId>` as of Phase 9, and (Phase 10) shows a live "Friends Online" list with a Challenge button, plus a challenge-received banner. |
+| `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. **Phase 9** fixed a real pre-existing bug: it read `window.location.search` by hand instead of Next's reactive `useSearchParams()`, which could permanently lock in a stale (empty) query-param value when arriving via a client-side route transition rather than a full page load — affected both the new `?watch=` spectate flow and the pre-existing Phase 5 `?tournamentId=` flow identically. Now wrapped in `Suspense` and uses `useSearchParams()`, which doesn't have this problem. **Phase 10** adds the first real UI for Phase 5's direct-challenge mechanism, deliberately placed here (not a separate page) because `respondToChallenge` creates the game room from the exact socket connection present when the challenge is issued/accepted — it has to be the same long-lived socket that then plays the game. |
 | `/watch` (live games dashboard) | Y | Y | Y | **New in Phase 9 (2026-08-13).** Lists every active game with both players' usernames, ratings, variant, board size, time control, and current spectator count; "Watch" navigates to `/?watch=<roomId>`. |
+| `/clubs` + `/clubs/[id]` | Y | Y | Y | **New in Phase 10.** List/create/join on the index page; detail page shows member list, join/leave, and the club-only discussion feed (only rendered/postable once membership is confirmed against the real `GET /clubs/:id/posts` — a 400 there is treated as "not a member yet", not an error). |
 | `Board.tsx` | Y | Y | Y | **New in Phase 4.** Board rendering, orientation/flip, drag-and-drop + click-click move input, move animation. Never computes legal moves itself — only ever filters the `legalMoves` array the server sends. |
 | `MoveList.tsx` | Y | Y | Y | **New in Phase 4.** Real move history in FMJD-style square-numbering notation. |
 | `CapturedTray.tsx` | Y | Y | Y | **New in Phase 4.** Per-side captured-piece tally, derived from the actual captured piece data at the moment of capture (not guessed after the fact). |
 | `ConnectionStatus.tsx` | Y | Y | Y | **New in Phase 4.** Reflects real socket connect/disconnect events. |
 | `/login` | Y | Y (1 API call) | Y | Renders correctly, zero console errors. |
-| `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). |
+| `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). **Phase 10** extended the existing Friends tab (per the brief: "verify and extend rather than rebuild") with a Decline button and a live green/gray online-status dot per friend. |
 | `/puzzles` | Y | Y | Y | **Rebuilt in Phase 7.** Reuses `Board.tsx` (Phase 4) instead of its own bespoke board — real drag/click, real legal-move highlighting fetched from `GET /puzzles/:id/legal-moves`, moves validated via `POST /puzzles/:id/attempt`. Confirmed live: the solution never appears in any network response (checked every `/puzzles/*` response body across a full solve), zero console errors. |
 | `/puzzles/rush` (Puzzle Storm) | Y | Y | Y | **New in Phase 7.** Live-verified: real countdown, score, and streak UI backed by the server-authoritative rush session. |
 | `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
@@ -69,10 +77,11 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
 | `Timer.tsx` | Y | Y | Y | Wired in during Phase 4 (was orphaned since Phase 0); **as of Phase 5, genuinely server-authoritative** — it's fed a live-computed snapshot of the backend's real clock/turnStartedAt on every move, not a fixed cosmetic constant. See "Phase 5" below. |
 | Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in scope for Phases 4 or 5. |
-| Direct-challenge-by-user-ID UI | N | — | — | **Backend flow exists (Phase 5), no frontend UI for it yet** — no button/modal to challenge a specific friend. Scoped out: Phase 5's brief is backend real-time infrastructure; adding a challenge UI is a Phase-4-style frontend task better done as its own slice. |
+| Direct-challenge-by-user-ID UI | Y | Y | Y | **Built in Phase 10** (the gap this row tracked since Phase 5) — "Friends Online" list + Challenge button on `/`, an incoming-challenge banner with Accept/Decline, wired to the existing `challengePlayer`/`challengeReceived`/`respondToChallenge` events. Live-verified with two real browser tabs (see "Phase 10" below). |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
-not just the type-check) → succeeds, all 11 routes generated (Phase 9 adds `/watch`), zero build errors.
+not just the type-check) → succeeds, all 13 routes generated (Phase 10 adds `/clubs` + `/clubs/[id]`), zero
+build errors.
 
 ## How this was verified (Phase 1 method)
 
@@ -865,6 +874,101 @@ Redis connection warnings.
   not a full distributed-load/production-network test.
 - Spectator sockets never authenticate and aren't rate-limited per IP; watching is intentionally as open as
   the rest of the app's anonymous read paths (e.g. `/tournaments` standings), not a new gap introduced here.
+
+## Phase 10: social — friends, clubs, chat moderation, direct challenges (2026-08-14)
+
+Per the brief, "a friends module already exists — verify and extend rather than rebuild if it's sound." It
+was sound: `sendFriendRequest`/`acceptFriendRequest`/`getFriendsList` all worked correctly and already had a
+real (if thin) `/profile` UI. This phase extended what was there — decline, online status, a chat filter,
+the challenge UI that never got built in Phase 5 — and added Clubs from scratch, since nothing like it
+existed at all.
+
+**1. Friends: decline + online status.** `declineFriendRequest()` deletes the request row outright rather
+than marking it some 'DECLINED' status — `sendFriendRequest`'s existing duplicate check doesn't filter by
+status, so a kept 'DECLINED' row would have silently blocked either side from ever sending a fresh request
+again. New `presence/presence.service.ts`: a minimal in-memory `Set<userId>`, updated by `GameGateway` on
+real connect/disconnect (reusing the exact same "is this socket still their current one?" guard already
+built for the reconnect-grace-period logic, so a stale disconnect event from an old socket can't flicker
+someone offline right after they've reconnected under a new one). `FriendsService.getFriendsList()` now
+reads it directly — "online" always means "has a live socket right now," nothing persisted, nothing that
+could go stale across a server restart because there's nothing to restore.
+
+**2. In-game chat: profanity + spam filtering.** New `game/chat-filter.ts` — pure and framework-independent,
+same pattern as the engine/matchmaking/swiss-pairing modules. `filterMessage()` censors wordlist matches
+with word-boundary regex (so "shit" gets caught but "Shitake" doesn't), `isRateLimited()`/
+`pruneAndRecordTimestamp()` implement a sliding 10-second/5-message window. The actual per-socket timestamp
+history is real mutable gateway state (like `disconnectTimers`); only the threshold *decision* is the pure,
+independently-tested part. Wired into `sendMessage`: a rate-limited sender gets a `chatError` back and
+nothing is broadcast; everyone else's messages get filtered before broadcasting, never after (spectators
+included, as before — chat was never restricted to just the two players, and this phase didn't add that
+restriction). Reused as-is for club discussion posts (see below) — no spam limit there since a REST-posted
+feed doesn't have the same rapid-fire failure mode a live chat does.
+
+**3. Clubs — new from scratch.** `Club` (name, description, creator), `ClubMembership`, `ClubPost` (a flat,
+unthreaded feed — "full forums can come later" per the brief). Creating a club auto-enrolls the creator;
+joining/leaving are idempotent/harmless no-ops when already in the requested state (same convention as
+`joinTournament`). Posting and reading the feed are both gated on real membership — attempting either as a
+non-member is a `400`, verified by both a service test and a live check that a real non-member gets refused,
+joins, and is then let in. A real (minor) bug surfaced by a test: the feed originally sorted by `createdAt`,
+but sqlite's datetime column is only second-precision, so two posts made within the same second could tie
+and come back in either order — fixed by sorting on `id`, which is strictly monotonic with insertion order
+regardless of timestamp resolution.
+
+**4. Direct challenges — the frontend that never got built.** The mechanism (`challengePlayer` /
+`challengeReceived` / `respondToChallenge`) has existed since Phase 5; STATUS.md tracked "no frontend UI for
+it yet" ever since. Built now, deliberately on `/` (`GameBoard.tsx`) rather than as part of `/profile` or a
+new page: `respondToChallenge` creates the game room using the *exact socket connection* present at the
+moment of issuing/accepting, so whoever's involved has to stay on the same long-lived connection all the way
+through into the game itself — the same constraint that shaped Phase 9's spectate-by-URL design. The lobby
+shows a live "Friends Online" list (polled from `GET /friends` every 5s, same simple-polling pattern as
+`/watch`) with a Challenge button per online friend; an incoming challenge shows a fixed banner with
+Accept/Decline, rendered above whichever view is active (lobby or mid-game) since a challenge can arrive at
+either time.
+
+**33 new/rebuilt backend tests**: `chat-filter.spec.ts` (11), `presence.service.spec.ts` (4),
+`clubs.service.spec.ts` (15), `clubs.controller.spec.ts` (6), plus `friends.service.spec.ts` and
+`friends.controller.spec.ts` — both previously single "should be defined" stubs with zero real coverage —
+rebuilt into 10 and 5 real tests respectively against real in-memory sqlite. Plus 8 new gateway-integration
+tests (presence on connect/disconnect including the reconnect-race guard; profanity censoring and spam
+blocking actually wired into `sendMessage`, not just correct in isolation).
+
+### Live verification
+
+Two full passes against the real running server, not just the test suite:
+
+- **API/socket script** (real HTTP registration/auth + real `socket.io-client` connections, 3 real users):
+  sent → declined → re-sent → accepted a real friend request (confirming decline doesn't block a fresh one);
+  watched a friend's `online` field flip true/false as their real socket connected and disconnected; issued
+  a real challenge, had it accepted, and confirmed both sides landed in the same real game room; sent a
+  profane real chat message and confirmed the broadcast both players received was censored; sent 6 rapid
+  real messages and confirmed the 6th was rejected with a real `chatError`; created a real club, confirmed a
+  non-member's post attempt was refused, had them join, post (profanity-filtered, same as game chat), and be
+  read by the other member, then leave and be refused again.
+- **Playwright, real browser(s)**: logged in as one user, declined a real incoming request and confirmed it
+  disappeared from a real re-fetch of `/profile`; opened a **second real browser tab** logged in as the
+  friend, confirmed the online dot flipped live; from the first tab's homepage, clicked a real "Friends
+  Online" → Challenge button; confirmed the **second tab** showed a real incoming-challenge banner naming
+  the correct challenger; clicked Accept in the second tab and confirmed **both real tabs** independently
+  landed on "Game Room" — the full direct-challenge flow, end to end, across two actual browser contexts.
+  Separately created a real club through the UI and confirmed a profanity-filtered post appeared in the real
+  feed, attributed to the real logged-in user. Zero browser console errors across the entire flow.
+- Backend log checked for errors during both runs: none beyond the pre-existing, already-documented Redis
+  connection warnings.
+
+**Known simplifications, stated plainly:**
+- No club roles/ownership beyond the informational `createdBy` field — any member can post, anyone can join
+  or leave, per the brief's "keep this simple for now." Owner-only moderation (removing a member, deleting a
+  post) is a reasonable follow-up, not built here.
+- The profanity wordlist is small and starter-sized, exactly as asked ("a simple wordlist filter is fine for
+  now") — not a production moderation system, and not locale-aware.
+- The spam rate limit (5 messages / 10s) is a single fixed global threshold, not configurable per room or
+  user, and isn't shared between game chat and club posts (club posts have no rate limit at all — see above).
+- Presence is a single in-memory `Set` on one Node process — correct for this deployment shape (matches how
+  `activeGames`/`waitingPlayers`/etc. already work in the gateway) but wouldn't survive horizontal scaling
+  across multiple server instances without a shared store (e.g. Redis) behind it.
+- The friends list ("Friends Online" on the homepage, and `/profile`'s tab) is polled on a timer rather than
+  server-pushed on presence change — same trade-off `/watch` already made for live games, for the same
+  reason: simple and sufficient, not the most instantaneous possible design.
 
 ## Repo cleanup notes (Phase 0)
 

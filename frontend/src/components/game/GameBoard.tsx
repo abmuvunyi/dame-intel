@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
+import axios from 'axios';
 import { BoardState, Move, Piece, PieceColor } from '@/lib/draughts';
 import Board from './Board';
 import MoveList from './MoveList';
@@ -57,6 +58,16 @@ function GameBoardInner() {
   const [manualFlip, setManualFlip] = useState(false);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
+  // Phase 10: friends + direct challenges. Challenges are issued/received on THIS
+  // socket specifically (not a separate one on e.g. a /friends page) — the gateway's
+  // respondToChallenge creates the game room using the exact socket ids present at
+  // the moment of acceptance, so whoever issues or accepts a challenge has to stay on
+  // the same connection all the way through into the game itself. This is also why
+  // the "online friends" list lives in the lobby here rather than on its own page.
+  const [friends, setFriends] = useState<any[]>([]);
+  const [incomingChallenge, setIncomingChallenge] = useState<{ challengeId: string, fromUser: { id: number, username: string } } | null>(null);
+  const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
+
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
@@ -106,6 +117,30 @@ function GameBoardInner() {
     newSocket.on('disconnect', () => setConnected(false));
 
     newSocket.on('activeGamesList', (games: any[]) => setActiveGames(games));
+
+    // Friends list (with live online status) — only meaningful for a logged-in user.
+    // Re-polled on a simple interval (same pattern as /watch's live-games dashboard)
+    // rather than server-pushed, since presence changes don't need to be instant here.
+    const fetchFriends = async () => {
+      const authToken = localStorage.getItem('token');
+      if (!authToken) return;
+      try {
+        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        setFriends(res.data);
+      } catch {
+        // Not fatal — the online-friends section just stays empty/stale.
+      }
+    };
+    fetchFriends();
+    const friendsPollInterval = setInterval(fetchFriends, 5000);
+
+    newSocket.on('challengeReceived', (data: { challengeId: string, fromUser: { id: number, username: string } }) => {
+      setIncomingChallenge(data);
+    });
+    newSocket.on('challengeDeclined', () => setChallengeNotice('Your challenge was declined.'));
+    newSocket.on('challengeFailed', (data: { reason: string }) => setChallengeNotice(data.reason || 'Challenge could not be sent.'));
 
     newSocket.on('waitingForOpponent', () => setStatus('Waiting in matchmaking queue...'));
 
@@ -227,6 +262,7 @@ function GameBoardInner() {
     newSocket.on('drawDeclined', () => alert('Your opponent declined the draw offer.'));
 
     return () => {
+      clearInterval(friendsPollInterval);
       newSocket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,6 +278,19 @@ function GameBoardInner() {
 
   const handleWatchGame = (roomIdToWatch: string) => {
     socket?.emit('joinSpectator', { roomId: roomIdToWatch });
+  };
+
+  // Reuses the exact Phase 5 challenge mechanism (challengePlayer / challengeReceived
+  // / respondToChallenge) — this just adds the UI that never existed for it before.
+  const handleChallengeFriend = (targetUserId: number) => {
+    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture }, timeControl });
+    setChallengeNotice('Challenge sent — waiting for a response...');
+  };
+
+  const handleRespondToChallenge = (accept: boolean) => {
+    if (!incomingChallenge) return;
+    socket?.emit('respondToChallenge', { challengeId: incomingChallenge.challengeId, accept });
+    setIncomingChallenge(null);
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -293,9 +342,33 @@ function GameBoardInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clocks, turnStartedAt, currentTurn]);
 
+  // Shown above whichever view is active (lobby or in-game) — a challenge can arrive
+  // at any time, not just while sitting in the lobby.
+  const challengeBanner = incomingChallenge && (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white border-2 border-blue-500 rounded-lg shadow-xl px-6 py-4 flex items-center gap-4">
+      <span className="font-semibold text-gray-800">
+        {incomingChallenge.fromUser.username} has challenged you to a game!
+      </span>
+      <button onClick={() => handleRespondToChallenge(true)} className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700">
+        Accept
+      </button>
+      <button onClick={() => handleRespondToChallenge(false)} className="px-4 py-1.5 bg-gray-200 text-gray-700 rounded text-sm font-semibold hover:bg-gray-300">
+        Decline
+      </button>
+    </div>
+  );
+  const challengeNoticeBanner = challengeNotice && (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-800 text-white rounded-lg shadow-lg px-4 py-2 text-sm flex items-center gap-3">
+      {challengeNotice}
+      <button onClick={() => setChallengeNotice(null)} className="text-slate-300 hover:text-white font-bold">×</button>
+    </div>
+  );
+
   if (!board) {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
+        {challengeBanner}
+        {challengeNoticeBanner}
         <div className="absolute top-4 right-4"><ConnectionStatus connected={connected} /></div>
         <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
         <p className="text-gray-600">{status}</p>
@@ -360,6 +433,28 @@ function GameBoardInner() {
           </div>
         </div>
 
+        {friends.some(f => f.status === 'ACCEPTED' && f.online) && (
+          <div className="mt-8 w-full">
+            <h3 className="text-xl font-bold mb-4 text-center">Friends Online</h3>
+            <ul className="space-y-2">
+              {friends.filter(f => f.status === 'ACCEPTED' && f.online).map((f) => (
+                <li key={f.friendId} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />
+                    {f.username}
+                  </span>
+                  <button
+                    onClick={() => handleChallengeFriend(f.friendId)}
+                    className="px-4 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                  >
+                    Challenge
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {activeGames.length > 0 && (
           <div className="mt-8 w-full">
             <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
@@ -384,6 +479,12 @@ function GameBoardInner() {
         <a href="/watch" className="mt-4 text-sm text-blue-600 hover:underline">
           View full Live Games dashboard →
         </a>
+        <a href="/profile" className="text-sm text-blue-600 hover:underline">
+          Manage Friends & Requests →
+        </a>
+        <a href="/clubs" className="text-sm text-blue-600 hover:underline">
+          Browse Clubs →
+        </a>
       </div>
     );
   }
@@ -395,6 +496,8 @@ function GameBoardInner() {
 
   return (
     <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+      {challengeBanner}
+      {challengeNoticeBanner}
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
         <div className="w-full flex justify-between items-center">

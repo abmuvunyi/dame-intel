@@ -8,9 +8,10 @@ import { TournamentsModule } from '../tournaments/tournaments.module';
 import { AnalysisController } from './analysis.controller';
 import { AnticheatModule } from '../anticheat/anticheat.module';
 import { RatingModule } from '../rating/rating.module';
+import { PresenceModule } from '../presence/presence.module';
 
 @Module({
-  imports: [UsersModule, HistoryModule, TournamentsModule, AnticheatModule, RatingModule],
+  imports: [UsersModule, HistoryModule, TournamentsModule, AnticheatModule, RatingModule, PresenceModule],
   providers: [DraughtsEngine, GameGateway, AiService],
   controllers: [AnalysisController]
 })
