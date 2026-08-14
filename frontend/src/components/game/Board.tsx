@@ -170,14 +170,24 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
   const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
 
   const pieceStyle = (color: PieceColor) => ({
-    className: `${pieceClass} rounded-full shadow-md ${color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}`,
+    className: `${pieceClass} rounded-full shadow-md ${color === PieceColor.LIGHT ? 'bg-[#f8f8f8] border-[#e0e0e0]' : 'bg-[#3b3a39] border-[#2b2a29]'}`,
   });
+
+  const renderKingCrown = (color: PieceColor) => (
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={`w-3/5 h-3/5 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 drop-shadow-md ${color === PieceColor.LIGHT ? 'text-[#e5e5e5]' : 'text-[#2b2a29]'}`}>
+      <path d="M2 19H22V21H2V19Z" fill="currentColor" stroke={color === PieceColor.LIGHT ? '#999' : '#111'} strokeWidth="1"/>
+      <path d="M4 17L3 9L8 12L12 5L16 12L21 9L20 17H4Z" fill="currentColor" stroke={color === PieceColor.LIGHT ? '#999' : '#111'} strokeWidth="1"/>
+      <circle cx="3" cy="8" r="1.5" fill="currentColor" stroke={color === PieceColor.LIGHT ? '#999' : '#111'} strokeWidth="1"/>
+      <circle cx="12" cy="4" r="1.5" fill="currentColor" stroke={color === PieceColor.LIGHT ? '#999' : '#111'} strokeWidth="1"/>
+      <circle cx="21" cy="8" r="1.5" fill="currentColor" stroke={color === PieceColor.LIGHT ? '#999' : '#111'} strokeWidth="1"/>
+    </svg>
+  );
 
   return (
     <div
       ref={boardRef}
-      className="relative border-[6px] border-slate-800 bg-slate-200 shadow-2xl rounded-sm select-none touch-none"
-      style={{ width: size * cellPx + 8, height: size * cellPx + 8, padding: 4 }}
+      className="relative border-[4px] border-[#302e2b] bg-[#302e2b] shadow-2xl rounded select-none touch-none"
+      style={{ width: size * cellPx + 8, height: size * cellPx + 8, padding: 0 }}
     >
       {/* Squares (background grid + click/drop targets) */}
       {Array.from({ length: size }).map((_, dr) =>
@@ -187,9 +197,9 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
           const isSelected = selectedPos?.row === row && selectedPos?.col === col;
           const isHighlighted = validDestinations.some(m => m.to.row === row && m.to.col === col);
 
-          let bg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]';
-          if (isSelected) bg = 'bg-yellow-400';
-          else if (isHighlighted) bg = 'bg-green-400/80';
+          let bg = isDarkSquare ? 'bg-[#739552]' : 'bg-[#ebecd0]';
+          if (isSelected) bg = 'bg-[#f6f669]';
+          else if (isHighlighted) bg = 'bg-[#f6f669]/60';
 
           return (
             <div
@@ -202,7 +212,7 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               style={{ width: cellPx, height: cellPx, left: dc * cellPx + 4, top: dr * cellPx + 4 }}
             >
               {isHighlighted && !board[row][col] && (
-                <div className="w-1/3 h-1/3 rounded-full bg-green-700/40 pointer-events-none" />
+                <div className="w-1/3 h-1/3 rounded-full bg-black/20 pointer-events-none" />
               )}
             </div>
           );
@@ -242,9 +252,9 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               // it's rendered centered on the pointer, so without this it would be
               // the element elementFromPoint() finds at drop time — hiding the
               // square underneath it that the drop actually needs to land on.
-              className={`${pieceStyle(p.color).className} flex items-center justify-center ${isDragging ? 'pointer-events-none' : 'pointer-events-auto'} ${p.color === myColor && canMove ? 'cursor-grab active:cursor-grabbing' : ''} ${p.type === PieceType.KING ? kingOffset : ''}`}
+              className={`${pieceStyle(p.color).className} flex items-center justify-center relative ${isDragging ? 'pointer-events-none' : 'pointer-events-auto'} ${p.color === myColor && canMove ? 'cursor-grab active:cursor-grabbing' : ''}`}
             >
-              {p.type === PieceType.KING && <div className={`${stackClass} ${pieceStyle(p.color).className}`} />}
+              {p.type === PieceType.KING && renderKingCrown(p.color)}
             </div>
           </div>
         );
