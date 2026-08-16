@@ -70,7 +70,6 @@ function GameBoardInner() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
   const [timeControl, setTimeControl] = useState<'bullet' | 'blitz' | 'rapid' | 'correspondence'>('blitz');
 
   // Real bug found verifying Phase 9, not introduced by it: this used to parse
@@ -269,11 +268,11 @@ function GameBoardInner() {
   }, []);
 
   const handleFindMatch = () => {
-    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize }, timeControl });
   };
 
   const handlePlayAI = (difficulty: number) => {
-    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('playVsAi', { difficulty, rules: { boardSize }, timeControl });
   };
 
   const handleWatchGame = (roomIdToWatch: string) => {
@@ -283,7 +282,7 @@ function GameBoardInner() {
   // Reuses the exact Phase 5 challenge mechanism (challengePlayer / challengeReceived
   // / respondToChallenge) — this just adds the UI that never existed for it before.
   const handleChallengeFriend = (targetUserId: number) => {
-    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize }, timeControl });
     setChallengeNotice('Challenge sent — waiting for a response...');
   };
 
@@ -387,15 +386,6 @@ function GameBoardInner() {
                 <option value={10}>10x10 (International)</option>
               </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceMajorityCapture}
-                onChange={e => setForceMajorityCapture(e.target.checked)}
-                className="rounded"
-              />
-              Force Majority Capture
-            </label>
             <label className="text-sm flex justify-between items-center text-gray-600">
               Time Control:
               <select
@@ -419,10 +409,8 @@ function GameBoardInner() {
           </button>
 
           <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
+          <div className="flex flex-col gap-2">
+          {[1, 2, 3, 4, 5, 6, 7].map(level => (<button
                 key={level}
                 onClick={() => handlePlayAI(level)}
                 className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
