@@ -12,8 +12,10 @@ rating, Storm mode, and generation pipeline built in Phase 7 (2026-08-11). Swiss
 in Phase 8 (2026-08-11). Organizer-configurable tournament settings (registration caps, game
 format/duration, points system) built in Phase 8b (2026-08-12). Spectator mode and a live-games dashboard
 built in Phase 9 (2026-08-13). Social features — friends, in-game/club chat moderation, clubs, and direct
-challenges — built in Phase 10 (2026-08-14). See "How this was verified" below for exact method, and the
-per-phase sections below for each phase specifically.
+challenges — built in Phase 10 (2026-08-14). Post-game analysis board (verified/extended) and automated
+move-by-move review (best/good/inaccuracy/mistake/blunder classification + accuracy) built in Phase 11
+(2026-08-17). See "How this was verified" below for exact method, and the per-phase sections below for each
+phase specifically.
 
 ## Backend (NestJS)
 
@@ -31,8 +33,11 @@ per-phase sections below for each phase specifically.
 | Direct challenges (`challengePlayer`/`respondToChallenge`) | Y | N (pre-existing) | — | Y | **Backend built in Phase 5, frontend UI built in Phase 10.** No new backend tests added this phase (mechanism itself untouched) — live-verified instead, including the full real two-browser accept flow. See "Phase 10" below. |
 | `matchmaking.ts` (rating-band seek pairing) | Y | Y | Y | Y | **New in Phase 5.** Pure, framework-independent pairing logic (same design pattern as the engine) — 15 tests. |
 | `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
-| Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. |
-| Anticheat | Y | Y | Y | N | Not exercised live this pass. No TODO/stub markers in source. |
+| Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. **Reused live in Phase 11** as the exact engine query the automated review's replay pass is built on. |
+| Anticheat | Y | Y | Y | Y | **Real bug found and fixed in Phase 11**, discovered while building the near-identical post-game review replay pass: `analyzeGameForCheating()` had the *exact same* "no rules passed, silently defaults to 8x8" bug Phase 3 already fixed in `analysis.controller.ts` — just never caught here. Confirmed directly (not assumed): for a 10x10 game, the very first recorded move already fails to apply on the wrong-sized engine, freezing the "replay" at the initial position for the whole game. Fixed by accepting an optional `rules` parameter (backward compatible) and passing `room.rules` from the gateway call site. New regression test proves a real 10x10 self-play replay tracks genuinely distinct positions move-to-move with rules passed, versus staying frozen (well under the move count) without them. |
+| `game/review/move-classification.ts` | Y | Y | Y | Y | **New in Phase 11.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter) — explicit, documented eval-delta thresholds classify each move as BEST/GOOD/INACCURACY/MISTAKE/BLUNDER, plus a simple credit-weighted accuracy-percentage formula. 14 tests covering every threshold boundary on both sides and the accuracy formula's edge cases. See "Phase 11" below for the exact thresholds and their reasoning. |
+| `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. |
+| `GET /game-review/:gameId` | Y | Y (via service tests) | Y | Y | **New in Phase 11.** Returns the stored review instantly, or an explicit `NOT_STARTED`/`PENDING` status while the async pass hasn't finished — never recomputes on a GET. |
 | Tournaments (Arena — pre-existing) | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. Untouched by Phase 8; its exact original code paths (`updateTournamentScore` inline in `game.gateway.ts`, the `@Cron` auto-start logic) remain as-is. |
 | Tournaments — Swiss (`tournaments.service.ts` lifecycle/pairing methods) | Y | Y | Y | Y | **New in Phase 8 (2026-08-11).** Full SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED lifecycle, automatic round generation/advancement, Buchholz tiebreak standings. See "Phase 8" below. |
 | `tournaments/swiss-pairing.ts` | Y | Y | Y | Y | **New in Phase 8.** Pure, framework-independent pairing algorithm (same pattern as `matchmaking.ts`/`glicko2.ts`) — greedy score-sorted pairing, bye to the lowest score without one yet, avoids rematches where a fresh opponent exists in the pool. 10 tests, including a full printed 8-player/3-round walkthrough. Documented limitation: no backtracking, so a small field pushed over many rounds can occasionally be forced into a rematch — see "Phase 8" below. |
@@ -47,12 +52,11 @@ per-phase sections below for each phase specifically.
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 28 suites, 213 tests, all passing, ~1s (up from 156 as of
-Phase 9 — the +57 are Phase 10's `chat-filter.spec.ts` (11 new), `presence.service.spec.ts` (4 new),
-`clubs.service.spec.ts` (15 new), `clubs.controller.spec.ts` (6 new), `friends.service.spec.ts` rebuilt
-from a 1-test "should be defined" stub into 10 real tests (+9), `friends.controller.spec.ts` similarly
-rebuilt into 5 (+4), and 8 new tests in `game.gateway.spec.ts` for presence/chat-filter wiring — see
-"Phase 10" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 30 suites, 237 tests, all passing, ~1s (up from 213 as of
+Phase 10 — the +24 are Phase 11's `move-classification.spec.ts` (14 new), `game-review.service.spec.ts`
+(7 new, real in-memory sqlite + a real, non-mocked `AiService`), `anticheat.service.spec.ts` (+1, the
+wrong-sized-engine regression), and 2 new tests in `game.gateway.spec.ts` proving `handleGameOver` actually
+triggers the review — see "Phase 11" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -69,11 +73,11 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | `CapturedTray.tsx` | Y | Y | Y | **New in Phase 4.** Per-side captured-piece tally, derived from the actual captured piece data at the moment of capture (not guessed after the fact). |
 | `ConnectionStatus.tsx` | Y | Y | Y | **New in Phase 4.** Reflects real socket connect/disconnect events. |
 | `/login` | Y | Y (1 API call) | Y | Renders correctly, zero console errors. |
-| `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). **Phase 10** extended the existing Friends tab (per the brief: "verify and extend rather than rebuild") with a Decline button and a live green/gray online-status dot per friend. |
+| `/profile` | Y | Y (5 API calls) | Y | Unauthenticated visits client-side redirect to `/login` — correct auth-guard behavior, confirmed live (Phase 1). **Phase 10** extended the existing Friends tab (per the brief: "verify and extend rather than rebuild") with a Decline button and a live green/gray online-status dot per friend. **Phase 11** adds a per-game accuracy badge to the Match History list, fetched from the already-computed review (never recomputed client-side). |
 | `/puzzles` | Y | Y | Y | **Rebuilt in Phase 7.** Reuses `Board.tsx` (Phase 4) instead of its own bespoke board — real drag/click, real legal-move highlighting fetched from `GET /puzzles/:id/legal-moves`, moves validated via `POST /puzzles/:id/attempt`. Confirmed live: the solution never appears in any network response (checked every `/puzzles/*` response body across a full solve), zero console errors. |
 | `/puzzles/rush` (Puzzle Storm) | Y | Y | Y | **New in Phase 7.** Live-verified: real countdown, score, and streak UI backed by the server-authoritative rush session. |
 | `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
-| `/analysis/[id]` | Y | Y (2 API calls) | N | Not driven live this pass (needs a real game ID with saved history). |
+| `/analysis/[id]` | Y | Y (2 API calls, +1 in Phase 11) | Y | **Board/replay verified and extended in Phase 11** (was un-driven-live before): the existing step-forward/back board and on-demand "Run Engine" query both confirmed working; new accuracy summary panel, a per-move classification badge, and a clickable move-by-move classification strip, all backed by `GET /game-review/:id` (polls every 3s only while the review is still PENDING). Live-verified with Playwright against a real completed review. |
 | `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
 | `Timer.tsx` | Y | Y | Y | Wired in during Phase 4 (was orphaned since Phase 0); **as of Phase 5, genuinely server-authoritative** — it's fed a live-computed snapshot of the backend's real clock/turnStartedAt on every move, not a fixed cosmetic constant. See "Phase 5" below. |
 | Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in scope for Phases 4 or 5. |
@@ -969,6 +973,143 @@ Two full passes against the real running server, not just the test suite:
 - The friends list ("Friends Online" on the homepage, and `/profile`'s tab) is polled on a timer rather than
   server-pushed on presence change — same trade-off `/watch` already made for live games, for the same
   reason: simple and sufficient, not the most instantaneous possible design.
+
+## Phase 11: post-game analysis board and automated review (2026-08-17)
+
+Per the brief, "an analysis controller exists per STATUS.md — verify and extend." It did, and it was more
+complete than most of this codebase's "existing scaffolding" has been going into a phase: a working
+step-forward/back board, on-demand engine evaluation via `POST /analysis`, and a best-move highlight — all
+already live. What was actually missing was requirement 2 and 3: an *automated*, *stored* review that runs
+once per game rather than a manual per-position query the viewer has to trigger themselves.
+
+**1. Analysis board (verified, not rebuilt).** Confirmed the existing board/replay/on-demand-evaluation flow
+genuinely works end-to-end against the real server (previously marked "not driven live this pass" in
+STATUS.md) rather than assuming it from Phase 3's original build. No changes needed to the replay mechanics
+themselves.
+
+**2. Automated post-game review.** New `game/review/move-classification.ts` — pure, framework-independent,
+same pattern as the engine/matchmaking/chat-filter modules. Explicit, documented thresholds (the brief's own
+requirement), expressed in `AiService.evaluateBoard()`'s own units (`WEIGHT_MAN = 10`, `WEIGHT_KING = 25`),
+since that's what an "eval delta" actually is here — not a chess-style centipawn scale:
+
+| Eval delta (points worse than the engine's best move) | Classification |
+|---|---|
+| 0 (matches the engine's own top choice) | **Best** |
+| 0 – 3 | **Good** |
+| 3 – 10 | **Inaccuracy** |
+| 10 – 25 | **Mistake** |
+| > 25 | **Blunder** |
+
+Accuracy per player is a simple, explicitly-documented credit-weighted average (Best=100, Good=90,
+Inaccuracy=70, Mistake=40, Blunder=0) — deliberately simpler than lichess/chess.com's win-probability-based
+model, matching this phase's own "simple wordlist filter is fine for now"-style scoping from Phase 10.
+
+New `GameReviewService.analyzeCompletedGame(gameId)` replays a completed game's real recorded moves on a
+real `DraughtsEngine`, calls `AiService.analyzePosition()` at every position (the exact same call
+`analysis.controller.ts`'s existing endpoint already exposes) to get every legal move's evaluation, matches
+the actually-played move against the engine's own legal-move list (same defense-in-depth principle as
+`handleMakeMove`'s `exactLegalMove` — never trusts the recorded move's coordinates blindly), and classifies
+the delta between the best available move and the one actually played. Triggered fire-and-forget from
+`game.gateway.ts`'s `handleGameOver` — reusing the exact "don't await this, it's CPU intensive, don't block
+the gateway" pattern Phase 5-era anti-cheat already established, not a new async convention. Runs for every
+completed game including vs-AI (unlike anti-cheat, which only makes sense between two humans).
+
+**3. Storage — "don't recompute on every view".** New `GameReview` entity: one row per game, `status`
+('PENDING' while the async pass hasn't finished, 'COMPLETED', or 'FAILED' with an `errorMessage` if the
+analysis itself threw), a `simple-json` array of per-move classifications, and both players' accuracy.
+`GET /game-review/:gameId` just reads this row — genuinely instant, never triggers analysis itself. A
+PENDING row is persisted *before* the expensive replay loop starts, specifically so a viewer who opens the
+game right after it ends sees "analysis in progress" rather than nothing at all.
+
+**A real bug found and fixed, not introduced by this phase.** Building `GameReviewService`'s replay loop —
+which is nearly identical in shape to `AnticheatService.analyzeGameForCheating`'s own replay — led to
+re-reading that existing code, which turned out to have the *exact same* bug Phase 3 already found and fixed
+in `analysis.controller.ts`: `new DraughtsEngine()` constructed with no rules at all, silently defaulting to
+8x8. Confirmed directly, not assumed (see the regression test): for a 10x10 game, the very first recorded
+move already fails to apply against the wrong-sized engine — not a crash, just a silent no-op — freezing the
+"replay" at the initial position for the rest of the loop. Anti-cheat has likely never correctly analyzed a
+single 10x10 game since it was built. Fixed by adding an optional `rules` parameter (defaults to the old 8x8
+behavior when omitted, so this is backward compatible) and passing `room.rules` from the gateway call site.
+
+**24 new tests**: `move-classification.spec.ts` (14 — every threshold boundary on both sides, the five bands
+proven contiguous/exhaustive across a swept range, and the accuracy formula's edge cases including
+monotonicity), `game-review.service.spec.ts` (7, against real in-memory sqlite **and a real, non-mocked
+`AiService`** — not existence-only tests: a real short game with one deliberately-suboptimal move correctly
+classified as worse than the surrounding best-play moves, a lower accuracy for the side that played it, the
+PENDING→COMPLETED transition observed mid-flight, idempotency via a spy proving `analyzePosition` isn't
+called again on a second pass, and a separately-mocked suite proving a mid-analysis exception is recorded as
+FAILED with its message rather than silently swallowed), `anticheat.service.spec.ts` (+1, the wrong-sized-
+engine regression above), and 2 new `game.gateway.spec.ts` tests proving `handleGameOver` actually calls
+`analyzeCompletedGame` with the right game id — including for a vs-AI game, unlike anti-cheat.
+
+### Worked example (live, against the real running server)
+
+A real two-player game via real WebSocket connections, where every move was the engine's own top choice
+(queried live through the real `POST /analysis` endpoint — the same one the frontend's "Run Engine" button
+calls) **except one deliberately picked as the engine's worst-rated legal option**, injected at the first
+position that actually offered a real choice (best ≠ worst) rather than a fixed move number, so the "mistake"
+couldn't coincidentally land on a forced single-legal-move position and tie with best by default:
+
+```
+move 0 (Light): INACCURACY  eval delta: 4   <-- the deliberate mistake
+move 1 (Dark):  BEST        eval delta: 0
+move 2 (Light): BEST        eval delta: 0
+move 3 (Dark):  BEST        eval delta: 0
+move 4 (Light): BEST        eval delta: 0
+move 5 (Dark):  BEST        eval delta: 0
+move 6 (Light): BEST        eval delta: 0
+move 7 (Dark):  BEST        eval delta: 0
+move 8 (Light): BEST        eval delta: 0
+move 9 (Dark):  BEST        eval delta: 0
+move 10 (Light): BEST       eval delta: 0
+move 11 (Dark):  BEST       eval delta: 0
+move 12 (Light): BEST       eval delta: 0
+move 13 (Dark):  BEST       eval delta: 0
+
+Light accuracy: 95.7%
+Dark accuracy: 100%
+```
+
+The one deliberately-injected mistake was correctly classified as INACCURACY (not BEST); all 13 other moves
+— every one of them the engine's own actual top choice at that position — were correctly classified as
+exactly BEST. Dark, which never deviated from best play, scored a perfect 100%; Light's one inaccuracy
+brought it down to 95.7%, exactly the credit-weighted formula's documented behavior.
+
+Also live-verified, separately: a real short game (3 real plies) played with fully random move selection —
+which turned out to be its own small finding (see below) — confirmed the review pipeline completes and is
+queryable within the same flow end-to-end on a much shorter, more typical quick-resignation game; a real
+browser (Playwright) loading `/analysis/[id]` for the worked-example game above and confirming the accuracy
+panel, the per-move classification badge, and the clickable classification-dot strip (jumping straight to
+move 14 when clicked) all render correctly against the real stored review, zero console errors.
+
+**A genuine finding from live verification, not a bug**: fully random move selection under American
+checkers' *mandatory*-capture rule ends a game remarkably fast — typically 3–6 plies — because random,
+lookahead-free play walks straight into forced capture cascades far more often than intuition suggests.
+Confirmed by direct investigation (several repeated runs, explicit turn/color tracking to rule out a test-
+script bug) before accepting it as real behavior rather than assuming a server-side problem. Not a defect;
+just informed the worked example above to use engine-guided play (via the real `/analysis` endpoint) instead
+of random moves, to get a game long enough to be a meaningful demonstration.
+
+Backend log checked for errors during all of the above: none beyond the pre-existing, already-documented
+Redis connection warnings.
+
+**Known simplifications, stated plainly:**
+- The review runs as a background *pass* on the same Node process (yielding via `setImmediate` between
+  moves, same technique anti-cheat already used), not a background *process* — no separate worker/job queue
+  (BullMQ, etc.) exists in this codebase. A very long game's review could still take a noticeable moment;
+  the PENDING-row-first design means a viewer always sees an honest "in progress" state rather than
+  appearing broken.
+- Classification thresholds and the accuracy-credit weights are explicit, documented, hand-picked constants
+  tied to this specific evaluation function's scale (`WEIGHT_MAN = 10`) — not statistically calibrated
+  against real game outcomes the way lichess/chess.com's models are. Revisit if `AiService`'s weights ever
+  change.
+- Search depth for review is 4 (matching the existing manual-analysis default) — deep enough to catch real
+  tactical swings without making a full game's review noticeably slow, but not as strong as the deepest
+  difficulty levels available elsewhere in the app (up to depth 9).
+- If the recorded move ever isn't found among the engine's own legal moves at that exact position (would
+  only happen for a corrupted/foreign move history — every game actually played through this gateway only
+  ever records engine-validated moves), that move is skipped from classification rather than guessed at; the
+  replay still continues correctly for the rest of the game.
 
 ## Repo cleanup notes (Phase 0)
 

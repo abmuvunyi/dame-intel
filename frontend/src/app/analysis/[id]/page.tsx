@@ -48,6 +48,17 @@ class ReplayEngine {
   }
 }
 
+// Move-classification presentation (Phase 11) — mirrors move-classification.ts's five
+// bands on the backend exactly; kept here rather than shared since this is the only
+// place classification labels get rendered as UI, and the mapping is trivial.
+const CLASSIFICATION_STYLE: Record<string, { label: string, dot: string, badge: string }> = {
+  BEST: { label: 'Best', dot: 'bg-green-500', badge: 'bg-green-100 text-green-800' },
+  GOOD: { label: 'Good', dot: 'bg-blue-500', badge: 'bg-blue-100 text-blue-800' },
+  INACCURACY: { label: 'Inaccuracy', dot: 'bg-yellow-500', badge: 'bg-yellow-100 text-yellow-800' },
+  MISTAKE: { label: 'Mistake', dot: 'bg-orange-500', badge: 'bg-orange-100 text-orange-800' },
+  BLUNDER: { label: 'Blunder', dot: 'bg-red-500', badge: 'bg-red-100 text-red-800' },
+};
+
 export default function AnalysisPage() {
   const params = useParams();
   const id = params.id as string;
@@ -58,6 +69,11 @@ export default function AnalysisPage() {
   const [currentMoveIndex, setCurrentMoveIndex] = useState(0);
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Phase 11: the automated post-game review (move classifications + accuracy),
+  // computed asynchronously server-side — see GameReviewService. Separate from
+  // `evaluations` above, which is this page's own pre-existing on-demand "Run Engine"
+  // query for whatever position is currently showing.
+  const [review, setReview] = useState<any>(null);
 
   useEffect(() => {
     const fetchGame = async () => {
@@ -91,6 +107,35 @@ export default function AnalysisPage() {
       }
     };
     if (id) fetchGame();
+  }, [id]);
+
+  // Fetches the stored review and, while it's still PENDING (the async pass hasn't
+  // finished yet — or NOT_STARTED, if this page loaded before the gateway even
+  // triggered it), polls every 3s until it lands. Stops polling once COMPLETED or
+  // FAILED — this is meant to catch "I opened the game review right after the game
+  // ended", not run forever.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    const fetchReview = async () => {
+      try {
+        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/game-review/${id}`);
+        if (cancelled) return;
+        setReview(res.data);
+        if (res.data.status === 'COMPLETED' || res.data.status === 'FAILED') {
+          if (interval) clearInterval(interval);
+        }
+      } catch {
+        // Not fatal — the page still works without review data, just without the
+        // classification/accuracy panel.
+      }
+    };
+
+    fetchReview();
+    interval = setInterval(fetchReview, 3000);
+    return () => { cancelled = true; if (interval) clearInterval(interval); };
   }, [id]);
 
   const handleAnalyze = async () => {
@@ -133,6 +178,12 @@ export default function AnalysisPage() {
   if (!game || boardStates.length === 0) return <div className="p-10 text-center">Loading game data...</div>;
 
   const currentBoard = boardStates[currentMoveIndex].board;
+  // moveReviews are indexed against `moves` (0-based); boardStates[0] is the pre-move
+  // starting position, so the review for the move that produced boardStates[N] is
+  // moveIndex N-1.
+  const currentMoveReview = currentMoveIndex > 0
+    ? review?.moveReviews?.find((m: any) => m.moveIndex === currentMoveIndex - 1)
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
@@ -149,6 +200,36 @@ export default function AnalysisPage() {
         >
           Back to Profile
         </button>
+      </div>
+
+      {/* Automated post-game review (Phase 11) — computed once, server-side, shown
+          instantly here rather than recomputed on every view. */}
+      <div className="w-full max-w-5xl mb-6">
+        {!review || review.status === 'NOT_STARTED' || review.status === 'PENDING' ? (
+          <div className="bg-white rounded-lg shadow p-4 text-sm text-gray-500 flex items-center gap-2">
+            <span className="inline-block w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
+            Post-game analysis {review?.status === 'PENDING' ? 'in progress' : 'not started yet'}...
+          </div>
+        ) : review.status === 'FAILED' ? (
+          <div className="bg-white rounded-lg shadow p-4 text-sm text-red-600">
+            Post-game analysis failed: {review.errorMessage || 'unknown error'}
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow p-4 flex gap-8">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Light accuracy</p>
+              <p className="text-2xl font-bold text-slate-700">
+                {review.lightAccuracy !== null ? `${review.lightAccuracy}%` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Dark accuracy</p>
+              <p className="text-2xl font-bold text-slate-900">
+                {review.darkAccuracy !== null ? `${review.darkAccuracy}%` : '—'}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="w-full max-w-5xl flex flex-col md:flex-row gap-8">
@@ -207,7 +288,29 @@ export default function AnalysisPage() {
                <button onClick={prevMove} disabled={currentMoveIndex === 0} className="px-6 py-2 bg-gray-800 text-white rounded disabled:opacity-50">Previous Move</button>
                <button onClick={nextMove} disabled={currentMoveIndex === boardStates.length - 1} className="px-6 py-2 bg-gray-800 text-white rounded disabled:opacity-50">Next Move</button>
             </div>
-            <p className="mt-4 font-medium text-gray-700">Move {currentMoveIndex} of {boardStates.length - 1}</p>
+            <div className="mt-4 flex items-center gap-2">
+              <p className="font-medium text-gray-700">Move {currentMoveIndex} of {boardStates.length - 1}</p>
+              {currentMoveReview && (
+                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${CLASSIFICATION_STYLE[currentMoveReview.classification].badge}`}>
+                  {CLASSIFICATION_STYLE[currentMoveReview.classification].label}
+                </span>
+              )}
+            </div>
+
+            {/* Move-by-move classification strip — click any dot to jump straight to
+                that position. Only rendered once the review has real data. */}
+            {review?.moveReviews && review.moveReviews.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1 max-w-md justify-center">
+                {review.moveReviews.map((mr: any) => (
+                  <button
+                    key={mr.moveIndex}
+                    title={`Move ${mr.moveIndex + 1}: ${CLASSIFICATION_STYLE[mr.classification].label}`}
+                    onClick={() => { setCurrentMoveIndex(mr.moveIndex + 1); setEvaluations([]); }}
+                    className={`w-3 h-3 rounded-full ${CLASSIFICATION_STYLE[mr.classification].dot} ${currentMoveIndex === mr.moveIndex + 1 ? 'ring-2 ring-offset-1 ring-slate-500' : ''}`}
+                  />
+                ))}
+              </div>
+            )}
         </div>
 
         {/* Right side: Engine */}

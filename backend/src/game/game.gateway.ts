@@ -25,6 +25,7 @@ import { TimeControl, TimeControlName, TIME_CONTROLS, resolveTimeControl } from 
 import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
 import { filterMessage, pruneAndRecordTimestamp, isRateLimited } from './chat-filter';
+import { GameReviewService } from './review/game-review.service';
 
 // How long a disconnected player has to reconnect before their opponent is awarded the
 // win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
@@ -82,6 +83,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly anticheatService: AnticheatService,
     private readonly ratingService: RatingService,
     private readonly presenceService: PresenceService,
+    private readonly gameReviewService: GameReviewService,
   ) {}
 
   @WebSocketServer()
@@ -851,13 +853,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        const p1 = room.playerProfiles[PieceColor.LIGHT];
        const p2 = room.playerProfiles[PieceColor.DARK];
 
+       // Trigger async post-game review (Phase 11) — for every completed game,
+       // including vs-AI (unlike anti-cheat below, which only makes sense between two
+       // human players). Same "don't await, it's CPU intensive" reasoning as
+       // anti-cheat; see GameReviewService.analyzeCompletedGame's own comment for why
+       // this is a background PASS rather than a background PROCESS.
+       this.gameReviewService.analyzeCompletedGame(savedGame.id).catch(err => console.error('Game Review Error:', err));
+
        // Trigger async anti-cheat analysis
        // We don't await this because it's CPU intensive and we don't want to block the gateway
        if (!room.aiDifficulty) {
            this.anticheatService.analyzeGameForCheating(
               room.playerProfiles[PieceColor.LIGHT] || null,
               room.playerProfiles[PieceColor.DARK] || null,
-              room.moves
+              room.moves,
+              room.rules, // fixes a real bug — see the comment on analyzeGameForCheating's rules param
            ).catch(err => console.error('Anticheat Error:', err));
        }
 
