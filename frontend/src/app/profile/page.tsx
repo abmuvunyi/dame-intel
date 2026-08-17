@@ -9,6 +9,10 @@ export default function Profile() {
   const [friends, setFriends] = useState<any[]>([]);
   const [newFriendName, setNewFriendName] = useState('');
   const [activeTab, setActiveTab] = useState<'history' | 'friends'>('history');
+  // Phase 11: per-game accuracy from the automated post-game review, keyed by game
+  // id. Fetched once history loads — already computed server-side (not recomputed
+  // here), so this is just N cheap lookups, not N re-analyses.
+  const [reviews, setReviews] = useState<Record<number, any>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -43,6 +47,17 @@ export default function Profile() {
 
     fetchProfile();
   }, [router]);
+
+  useEffect(() => {
+    if (history.length === 0) return;
+    const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    Promise.all(history.map(g => axios.get(`${API}/game-review/${g.id}`).then(r => [g.id, r.data] as const).catch(() => [g.id, null] as const)))
+      .then(entries => {
+        const map: Record<number, any> = {};
+        for (const [gameId, data] of entries) if (data) map[gameId] = data;
+        setReviews(map);
+      });
+  }, [history]);
 
   const handleAddFriend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,12 +151,24 @@ export default function Profile() {
                   const isDraw = game.winner === 'DRAW';
                   const resultColor = isWin ? 'text-green-600' : (isDraw ? 'text-gray-600' : 'text-red-600');
                   const opponent = myColor === 'LIGHT' ? (game.darkPlayer?.username || 'AI') : (game.lightPlayer?.username || 'AI');
+                  // Phase 11: my own accuracy from the automated review, if it's
+                  // ready. Undefined (not yet fetched/computed) and null (side never
+                  // moved) both just render nothing — no "0%" false signal either way.
+                  const gameReview = reviews[game.id];
+                  const myAccuracy = gameReview?.status === 'COMPLETED'
+                    ? (myColor === 'LIGHT' ? gameReview.lightAccuracy : myColor === 'DARK' ? gameReview.darkAccuracy : null)
+                    : null;
 
                   return (
                     <li key={i} className="py-4 flex justify-between items-center hover:bg-gray-50 px-2 rounded">
                       <div>
                         <span className={`font-bold uppercase ${resultColor}`}>{isWin ? 'WIN' : (isDraw ? 'DRAW' : 'LOSS')}</span>
                         <span className="text-gray-600 ml-3">vs {opponent}</span>
+                        {myAccuracy !== null && (
+                          <span className="ml-3 text-xs font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {myAccuracy}% accuracy
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-4">
                         <span className="text-sm text-gray-500">

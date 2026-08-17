@@ -8,6 +8,7 @@ import { TournamentsService } from '../tournaments/tournaments.service';
 import { AnticheatService } from '../anticheat/anticheat.service';
 import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
+import { GameReviewService } from './review/game-review.service';
 
 // Minimal stand-in for socket.io's Server: just enough surface for the gateway's
 // `this.server.to(...).emit(...)` and `this.server.sockets.sockets.get(...).join(...)`
@@ -32,6 +33,7 @@ describe('GameGateway', () => {
         GameGateway,
         AiService,
         PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: {} },
         { provide: HistoryService, useValue: {} },
@@ -132,6 +134,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
         GameGateway,
         AiService,
         PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         {
           provide: UsersService,
@@ -320,6 +323,7 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
         GameGateway,
         AiService,
         PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -406,6 +410,7 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
         GameGateway,
         AiService,
         PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -558,6 +563,7 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
         GameGateway,
         AiService,
         PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -670,5 +676,72 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
       gw.handleSendMessage(mockSocket('p1') as any, { roomId, message: '   ' });
       expect(mockServer.emitted.some((e: any) => e.event === 'receiveMessage')).toBe(false);
     });
+  });
+});
+
+describe('GameGateway: post-game review trigger (Phase 11)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+  let analyzeCompletedGame: jest.Mock;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x' },
+  };
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    analyzeCompletedGame = jest.fn().mockResolvedValue(undefined);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame } },
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: HistoryService, useValue: { saveGame: async () => ({ id: 4242 }) } },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  it('fires analyzeCompletedGame with the saved game\'s id when a real PvP game ends, without awaiting it', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+    gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 } });
+    gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 } });
+    const roomId = (gw as any).socketToRoom.get('p1');
+
+    const room = (gw as any).activeGames.get(roomId);
+    await (gw as any).handleGameOver(roomId, room, 'D', 'resignation');
+
+    expect(analyzeCompletedGame).toHaveBeenCalledWith(4242);
+  });
+
+  it('still triggers review for a vs-AI game, unlike anti-cheat which explicitly skips those', async () => {
+    gw.handlePlayVsAi(mockSocket('p1', '1') as any, { difficulty: 1, rules: { boardSize: 8 } });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    const room = (gw as any).activeGames.get(roomId);
+
+    await (gw as any).handleGameOver(roomId, room, 'L', 'resignation');
+
+    expect(analyzeCompletedGame).toHaveBeenCalledWith(4242);
   });
 });

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CheatFlag } from './cheat-flag.entity';
 import { AiService } from '../game/ai/ai/ai.service';
-import { DraughtsEngine, PieceColor, Move } from '../game/engine/engine.service';
+import { DraughtsEngine, PieceColor, Move, GameRules } from '../game/engine/engine.service';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -17,12 +17,28 @@ export class AnticheatService {
   public async analyzeGameForCheating(
     lightPlayer: User | null,
     darkPlayer: User | null,
-    moves: Move[]
+    moves: Move[],
+    // Real bug found while building Phase 11's post-game review, which does this
+    // exact same "replay the recorded moves on a fresh engine" pattern: this used to
+    // construct `new DraughtsEngine()` with no rules at all, silently defaulting to
+    // 8x8 American — the same class of bug Phase 3 already found and fixed in
+    // analysis.controller.ts, just never caught here. Confirmed directly (not
+    // assumed, see the regression test below): an 8x8 board isn't just a truncated
+    // 10x10 one, it's a different width with a different starting layout, so a
+    // 10x10 game's very FIRST recorded move already fails to match anything in the
+    // wrong-sized engine's `getLegalMoves()` — `engine.makeMove()` returns `false`
+    // and does nothing, so the "replay" never advances past the initial position at
+    // all. Not a crash: every move for the rest of the game gets silently compared
+    // against that same frozen starting board instead of the real one, making
+    // anti-cheat's analysis of any 10x10 game meaningless from move one. Optional and
+    // defaults to the old 8x8 behavior only when omitted, so this stays backward
+    // compatible.
+    rules?: Partial<GameRules>,
   ) {
     if (!lightPlayer && !darkPlayer) return;
     if (moves.length < 10) return; // Too short to analyze accurately
 
-    const engine = new DraughtsEngine();
+    const engine = new DraughtsEngine(rules ?? {});
     let lightEngineMatches = 0;
     let darkEngineMatches = 0;
     let lightTotalMoves = 0;
