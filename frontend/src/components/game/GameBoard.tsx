@@ -20,15 +20,15 @@ type Clocks = { [PieceColor.LIGHT]: number; [PieceColor.DARK]: number };
 // useSearchParams() requires a Suspense boundary somewhere above it in the App
 // Router — this wrapper is that boundary, keeping the exported component's own
 // signature/usage (`<GameBoard />`) unchanged for page.tsx.
-export default function GameBoard() {
+export default function GameBoard({ initialSettings, onBack }: { initialSettings?: any, onBack?: () => void }) {
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-screen text-gray-500">Loading...</div>}>
-      <GameBoardInner />
+      <GameBoardInner initialSettings={initialSettings} onBack={onBack} />
     </Suspense>
   );
 }
 
-function GameBoardInner() {
+function GameBoardInner({ initialSettings, onBack }: { initialSettings?: any, onBack?: () => void }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
@@ -108,6 +108,27 @@ function GameBoardInner() {
       } else if (tournamentIdToJoin) {
         setStatus(`Connected. Click 'Find Tournament Match' to join the Arena.`);
         newSocket.emit('getActiveGames');
+      } else if (initialSettings) {
+        // Automatically start matchmaking based on settings passed from Dashboard
+        setStatus('Matchmaking...');
+        setBoardSize(initialSettings.boardSize);
+        setTimeControl(initialSettings.timeControl);
+        if (initialSettings.mode === 'ai') {
+           newSocket.emit('playVsAi', {
+             rules: {
+               boardSize: initialSettings.boardSize,
+               variant: initialSettings.boardSize === 10 ? 'international' : 'american'
+             }
+           });
+        } else {
+           newSocket.emit('joinMatchmaking', {
+             rules: {
+               boardSize: initialSettings.boardSize,
+               variant: initialSettings.boardSize === 10 ? 'international' : 'american'
+             },
+             timeControl: initialSettings.timeControl
+           });
+        }
       } else {
         setStatus('Connected to server. Click Find Match to begin.');
         newSocket.emit('getActiveGames');
@@ -365,128 +386,138 @@ function GameBoardInner() {
   );
 
   if (!board) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
-        {challengeBanner}
-        {challengeNoticeBanner}
-        <div className="absolute top-4 right-4"><ConnectionStatus connected={connected} /></div>
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
+    if (!roomId && !roomIdToSpectate && !initialSettings) {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-6 w-full max-w-3xl">
+          {challengeBanner}
+          {challengeNoticeBanner}
+          <ConnectionStatus connected={connected} />
+          <p className="text-gray-400 font-medium">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-              Board Size:
-              <select
-                value={boardSize}
-                onChange={e => setBoardSize(parseInt(e.target.value))}
-                className="ml-2 border rounded p-1 text-sm bg-white"
-              >
-                <option value={8}>8x8 (Standard)</option>
-                <option value={10}>10x10 (International)</option>
-              </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceMajorityCapture}
-                onChange={e => setForceMajorityCapture(e.target.checked)}
-                className="rounded"
-              />
-              Force Majority Capture
-            </label>
-            <label className="text-sm flex justify-between items-center text-gray-600">
-              Time Control:
-              <select
-                value={timeControl}
-                onChange={e => setTimeControl(e.target.value as typeof timeControl)}
-                className="ml-2 border rounded p-1 text-sm bg-white"
-              >
-                <option value="bullet">Bullet (2+1)</option>
-                <option value="blitz">Blitz (5+3)</option>
-                <option value="rapid">Rapid (10+5)</option>
-                <option value="correspondence">Correspondence</option>
-              </select>
-            </label>
-          </div>
-
-          <button
-            onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          >
-            {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
-          </button>
-
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
+          {tournamentIdToJoin ? (
+            <div className="bg-[#3e3b38] border border-[#52504e] p-6 rounded-lg shadow-sm w-full max-w-sm text-center">
+              <h3 className="font-semibold text-white mb-2">Tournament Arena</h3>
+              <p className="text-sm text-gray-300 mb-4">You are in a tournament. Click to find your next pairing.</p>
               <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+                className="bg-[#81b64c] hover:bg-[#a3d160] text-white font-bold py-2 px-4 rounded w-full transition shadow"
+                onClick={handleJoinSwissPairing}
+                disabled={!connected}
               >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                Find Tournament Match
               </button>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-col space-y-4 w-full max-w-sm bg-[#3e3b38] p-6 rounded-lg border border-[#52504e] shadow-sm">
+              <div className="flex justify-between items-center bg-[#262421] p-2 rounded border border-[#52504e]">
+                <label className="text-sm font-semibold text-gray-300">Variant:</label>
+                <select
+                  className="bg-transparent text-sm text-white focus:outline-none"
+                  value={boardSize}
+                  onChange={(e) => setBoardSize(Number(e.target.value))}
+                >
+                  <option value={8}>8x8 (American)</option>
+                  <option value={10}>10x10 (International)</option>
+                </select>
+              </div>
+
+              <div className="flex justify-between items-center bg-[#262421] p-2 rounded border border-[#52504e]">
+                <label className="text-sm font-semibold text-gray-300">Time Control:</label>
+                <select
+                  className="bg-transparent text-sm text-white focus:outline-none"
+                  value={timeControl}
+                  onChange={(e) => setTimeControl(e.target.value as any)}
+                >
+                  <option value="bullet">Bullet</option>
+                  <option value="blitz">Blitz</option>
+                  <option value="rapid">Rapid</option>
+                  <option value="correspondence">Daily</option>
+                </select>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  className="bg-[#81b64c] hover:bg-[#a3d160] text-white font-bold py-3 px-4 rounded flex-1 transition shadow"
+                  onClick={handleFindMatch}
+                  disabled={!connected || status === 'Matchmaking...'}
+                >
+                  {status === 'Matchmaking...' ? 'Searching...' : 'Play Human'}
+                </button>
+                <button
+                  className="bg-[#454341] hover:bg-[#52504e] text-white font-bold py-3 px-4 rounded flex-1 transition shadow"
+                  onClick={() => handlePlayAI(3)}
+                  disabled={!connected}
+                >
+                  Play AI
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 10: Friends Online List (direct challenges) */}
+          {friends.some(f => f.status === 'ACCEPTED' && f.online) && (
+            <div className="w-full max-w-sm">
+              <h3 className="font-semibold text-gray-300 border-b border-[#52504e] pb-2 mb-3">Friends Online</h3>
+              <ul className="space-y-2">
+                {friends.filter(f => f.status === 'ACCEPTED' && f.online).map((f) => (
+                  <li key={f.friendId} className="flex justify-between items-center bg-[#3e3b38] p-3 rounded border border-[#52504e] shadow-sm text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      <span className="font-medium text-gray-200">{f.username}</span>
+                    </div>
+                    <button
+                      onClick={() => handleChallengeFriend(f.friendId)}
+                      className="text-xs bg-[#454341] text-gray-200 hover:bg-[#52504e] px-3 py-1.5 rounded font-semibold transition border border-[#52504e]"
+                    >
+                      Challenge
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Phase 9: Compact inline Live Games list */}
+          {activeGames.length > 0 && (
+            <div className="w-full max-w-sm">
+              <h3 className="font-semibold text-gray-300 border-b border-[#52504e] pb-2 mb-3">Live Games</h3>
+              <ul className="space-y-2">
+                {activeGames.map((game, i) => (
+                  <li key={i} className="flex justify-between items-center bg-[#3e3b38] p-3 rounded border border-[#52504e] shadow-sm text-sm">
+                    <span className="font-medium text-gray-200 truncate pr-4">
+                      {game.player1Username} vs {game.player2Username}
+                    </span>
+                    <button
+                      onClick={() => handleWatchGame(game.roomId)}
+                      className="text-xs bg-[#454341] text-gray-200 hover:bg-[#52504e] px-3 py-1.5 rounded font-semibold whitespace-nowrap transition border border-[#52504e]"
+                    >
+                      Watch
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
-
-        {friends.some(f => f.status === 'ACCEPTED' && f.online) && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Friends Online</h3>
-            <ul className="space-y-2">
-              {friends.filter(f => f.status === 'ACCEPTED' && f.online).map((f) => (
-                <li key={f.friendId} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                  <span className="font-medium text-gray-700 flex items-center gap-2">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />
-                    {f.username}
-                  </span>
-                  <button
-                    onClick={() => handleChallengeFriend(f.friendId)}
-                    className="px-4 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
-                  >
-                    Challenge
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {activeGames.length > 0 && (
-          <div className="mt-8 w-full">
-            <h3 className="text-xl font-bold mb-4 text-center">Live Games</h3>
-            <ul className="space-y-2">
-              {activeGames.map((game, i) => (
-                <li key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded border">
-                  <span className="font-medium text-gray-700">{game.player1} vs {game.player2}</span>
-                  <button
-                    onClick={() => handleWatchGame(game.roomId)}
-                    className="px-4 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
-                  >
-                    Watch ({game.spectatorsCount} 👀)
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Full dashboard (Phase 9): ratings, variant, board size, and time control
-            per game — more than fits in this compact inline list. */}
-        <a href="/watch" className="mt-4 text-sm text-blue-600 hover:underline">
-          View full Live Games dashboard →
-        </a>
-        <a href="/profile" className="text-sm text-blue-600 hover:underline">
-          Manage Friends & Requests →
-        </a>
-        <a href="/clubs" className="text-sm text-blue-600 hover:underline">
-          Browse Clubs →
-        </a>
-      </div>
-    );
+      );
+    } else if (!roomId && initialSettings) {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-6 w-full max-w-3xl h-full">
+          <h2 className="text-2xl font-bold text-white mb-4">Searching for opponent...</h2>
+          <ConnectionStatus connected={connected} />
+          <p className="text-gray-400 font-medium">{status}</p>
+          <div className="mt-8 animate-spin rounded-full h-12 w-12 border-b-2 border-[#81b64c]"></div>
+        </div>
+      );
+    } else {
+      return (
+        <div className="flex flex-col items-center justify-center space-y-6 w-full max-w-3xl h-full">
+          <h2 className="text-2xl font-bold text-white mb-4">Loading Game...</h2>
+          <ConnectionStatus connected={connected} />
+          <p className="text-gray-400 font-medium">{status}</p>
+          <div className="mt-8 animate-spin rounded-full h-12 w-12 border-b-2 border-[#81b64c]"></div>
+        </div>
+      );
+    }
   }
 
   // Auto-orient so the player's own pieces are always nearest them; a manual toggle
