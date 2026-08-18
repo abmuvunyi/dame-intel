@@ -35,7 +35,6 @@ export interface Move {
 
 export interface GameRules {
   boardSize: number;
-  forceMajorityCapture: boolean;
 }
 
 /**

@@ -70,7 +70,6 @@ function GameBoardInner() {
 
   // Settings
   const [boardSize, setBoardSize] = useState(8);
-  const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
   const [timeControl, setTimeControl] = useState<'bullet' | 'blitz' | 'rapid' | 'correspondence'>('blitz');
 
   // Real bug found verifying Phase 9, not introduced by it: this used to parse
@@ -269,11 +268,11 @@ function GameBoardInner() {
   }, []);
 
   const handleFindMatch = () => {
-    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize }, timeControl });
   };
 
   const handlePlayAI = (difficulty: number) => {
-    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('playVsAi', { difficulty, rules: { boardSize }, timeControl });
   };
 
   const handleWatchGame = (roomIdToWatch: string) => {
@@ -283,7 +282,7 @@ function GameBoardInner() {
   // Reuses the exact Phase 5 challenge mechanism (challengePlayer / challengeReceived
   // / respondToChallenge) — this just adds the UI that never existed for it before.
   const handleChallengeFriend = (targetUserId: number) => {
-    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize }, timeControl });
     setChallengeNotice('Challenge sent — waiting for a response...');
   };
 
@@ -386,15 +385,6 @@ function GameBoardInner() {
                 <option value={8}>8x8 (Standard)</option>
                 <option value={10}>10x10 (International)</option>
               </select>
-            </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceMajorityCapture}
-                onChange={e => setForceMajorityCapture(e.target.checked)}
-                className="rounded"
-              />
-              Force Majority Capture
             </label>
             <label className="text-sm flex justify-between items-center text-gray-600">
               Time Control:
