@@ -1,5 +1,6 @@
 'use client';
 import GameBoard from "@/components/game/GameBoard";
+import NotificationBell from "@/components/NotificationBell";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -34,9 +35,13 @@ export default function Home() {
               <Link href="/puzzles" className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition shadow">
                 Train / Puzzles
               </Link>
+              <Link href="/membership" className="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded hover:bg-amber-700 transition shadow">
+                Premium
+              </Link>
               <Link href="/profile" className="px-4 py-2 text-sm font-medium text-white bg-slate-800 rounded hover:bg-slate-900 transition shadow">
                 My Profile
               </Link>
+              <NotificationBell />
               <button onClick={handleLogout} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition shadow-sm">
                 Log Out
               </button>

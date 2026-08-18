@@ -39,6 +39,7 @@
     "rxjs": "^7.8.1",
     "socket.io": "^4.7.4",
     "sqlite3": "^5.1.7",
+    "stripe": "^22.5.0",
     "typeorm": "^0.3.20"
   },
   "devDependencies": {

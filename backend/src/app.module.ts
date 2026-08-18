@@ -15,6 +15,8 @@ import { AnticheatModule } from './anticheat/anticheat.module';
 import { RatingModule } from './rating/rating.module';
 import { ClubsModule } from './clubs/clubs.module';
 import { PresenceModule } from './presence/presence.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -55,6 +57,8 @@ import { PresenceModule } from './presence/presence.module';
     RatingModule,
     ClubsModule,
     PresenceModule,
+    SubscriptionsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -6,6 +6,7 @@ import { TournamentPlayer } from './tournament-player.entity';
 import { SwissRound } from './swiss-round.entity';
 import { SwissPairingRecord } from './swiss-pairing.entity';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('TournamentsService', () => {
   let service: TournamentsService;
@@ -18,7 +19,8 @@ describe('TournamentsService', () => {
         { provide: getRepositoryToken(TournamentPlayer), useValue: {} },
         { provide: getRepositoryToken(SwissRound), useValue: {} },
         { provide: getRepositoryToken(SwissPairingRecord), useValue: {} },
-        { provide: UsersService, useValue: {} }
+        { provide: UsersService, useValue: {} },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
       ],
     }).compile();
 

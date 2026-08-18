@@ -8,6 +8,7 @@ import { TournamentPlayer } from './tournament-player.entity';
 import { SwissRound } from './swiss-round.entity';
 import { SwissPairingRecord } from './swiss-pairing.entity';
 import { User } from '../users/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Real in-memory sqlite (same pattern as rating.service.spec.ts / puzzles.service.spec.ts)
 // — round generation, pairing persistence, and standings all involve genuine
@@ -15,6 +16,7 @@ import { User } from '../users/user.entity';
 describe('TournamentsService: Swiss lifecycle', () => {
   let service: TournamentsService;
   let usersService: UsersService;
+  let notify: jest.Mock;
 
   async function makeUsers(n: number): Promise<number[]> {
     const ids: number[] = [];
@@ -34,6 +36,7 @@ describe('TournamentsService: Swiss lifecycle', () => {
   }
 
   beforeEach(async () => {
+    notify = jest.fn().mockResolvedValue({});
     const module: TestingModule = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot({
@@ -44,7 +47,7 @@ describe('TournamentsService: Swiss lifecycle', () => {
         }),
         TypeOrmModule.forFeature([Tournament, TournamentPlayer, SwissRound, SwissPairingRecord, User]),
       ],
-      providers: [TournamentsService, UsersService],
+      providers: [TournamentsService, UsersService, { provide: NotificationsService, useValue: { notify } }],
     }).compile();
 
     service = module.get<TournamentsService>(TournamentsService);
@@ -91,6 +94,17 @@ describe('TournamentsService: Swiss lifecycle', () => {
       expect(started.currentRound).toBe(1);
       const pairings = await service.getRoundPairings(tournament.id, 1);
       expect(pairings).toHaveLength(2); // 4 players -> 2 pairings
+    });
+
+    // Phase 13 trigger point 3/4.
+    it('notifies every registered player that the tournament has started', async () => {
+      const { tournament, userIds } = await makeSwissTournament(3);
+      await service.startTournament(tournament.id);
+
+      expect(notify).toHaveBeenCalledTimes(3);
+      for (const uid of userIds) {
+        expect(notify).toHaveBeenCalledWith(uid, 'TOURNAMENT_STARTING', expect.stringContaining(tournament.name), { tournamentId: tournament.id });
+      }
     });
   });
 
@@ -283,6 +297,39 @@ describe('TournamentsService: Swiss lifecycle', () => {
       const bye = pairings.find(p => p.player2Id === null)!;
 
       expect(await service.findSwissOpponent(tournament.id, bye.player1Id)).toBeNull();
+    });
+  });
+
+  // Phase 13 trigger point 3/4, the other half — Arena's auto-start (the cron-driven
+  // 'UPCOMING' -> 'IN_PROGRESS' path), distinct from Swiss's explicit startTournament.
+  describe('Arena tournament auto-start notification (Phase 13)', () => {
+    it('notifies every registered player once the cron sweep auto-starts the tournament', async () => {
+      const t = await service.createTournament('Arena Cup', 'Arena');
+      const userIds = await makeUsers(2);
+      for (const uid of userIds) await service.joinTournament(t.id, uid);
+
+      // Force the tournament to look old enough to auto-start — handleTournamentState
+      // only starts an 'UPCOMING' Arena tournament once it's been open for 60s+.
+      const tournamentRepository = (service as any).tournamentRepository;
+      await tournamentRepository.update(t.id, { createdAt: new Date(Date.now() - 61_000) });
+
+      await service.handleTournamentState();
+
+      expect(notify).toHaveBeenCalledTimes(2);
+      for (const uid of userIds) {
+        expect(notify).toHaveBeenCalledWith(uid, 'TOURNAMENT_STARTING', expect.stringContaining('Arena Cup'), { tournamentId: t.id });
+      }
+    });
+
+    it('does not notify anyone for a tournament that has not met the auto-start conditions yet', async () => {
+      const t = await service.createTournament('Too Fresh', 'Arena');
+      const userIds = await makeUsers(2);
+      for (const uid of userIds) await service.joinTournament(t.id, uid);
+      // createdAt left as "just now" — under the 60s threshold.
+
+      await service.handleTournamentState();
+
+      expect(notify).not.toHaveBeenCalled();
     });
   });
 });

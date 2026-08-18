@@ -8,6 +8,7 @@ import { TournamentPlayer } from './tournament-player.entity';
 import { SwissRound } from './swiss-round.entity';
 import { SwissPairingRecord } from './swiss-pairing.entity';
 import { User } from '../users/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Phase 8b: organizer-configurable tournament settings — registration caps, board
 // format/time control, and a custom points system. Real in-memory sqlite, same
@@ -36,7 +37,7 @@ describe('TournamentsService: organizer-configurable settings (Phase 8b)', () =>
         }),
         TypeOrmModule.forFeature([Tournament, TournamentPlayer, SwissRound, SwissPairingRecord, User]),
       ],
-      providers: [TournamentsService, UsersService],
+      providers: [TournamentsService, UsersService, { provide: NotificationsService, useValue: { notify: async () => ({}) } }],
     }).compile();
 
     service = module.get<TournamentsService>(TournamentsService);

@@ -6,6 +6,7 @@ import { TournamentPlayer } from './tournament-player.entity';
 import { SwissRound } from './swiss-round.entity';
 import { SwissPairingRecord } from './swiss-pairing.entity';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { pairSwissRound, SwissPlayer, BYE } from './swiss-pairing';
 
@@ -39,7 +40,20 @@ export class TournamentsService implements OnModuleInit {
     @InjectRepository(SwissPairingRecord)
     private pairingRepository: Repository<SwissPairingRecord>,
     private usersService: UsersService,
+    private notificationsService: NotificationsService,
   ) {}
+
+  // Phase 13 trigger point 3/4, shared by both tournament formats' start paths (Arena's
+  // auto-start below, and Swiss's startTournament). Best-effort per player — one
+  // player's failed notification must never stop the others from being notified or
+  // the tournament from starting, which has already happened by the time this runs.
+  private async notifyTournamentStarting(tournamentId: number, tournamentName: string, userIds: number[]): Promise<void> {
+    await Promise.all(userIds.map((userId) =>
+      this.notificationsService
+        .notify(userId, 'TOURNAMENT_STARTING', `${tournamentName} has started`, { tournamentId })
+        .catch((err) => console.error(`[Notifications] Failed to notify user ${userId} of tournament ${tournamentId} starting:`, err)),
+    ));
+  }
 
   async onModuleInit() {
     // Seed an initial upcoming tournament
@@ -144,7 +158,7 @@ export class TournamentsService implements OnModuleInit {
     // Auto-start tournaments
     const upcoming = await this.tournamentRepository.find({
        where: { status: 'UPCOMING' },
-       relations: ['players']
+       relations: ['players', 'players.user']
     });
 
     for (const t of upcoming) {
@@ -153,6 +167,7 @@ export class TournamentsService implements OnModuleInit {
           t.status = 'IN_PROGRESS';
           await this.tournamentRepository.save(t);
           console.log(`Tournament ${t.id} started!`);
+          await this.notifyTournamentStarting(t.id, t.name, t.players.map(p => p.user.id));
        }
     }
 
@@ -252,12 +267,13 @@ export class TournamentsService implements OnModuleInit {
     if (t.format !== 'Swiss') throw new BadRequestException('Only Swiss tournaments use this lifecycle');
     if (t.status !== 'REGISTRATION_OPEN') throw new BadRequestException(`Cannot start from status ${t.status}`);
 
-    const players = await this.tournamentPlayerRepository.find({ where: { tournament: { id: tournamentId } } });
+    const players = await this.tournamentPlayerRepository.find({ where: { tournament: { id: tournamentId } }, relations: ['user'] });
     if (players.length < 2) throw new BadRequestException('Need at least 2 registered players to start');
 
     t.status = 'IN_PROGRESS';
     await this.tournamentRepository.save(t);
     await this.generateNextRound(tournamentId);
+    await this.notifyTournamentStarting(t.id, t.name, players.map(p => p.user.id));
 
     return this.requireTournament(tournamentId);
   }

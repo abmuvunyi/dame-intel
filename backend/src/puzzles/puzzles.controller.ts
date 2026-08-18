@@ -6,6 +6,7 @@ import { PuzzleRushService } from './puzzle-rush.service';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { jwtConstants } from '../auth/constants';
+import { UsersService } from '../users/users.service';
 import type { Move } from '../game/engine/engine.service';
 
 @Controller('puzzles')
@@ -15,6 +16,7 @@ export class PuzzlesController {
     private readonly rushService: PuzzleRushService,
     private readonly generatorService: PuzzleGeneratorService,
     private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
   ) {}
 
   // Puzzle solving is open to anonymous play, same as vs-AI games — but attempts from
@@ -32,10 +34,21 @@ export class PuzzlesController {
     }
   }
 
+  // Phase 13: same optional-auth shape as optionalUserId above, resolved one step
+  // further into "does this (possibly anonymous) caller have premium access" — the
+  // one feature-flag check every gated puzzle route below goes through.
+  private async optionalHasPremium(req: Request): Promise<boolean> {
+    const userId = await this.optionalUserId(req);
+    if (!userId) return false;
+    const user = await this.usersService.findOneById(userId);
+    return this.usersService.hasPremium(user);
+  }
+
   @Get('random')
-  async getRandomPuzzle(@Query('difficulty') difficulty?: string) {
+  async getRandomPuzzle(@Req() req: Request, @Query('difficulty') difficulty?: string) {
     const diff = difficulty ? parseInt(difficulty, 10) : undefined;
-    return this.puzzlesService.getRandomPuzzle(diff);
+    const hasPremium = await this.optionalHasPremium(req);
+    return this.puzzlesService.getRandomPuzzle(diff, hasPremium);
   }
 
   @Get('rating')
@@ -45,8 +58,9 @@ export class PuzzlesController {
   }
 
   @Get(':id/legal-moves')
-  async getLegalMoves(@Param('id', ParseIntPipe) id: number, @Query('moveIndex') moveIndex?: string) {
-    return this.puzzlesService.getLegalMoves(id, moveIndex ? parseInt(moveIndex, 10) : 0);
+  async getLegalMoves(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Query('moveIndex') moveIndex?: string) {
+    const hasPremium = await this.optionalHasPremium(req);
+    return this.puzzlesService.getLegalMoves(id, moveIndex ? parseInt(moveIndex, 10) : 0, hasPremium);
   }
 
   @Post(':id/attempt')
@@ -56,7 +70,8 @@ export class PuzzlesController {
     @Body() body: { moveIndex: number; move: Move },
   ) {
     const userId = await this.optionalUserId(req);
-    return this.puzzlesService.attemptMove(id, userId, body.moveIndex, body.move);
+    const hasPremium = userId ? this.usersService.hasPremium(await this.usersService.findOneById(userId)) : false;
+    return this.puzzlesService.attemptMove(id, userId, body.moveIndex, body.move, hasPremium);
   }
 
   // --- Puzzle Rush / Storm ---
@@ -96,6 +111,14 @@ export class PuzzlesController {
   @UseGuards(AuthGuard)
   async approvePuzzle(@Param('id', ParseIntPipe) id: number) {
     return this.puzzlesService.setStatus(id, 'published');
+  }
+
+  // Phase 13: marks a puzzle premium-only (or reverts it) — same "logged in is
+  // enough" admin bar as everything else in this section.
+  @Post('admin/:id/set-premium')
+  @UseGuards(AuthGuard)
+  async setPuzzlePremium(@Param('id', ParseIntPipe) id: number, @Body() body: { isPremium: boolean }) {
+    return this.puzzlesService.setPremium(id, !!body.isPremium);
   }
 
   @Post('admin/:id/reject')

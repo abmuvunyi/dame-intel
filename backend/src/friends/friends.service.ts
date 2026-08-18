@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Friendship } from './friendship.entity';
 import { UsersService } from '../users/users.service';
 import { PresenceService } from '../presence/presence.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class FriendsService {
@@ -12,6 +13,7 @@ export class FriendsService {
     private friendshipRepository: Repository<Friendship>,
     private usersService: UsersService,
     private presenceService: PresenceService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async sendFriendRequest(senderId: number, targetUsername: string) {
@@ -38,7 +40,18 @@ export class FriendsService {
       status: 'PENDING'
     });
 
-    return this.friendshipRepository.save(friendship);
+    const saved = await this.friendshipRepository.save(friendship);
+
+    // Phase 13 trigger point 1/4. Best-effort — notifying the recipient must never
+    // roll back or fail a friend request that already succeeded.
+    await this.notificationsService.notify(
+      targetUser.id,
+      'FRIEND_REQUEST',
+      `${user1.username} sent you a friend request`,
+      { friendshipId: saved.id },
+    );
+
+    return saved;
   }
 
   async acceptFriendRequest(userId: number, friendshipId: number) {

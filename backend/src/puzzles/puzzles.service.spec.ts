@@ -214,4 +214,69 @@ describe('PuzzlesService', () => {
       expect((await service.listPending()).map(p => p.id)).not.toContain(pending.id);
     });
   });
+
+  // Phase 13: premium-only puzzles — one of the two features actually gated behind
+  // the paid tier (see analysis.controller.ts for the other one).
+  describe('premium puzzle gating (Phase 13)', () => {
+    async function makePremiumPuzzle() {
+      const board = emptyBoard(8);
+      return (service as any).puzzlesRepository.save(
+        (service as any).puzzlesRepository.create({ difficulty: 1, boardSize: 8, board, turnToMove: 'L', solution: [], status: 'published', isPremium: true }),
+      );
+    }
+
+    it('setPremium toggles the flag and persists it', async () => {
+      const board = emptyBoard(8);
+      const puzzle = await (service as any).puzzlesRepository.save(
+        (service as any).puzzlesRepository.create({ difficulty: 1, boardSize: 8, board, turnToMove: 'L', solution: [], status: 'published' }),
+      );
+      expect(puzzle.isPremium).toBe(false);
+
+      const updated = await service.setPremium(puzzle.id, true);
+      expect(updated.isPremium).toBe(true);
+      expect((await service.getPuzzleEntity(puzzle.id)).isPremium).toBe(true);
+    });
+
+    it('getRandomPuzzle never serves a premium puzzle to a non-premium caller, even when it is the ONLY published puzzle', async () => {
+      await makePremiumPuzzle();
+      expect(await service.getRandomPuzzle(undefined, false)).toBeNull();
+      // Same pool, but as a premium caller — the puzzle is now reachable.
+      const served = await service.getRandomPuzzle(undefined, true);
+      expect(served).not.toBeNull();
+      expect(served!.isPremium).toBe(true);
+    });
+
+    it('getRandomPuzzle happily serves free puzzles to everyone once both kinds exist', async () => {
+      const board = emptyBoard(8);
+      await (service as any).puzzlesRepository.save(
+        (service as any).puzzlesRepository.create({ difficulty: 1, boardSize: 8, board, turnToMove: 'L', solution: [], status: 'published', isPremium: false }),
+      );
+      await makePremiumPuzzle();
+
+      for (let i = 0; i < 10; i++) {
+        const picked = await service.getRandomPuzzle(undefined, false);
+        expect(picked!.isPremium).toBe(false); // never the premium one, across repeated draws
+      }
+    });
+
+    it('getLegalMoves refuses direct-by-id access to a premium puzzle for a non-premium caller', async () => {
+      const puzzle = await makePremiumPuzzle();
+      await expect(service.getLegalMoves(puzzle.id, 0, false)).rejects.toThrow('premium-only');
+      await expect(service.getLegalMoves(puzzle.id, 0, true)).resolves.toBeDefined();
+    });
+
+    it('attemptMove refuses a solve attempt on a premium puzzle for a non-premium caller', async () => {
+      const puzzle = await makePremiumPuzzle();
+      const anyMove: Move = { from: { row: 2, col: 1 }, to: { row: 3, col: 0 } };
+      await expect(service.attemptMove(puzzle.id, null, 0, anyMove, false)).rejects.toThrow('premium-only');
+    });
+
+    it('a free (non-premium) puzzle remains accessible to everyone, unaffected by the gate', async () => {
+      const board = emptyBoard(8);
+      const puzzle = await (service as any).puzzlesRepository.save(
+        (service as any).puzzlesRepository.create({ difficulty: 1, boardSize: 8, board, turnToMove: 'L', solution: [], status: 'published', isPremium: false }),
+      );
+      await expect(service.getLegalMoves(puzzle.id, 0, false)).resolves.toBeDefined();
+    });
+  });
 });

@@ -26,6 +26,7 @@ import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
 import { filterMessage, pruneAndRecordTimestamp, isRateLimited } from './chat-filter';
 import { GameReviewService } from './review/game-review.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // How long a disconnected player has to reconnect before their opponent is awarded the
 // win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
@@ -33,6 +34,15 @@ const DISCONNECT_GRACE_MS = 60_000;
 // How often the matchmaking queue is re-swept for matches that only became possible
 // because someone's rating band widened with wait time (no new player needed to join).
 const MATCHMAKING_SWEEP_MS = 2_000;
+// Phase 13: how long a correspondence game's current mover can go without moving
+// before their opponent... no, before *they* get a reminder. Deliberately generous —
+// correspondence's whole premise (86,400s/24h banked per move, see time-control.ts) is
+// that players aren't expected to be at the board; a reminder at the halfway point of
+// their own clock gives real lead time without being naggy.
+const CORRESPONDENCE_REMINDER_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+// How often the sweep checks for correspondence games needing a reminder. Coarser than
+// the matchmaking sweep on purpose — nothing here is time-critical to the second.
+const CORRESPONDENCE_REMINDER_SWEEP_MS = 60 * 60 * 1000;
 
 interface QueuedPlayer extends SeekEntry {
   fullRules: GameRules;
@@ -76,6 +86,12 @@ interface GameRoom {
   // cheating) so the two arrays never drift out of index alignment.
   moveTimings: number[];
   tournamentId?: number;
+  // Phase 13: the `turnStartedAt` value (not a boolean) a correspondence-turn reminder
+  // was already sent for. Comparing against the *current* turnStartedAt, rather than a
+  // simple sent/unsent flag, means a fresh turn (which always sets a new turnStartedAt)
+  // automatically becomes eligible for its own reminder again, with no explicit reset
+  // needed anywhere a move gets made.
+  correspondenceReminderSentFor?: number;
 }
 
 @WebSocketGateway({ cors: true })
@@ -90,6 +106,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly ratingService: RatingService,
     private readonly presenceService: PresenceService,
     private readonly gameReviewService: GameReviewService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   @WebSocketServer()
@@ -105,13 +122,37 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   // Phase 10: per-socket recent chat timestamps, for the sendMessage rate limit below.
   private chatTimestamps: Map<string, number[]> = new Map();
   private matchmakingInterval?: ReturnType<typeof setInterval>;
+  private correspondenceReminderInterval?: ReturnType<typeof setInterval>;
 
   onModuleInit() {
     this.matchmakingInterval = setInterval(() => this.runMatchmakingSweep(), MATCHMAKING_SWEEP_MS);
+    this.correspondenceReminderInterval = setInterval(() => this.checkCorrespondenceReminders(), CORRESPONDENCE_REMINDER_SWEEP_MS);
   }
 
   onModuleDestroy() {
     if (this.matchmakingInterval) clearInterval(this.matchmakingInterval);
+    if (this.correspondenceReminderInterval) clearInterval(this.correspondenceReminderInterval);
+  }
+
+  // Phase 13 trigger point 4/4. Deliberately independent of whether the mover is
+  // currently connected — playerProfiles (unlike socketToUser/players, which track the
+  // live socket) survives disconnects, which is the entire point for a format whose
+  // players are expected to be away from the board between moves.
+  checkCorrespondenceReminders(): void {
+    const now = Date.now();
+    for (const room of this.activeGames.values()) {
+      if (room.timeControl.name !== 'correspondence') continue;
+      if (room.correspondenceReminderSentFor === room.turnStartedAt) continue;
+      if (now - room.turnStartedAt < CORRESPONDENCE_REMINDER_THRESHOLD_MS) continue;
+
+      const mover = room.playerProfiles[room.engine.getCurrentTurn()];
+      if (!mover?.id) continue; // vs-AI game, or a slot with no attached profile
+
+      room.correspondenceReminderSentFor = room.turnStartedAt;
+      this.notificationsService
+        .notify(mover.id, 'CORRESPONDENCE_TURN_REMINDER', "It's your move in your correspondence game", { roomId: room.roomId })
+        .catch((err) => console.error(`[Notifications] Failed to send correspondence reminder for room ${room.roomId}:`, err));
+    }
   }
 
   async handleConnection(client: Socket) {
@@ -644,6 +685,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       rules,
       timeControl: timeControl.name,
     });
+
+    // Phase 13 trigger point 2/4. The live socket event above already reaches the
+    // target if their client is listening right now; this is the persisted/email
+    // record that survives even if they're online but not looking, or check back
+    // later via the notification center. Fire-and-forget — a notification failure
+    // must never block the challenge itself, which has already been delivered.
+    this.notificationsService
+      .notify(data.targetUserId, 'CHALLENGE_RECEIVED', `${fromProfile.username} has challenged you to a game`, { challengeId })
+      .catch((err) => console.error('[Notifications] Failed to record challenge notification:', err));
   }
 
   @SubscribeMessage('respondToChallenge')

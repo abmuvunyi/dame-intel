@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Puzzle } from './puzzle.entity';
@@ -59,9 +59,17 @@ export class PuzzlesService implements OnModuleInit {
     return publicFields;
   }
 
-  async getRandomPuzzle(difficulty?: number) {
+  // Phase 13: the other feature actually gated behind PREMIUM (alongside analysis
+  // depth — see analysis.controller.ts). A free/anonymous solver never even sees a
+  // premium puzzle offered at random; getLegalMoves/attemptMove below additionally
+  // refuse direct access by id, so gating can't be bypassed just by knowing/guessing
+  // a premium puzzle's id.
+  async getRandomPuzzle(difficulty?: number, hasPremium = false) {
     const query = this.puzzlesRepository.createQueryBuilder('puzzle')
       .where('puzzle.status = :status', { status: 'published' });
+    if (!hasPremium) {
+      query.andWhere('puzzle.isPremium = :isPremium', { isPremium: false });
+    }
     if (difficulty) {
       query.andWhere('puzzle.difficulty = :diff', { diff: difficulty });
     }
@@ -69,7 +77,9 @@ export class PuzzlesService implements OnModuleInit {
     let result = await query.getOne();
 
     if (!result) {
-      const all = await this.puzzlesRepository.find({ where: { status: 'published' } });
+      const where: any = { status: 'published' };
+      if (!hasPremium) where.isPremium = false;
+      const all = await this.puzzlesRepository.find({ where });
       result = all[Math.floor(Math.random() * all.length)];
     }
     return result ? this.toPublic(result) : null;
@@ -81,13 +91,20 @@ export class PuzzlesService implements OnModuleInit {
     return puzzle;
   }
 
+  private assertAccessible(puzzle: Puzzle, hasPremium: boolean): void {
+    if (puzzle.isPremium && !hasPremium) {
+      throw new ForbiddenException('This is a premium-only puzzle.');
+    }
+  }
+
   // Legal moves at a given ply of the puzzle — lets the frontend reuse the same
   // Board.tsx component (and its real drag/click/highlighting) that live games use,
   // rather than a separate bespoke puzzle board. Showing every legal move for a
   // puzzle position (not just the solver's own piece) is normal, expected puzzle-UI
   // behavior, same as chess.com/lichess.
-  async getLegalMoves(puzzleId: number, moveIndex: number): Promise<{ legalMoves: Move[]; board: BoardState; turn: PieceColor }> {
+  async getLegalMoves(puzzleId: number, moveIndex: number, hasPremium = false): Promise<{ legalMoves: Move[]; board: BoardState; turn: PieceColor }> {
     const puzzle = await this.getPuzzleEntity(puzzleId);
+    this.assertAccessible(puzzle, hasPremium);
     const engine = reconstructEngine(puzzle, moveIndex);
     return { legalMoves: engine.getLegalMoves(), board: engine.getBoard(), turn: engine.getCurrentTurn() };
   }
@@ -101,6 +118,12 @@ export class PuzzlesService implements OnModuleInit {
   async setStatus(id: number, status: 'published' | 'rejected'): Promise<Puzzle> {
     const puzzle = await this.getPuzzleEntity(id);
     puzzle.status = status;
+    return this.puzzlesRepository.save(puzzle);
+  }
+
+  async setPremium(id: number, isPremium: boolean): Promise<Puzzle> {
+    const puzzle = await this.getPuzzleEntity(id);
+    puzzle.isPremium = isPremium;
     return this.puzzlesRepository.save(puzzle);
   }
 
@@ -122,8 +145,9 @@ export class PuzzlesService implements OnModuleInit {
    * either a correct-and-complete or an incorrect attempt, updates the puzzle's and
    * (if authenticated) the player's Glicko-2 puzzle ratings — see scoreAttempt.
    */
-  async attemptMove(puzzleId: number, userId: number | null, moveIndex: number, move: Move): Promise<PuzzleAttemptResult> {
+  async attemptMove(puzzleId: number, userId: number | null, moveIndex: number, move: Move, hasPremium = false): Promise<PuzzleAttemptResult> {
     const puzzle = await this.getPuzzleEntity(puzzleId);
+    this.assertAccessible(puzzle, hasPremium);
 
     if (moveIndex < 0 || moveIndex % 2 !== 0) {
       throw new BadRequestException('moveIndex must be an even index (a solver ply)');

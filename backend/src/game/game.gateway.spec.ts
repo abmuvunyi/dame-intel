@@ -9,6 +9,7 @@ import { AnticheatService } from '../anticheat/anticheat.service';
 import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
 import { GameReviewService } from './review/game-review.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Minimal stand-in for socket.io's Server: just enough surface for the gateway's
 // `this.server.to(...).emit(...)` and `this.server.sockets.sockets.get(...).join(...)`
@@ -34,6 +35,7 @@ describe('GameGateway', () => {
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: {} },
         { provide: HistoryService, useValue: {} },
@@ -135,6 +137,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         {
           provide: UsersService,
@@ -325,6 +328,7 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -412,6 +416,7 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -565,6 +570,7 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
@@ -699,6 +705,7 @@ describe('GameGateway: post-game review trigger (Phase 11)', () => {
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 4242 }) } },
@@ -769,6 +776,7 @@ describe('GameGateway: anti-cheat wiring and banned-user connection rejection (P
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
         {
           provide: UsersService,
@@ -841,5 +849,190 @@ describe('GameGateway: anti-cheat wiring and banned-user connection rejection (P
     await gw.handleConnection(mockSocket('p1', '1') as any);
     expect((gw as any).socketToUser.get('p1')).toBeDefined();
     expect((gw as any).userIdToSocket.get(1)).toBe('p1');
+  });
+});
+
+describe('GameGateway: correspondence turn-reminder notification trigger (Phase 13)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+  let notify: jest.Mock;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x' },
+  };
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    notify = jest.fn().mockResolvedValue({});
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify } },
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: HistoryService, useValue: {} },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: {} },
+        { provide: RatingService, useValue: {} },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  async function matchCorrespondenceGame() {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+    gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 }, timeControl: 'correspondence' });
+    gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 }, timeControl: 'correspondence' });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    return roomId as string;
+  }
+
+  it('reminds the current mover once their turn has run past the threshold', async () => {
+    const roomId = await matchCorrespondenceGame();
+    const room = (gw as any).activeGames.get(roomId);
+    expect(room.timeControl.name).toBe('correspondence');
+
+    jest.advanceTimersByTime(12 * 60 * 60 * 1000 + 1000); // just past the 12h threshold
+
+    gw.checkCorrespondenceReminders();
+
+    expect(notify).toHaveBeenCalledWith(1, 'CORRESPONDENCE_TURN_REMINDER', expect.any(String), { roomId });
+  });
+
+  it('does not remind before the threshold has elapsed', async () => {
+    await matchCorrespondenceGame();
+    jest.advanceTimersByTime(6 * 60 * 60 * 1000); // halfway to the threshold
+
+    gw.checkCorrespondenceReminders();
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('sends only one reminder per turn, not once per sweep', async () => {
+    await matchCorrespondenceGame();
+    jest.advanceTimersByTime(13 * 60 * 60 * 1000);
+
+    gw.checkCorrespondenceReminders();
+    gw.checkCorrespondenceReminders();
+    gw.checkCorrespondenceReminders();
+
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('reminds again once a fresh turn also runs past the threshold', async () => {
+    const roomId = await matchCorrespondenceGame();
+    const room = (gw as any).activeGames.get(roomId);
+
+    jest.advanceTimersByTime(13 * 60 * 60 * 1000);
+    gw.checkCorrespondenceReminders();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    // A real move resets turnStartedAt, making the (now different) mover newly eligible.
+    const legalMove = room.engine.getLegalMoves()[0];
+    gw.handleMakeMove(mockSocket('p1') as any, legalMove);
+
+    jest.advanceTimersByTime(13 * 60 * 60 * 1000);
+    gw.checkCorrespondenceReminders();
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenLastCalledWith(2, 'CORRESPONDENCE_TURN_REMINDER', expect.any(String), { roomId });
+  });
+
+  it('never reminds a slot with no attached user profile (e.g. an AI opponent)', async () => {
+    // Seeded directly rather than via handlePlayVsAi: the point here is purely the
+    // "no profile at the current-turn color" branch, independent of how a real vs-AI
+    // room's own setTimeout-driven auto-move (see triggerAiTurn) would otherwise
+    // interact with fake timers advanced far enough to cross the reminder threshold.
+    const roomId = 'ai_room_1';
+    (gw as any).activeGames.set(roomId, {
+      roomId,
+      engine: { getCurrentTurn: () => 'D' },
+      timeControl: { name: 'correspondence', baseSeconds: 86400, incrementSeconds: 0 },
+      turnStartedAt: Date.now(),
+      players: {},
+      playerProfiles: { L: { id: 1, username: 'alice' } }, // no 'D' entry — the AI's slot
+    });
+
+    jest.advanceTimersByTime(13 * 60 * 60 * 1000);
+    gw.checkCorrespondenceReminders();
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('GameGateway: direct-challenge notification trigger (Phase 13)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+  let notify: jest.Mock;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x' },
+  };
+
+  beforeEach(async () => {
+    notify = jest.fn().mockResolvedValue({});
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify } },
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: HistoryService, useValue: {} },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: {} },
+        { provide: RatingService, useValue: {} },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    (gw as any).onModuleDestroy?.();
+  });
+
+  it('records a CHALLENGE_RECEIVED notification for the target, alongside the live socket event', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+
+    gw.handleChallengePlayer(mockSocket('p1') as any, { targetUserId: 2 });
+
+    expect(mockServer.emitted.some(e => e.event === 'challengeReceived' && e.room === 'p2')).toBe(true);
+    expect(notify).toHaveBeenCalledWith(2, 'CHALLENGE_RECEIVED', expect.stringContaining('alice'), expect.any(Object));
+  });
+
+  it('does not notify anyone if the target is offline (the challenge itself fails first)', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    const emitted: any[] = [];
+    const client = mockSocket('p1', undefined, emitted);
+    (gw as any).socketToUser.set('p1', USERS[1]);
+
+    gw.handleChallengePlayer(client as any, { targetUserId: 999 });
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(emitted.some(e => e.event === 'challengeFailed')).toBe(true);
   });
 });

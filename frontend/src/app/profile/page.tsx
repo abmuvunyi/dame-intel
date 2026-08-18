@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import NotificationBell from '@/components/NotificationBell';
 
 export default function Profile() {
   const [profile, setProfile] = useState<any>(null);
@@ -107,7 +108,8 @@ export default function Profile() {
           <h1 className="text-4xl font-bold text-gray-800">{profile.username}</h1>
           <p className="text-xl text-blue-600 font-semibold mt-2">Rating: {profile.rating}</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-4 items-center">
+          <NotificationBell />
           <div className="text-center p-4 bg-gray-100 rounded">
             <p className="text-2xl font-bold text-green-600">{profile.wins}</p>
             <p className="text-xs text-gray-500 uppercase tracking-widest">Wins</p>
