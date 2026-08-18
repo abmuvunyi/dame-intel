@@ -93,11 +93,9 @@ describe('GameGateway', () => {
       expect(gameStart!.payload.board).toHaveLength(8);
 
       const room = (gateway as any).activeGames.get(gameStart!.payload.roomId);
-      // Regression check: this used to hardcode { boardSize: 8, forceMajorityCapture: true }
-      // as the fallback default, which was wrong for the American variant.
+      // Regression check: this used to hardcode rules which was wrong for the American variant.
       expect(room.rules.flyingKings).toBe(false);
       expect(room.rules.manCaptureBackward).toBe(false);
-      expect(room.rules.forceMajorityCapture).toBe(false);
     });
   });
 });

@@ -51,7 +51,6 @@ describe('DraughtsEngine: default rule derivation per variant', () => {
     expect(rules.variant).toBe('international');
     expect(rules.flyingKings).toBe(true);
     expect(rules.manCaptureBackward).toBe(true);
-    expect(rules.forceMajorityCapture).toBe(true);
   });
 
   it('defaults an 8-square board to American-style rules', () => {
@@ -59,7 +58,6 @@ describe('DraughtsEngine: default rule derivation per variant', () => {
     expect(rules.variant).toBe('american');
     expect(rules.flyingKings).toBe(false);
     expect(rules.manCaptureBackward).toBe(false);
-    expect(rules.forceMajorityCapture).toBe(false);
   });
 
   it('createInternational() and createAmerican() apply the expected variant', () => {

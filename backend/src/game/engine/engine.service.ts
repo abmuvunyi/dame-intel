@@ -43,7 +43,6 @@ export type Variant = 'international' | 'american';
 export interface GameRules {
   boardSize: number; // 8 or 10
   variant?: Variant; // informational label; behavior is driven by the flags below
-  forceMajorityCapture: boolean; // FMJD 4.13: capture of the largest number of pieces is obligatory
   flyingKings: boolean; // FMJD 3.9: international kings slide any distance; American kings move one square
   manCaptureBackward: boolean; // FMJD 4.1: international men may capture backward; American men may not
   resetOnManMove: boolean; // FMJD 6.2: the no-progress draw counter resets on a man move OR a capture
@@ -69,7 +68,6 @@ function resolveRules(rules: Partial<GameRules>): GameRules {
   return {
     boardSize,
     variant: rules.variant ?? (isInternational ? 'international' : 'american'),
-    forceMajorityCapture: rules.forceMajorityCapture ?? isInternational,
     flyingKings: rules.flyingKings ?? isInternational,
     manCaptureBackward: rules.manCaptureBackward ?? isInternational,
     resetOnManMove: rules.resetOnManMove ?? isInternational,
@@ -195,7 +193,7 @@ export class DraughtsEngine {
     // Forced capture rule (FMJD 4.2/4.5, and standard for American checkers too):
     // if any jump is possible, only jumps are legal.
     if (jumps.length > 0) {
-      if (this.rules.forceMajorityCapture) {
+      if (this.rules.boardSize === 10) {
         // FMJD 4.13: the capture of the largest number of pieces has priority and is
         // obligatory; a king has no priority or special weighting over a man for this
         // purpose (4.13), so we compare raw capture counts across all pieces globally.
