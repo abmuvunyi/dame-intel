@@ -36,6 +36,32 @@ export class UsersService {
       return this.usersRepository.save(user);
   }
 
+  // Phase 12: the ONLY place User.moderationStatus is ever written. Called
+  // exclusively from AnticheatService.applyModeratorAction, which is itself only
+  // reachable via the moderator review endpoint — never from the automated
+  // detection methods. See CheatFlag/User entity comments for the full reasoning.
+  async applyModeration(userId: number, status: string, note: string | null, tempBanUntil: Date | null): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    user.moderationStatus = status;
+    user.moderationNote = note;
+    user.tempBanUntil = tempBanUntil;
+    return this.usersRepository.save(user);
+  }
+
+  // Phase 12: true only while an active ban is actually in effect right now — a
+  // TEMP_BANNED user whose tempBanUntil has already passed is NOT currently banned
+  // (the graduated-response state itself isn't auto-cleared on expiry, since that
+  // would be an automated status change; this just makes "are they blocked *right
+  // now*" a single, correct check for callers like AuthService).
+  isCurrentlyBanned(user: User): boolean {
+    if (user.moderationStatus === 'PERMA_BANNED') return true;
+    if (user.moderationStatus === 'TEMP_BANNED' && user.tempBanUntil) {
+      return new Date(user.tempBanUntil).getTime() > Date.now();
+    }
+    return false;
+  }
+
   async getRankings(limit: number = 100): Promise<User[]> {
     return this.usersRepository.find({
       order: { rating: 'DESC' },

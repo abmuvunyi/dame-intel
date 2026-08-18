@@ -16,14 +16,16 @@ export class HistoryService {
     darkPlayer: User | null,
     winner: 'L' | 'D' | 'DRAW',
     moves: any[],
-    rules?: any
+    rules?: any,
+    moveTimings?: number[], // Phase 12 — see GameHistory.moveTimings
   ): Promise<GameHistory> {
     const game = this.historyRepository.create({
       lightPlayer: lightPlayer || undefined,
       darkPlayer: darkPlayer || undefined,
       winner: winner === 'L' ? 'LIGHT' : (winner === 'D' ? 'DARK' : 'DRAW'),
       moves: moves, // simple-json handles stringification
-      rules: rules
+      rules: rules,
+      moveTimings: moveTimings ?? null,
     });
     return this.historyRepository.save(game);
   }

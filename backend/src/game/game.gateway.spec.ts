@@ -142,6 +142,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
             findOneById: async (id: number) => USERS[id] ?? null,
             calculateEloChange: () => 0,
             updateRating: async () => {},
+            isCurrentlyBanned: () => false,
           },
         },
         { provide: HistoryService, useValue: { saveGame: async () => {} } },
@@ -325,7 +326,7 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         {
           provide: TournamentsService,
@@ -412,7 +413,7 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -565,7 +566,7 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -699,7 +700,7 @@ describe('GameGateway: post-game review trigger (Phase 11)', () => {
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 4242 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -743,5 +744,102 @@ describe('GameGateway: post-game review trigger (Phase 11)', () => {
     await (gw as any).handleGameOver(roomId, room, 'L', 'resignation');
 
     expect(analyzeCompletedGame).toHaveBeenCalledWith(4242);
+  });
+});
+
+describe('GameGateway: anti-cheat wiring and banned-user connection rejection (Phase 12)', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+  let analyzeGameForCheating: jest.Mock;
+  let bannedUserIds: Set<number>;
+
+  const USERS: Record<number, any> = {
+    1: { id: 1, username: 'alice', rating: 1200, passwordHash: 'x', moderationStatus: 'NONE' },
+    2: { id: 2, username: 'bob', rating: 1210, passwordHash: 'x', moderationStatus: 'NONE' },
+    3: { id: 3, username: 'banned_carol', rating: 1200, passwordHash: 'x', moderationStatus: 'PERMA_BANNED' },
+  };
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    bannedUserIds = new Set([3]);
+    analyzeGameForCheating = jest.fn().mockResolvedValue(undefined);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
+        {
+          provide: UsersService,
+          useValue: {
+            findOneById: async (id: number) => USERS[id] ?? null,
+            isCurrentlyBanned: (user: any) => bannedUserIds.has(user.id),
+          },
+        },
+        { provide: HistoryService, useValue: { saveGame: async () => ({ id: 777 }) } },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    const games = (gw as any).activeGames as Map<string, any> | undefined;
+    games?.forEach(room => {
+      if (room.flagTimer) clearTimeout(room.flagTimer);
+      Object.values(room.disconnectTimers ?? {}).forEach((t: any) => t && clearTimeout(t));
+    });
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  it('passes real per-move think-times and the saved game id to analyzeGameForCheating', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    await gw.handleConnection(mockSocket('p2', '2') as any);
+    gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 } });
+    gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 } });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    const room = (gw as any).activeGames.get(roomId);
+
+    // A couple of real moves so moveTimings actually has entries to check.
+    const legalMove1 = room.engine.getLegalMoves()[0];
+    gw.handleMakeMove(mockSocket('p1') as any, legalMove1);
+    const legalMove2 = room.engine.getLegalMoves()[0];
+    gw.handleMakeMove(mockSocket('p2') as any, legalMove2);
+
+    expect(room.moveTimings).toHaveLength(2);
+    expect(room.moveTimings.every((t: number) => typeof t === 'number' && t >= 0)).toBe(true);
+
+    await (gw as any).handleGameOver(roomId, room, 'D', 'resignation');
+
+    expect(analyzeGameForCheating).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      expect.objectContaining({ id: 2 }),
+      room.moves,
+      room.rules,
+      room.moveTimings,
+      777,
+    );
+  });
+
+  it('does not authenticate a banned user\'s socket connection', async () => {
+    const emitted: any[] = [];
+    await gw.handleConnection(mockSocket('carol', '3', emitted) as any);
+
+    expect((gw as any).socketToUser.get('carol')).toBeUndefined();
+    expect((gw as any).userIdToSocket.get(3)).toBeUndefined();
+    expect(emitted.some(e => e.event === 'error')).toBe(true);
+  });
+
+  it('still authenticates a non-banned user normally', async () => {
+    await gw.handleConnection(mockSocket('p1', '1') as any);
+    expect((gw as any).socketToUser.get('p1')).toBeDefined();
+    expect((gw as any).userIdToSocket.get(1)).toBe('p1');
   });
 });

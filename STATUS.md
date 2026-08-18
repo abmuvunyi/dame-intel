@@ -14,7 +14,9 @@ format/duration, points system) built in Phase 8b (2026-08-12). Spectator mode a
 built in Phase 9 (2026-08-13). Social features — friends, in-game/club chat moderation, clubs, and direct
 challenges — built in Phase 10 (2026-08-14). Post-game analysis board (verified/extended) and automated
 move-by-move review (best/good/inaccuracy/mistake/blunder classification + accuracy) built in Phase 11
-(2026-08-17). See "How this was verified" below for exact method, and the per-phase sections below for each
+(2026-08-17). Anti-cheat system — move-time anomaly + engine-correlation detection, a moderator review
+queue, and graduated-response scaffolding with real login/WebSocket enforcement — built in Phase 12
+(2026-08-18). See "How this was verified" below for exact method, and the per-phase sections below for each
 phase specifically.
 
 ## Backend (NestJS)
@@ -22,7 +24,7 @@ phase specifically.
 | Module | Exists (Y/N) | Has tests (Y/N) | Tests passing (Y/N) | Verified (Y/N) | Notes |
 |---|---|---|---|---|---|
 | Auth | Y | Y | Y | Y | Controller + service + JWT guard. 1 test only (shallow). Live-verified indirectly: unauthenticated `/profile` correctly redirects to `/login` client-side. |
-| Users | Y | Y | Y | Y | `GET /users/rankings` and `/users/stats` confirmed **live** — routes registered in the running Nest app, hit by the `/rankings` page with zero failed requests. Returns correct empty-state shape (no seeded rating data in a fresh DB, not an error). Core CRUD/ELO methods have 2 tests. |
+| Users | Y | Y | Y | Y | `GET /users/rankings` and `/users/stats` confirmed **live** — routes registered in the running Nest app, hit by the `/rankings` page with zero failed requests. Returns correct empty-state shape (no seeded rating data in a fresh DB, not an error). Core CRUD/ELO methods have 2 tests. **Phase 12** adds `applyModeration()`/`isCurrentlyBanned()` — the only place `moderationStatus` is ever written, and the single source of truth for "is this ban actually in effect right now" (a `TEMP_BANNED` user whose ban already expired reads as not-banned without the status itself being auto-cleared). 7 new tests against real in-memory sqlite. |
 | Friends (`friends.service.ts`/`friends.controller.ts`) | Y | Y | Y | Y | **Extended in Phase 10 (2026-08-14)**, not rebuilt — send/accept already existed. Added `decline` (deletes the request outright rather than a permanent 'DECLINED' status, so a fresh request can be sent again later) and a live `online` field per friend, backed by the new `PresenceService`. 10 tests against real in-memory sqlite (was 1 trivial "should be defined" stub). Live-verified end-to-end, including real online-status flips as a real socket connects/disconnects. |
 | `presence/presence.service.ts` | Y | Y | Y | Y | **New in Phase 10.** Minimal in-memory online-status registry — `GameGateway` marks a user online/offline on real connect/disconnect (with the same "still their current socket?" guard used elsewhere for reconnect races), `FriendsService` reads it for the friends list. 4 tests, plus 3 gateway-integration tests. |
 | Clubs (`clubs.service.ts`/`clubs.controller.ts` + `Club`/`ClubMembership`/`ClubPost` entities) | Y | Y | Y | Y | **New in Phase 10.** Create/join/leave, member list, and a basic flat (no threading) club-only discussion feed — posting/reading both gated on real membership, not just being logged in. Reuses `chat-filter.ts`'s profanity filter for posts. 21 tests against real in-memory sqlite. A real (minor) ordering bug found and fixed: the feed originally sorted by `createdAt`, but sqlite's datetime column is only second-precision, so two posts made within the same second could tie and return in either order — fixed by sorting on `id` instead, which is strictly monotonic with insertion order. |
@@ -34,7 +36,10 @@ phase specifically.
 | `matchmaking.ts` (rating-band seek pairing) | Y | Y | Y | Y | **New in Phase 5.** Pure, framework-independent pairing logic (same design pattern as the engine) — 15 tests. |
 | `time-control.ts` | Y | N (data only) | — | Y | **New in Phase 5.** Bullet/blitz/rapid/correspondence bands; exercised indirectly through the gateway/matchmaking tests. |
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. **Reused live in Phase 11** as the exact engine query the automated review's replay pass is built on. |
-| Anticheat | Y | Y | Y | Y | **Real bug found and fixed in Phase 11**, discovered while building the near-identical post-game review replay pass: `analyzeGameForCheating()` had the *exact same* "no rules passed, silently defaults to 8x8" bug Phase 3 already fixed in `analysis.controller.ts` — just never caught here. Confirmed directly (not assumed): for a 10x10 game, the very first recorded move already fails to apply on the wrong-sized engine, freezing the "replay" at the initial position for the whole game. Fixed by accepting an optional `rules` parameter (backward compatible) and passing `room.rules` from the gateway call site. New regression test proves a real 10x10 self-play replay tracks genuinely distinct positions move-to-move with rules passed, versus staying frozen (well under the move count) without them. |
+| Anticheat (`anticheat.service.ts`) | Y | Y | Y | Y | **Real bug found and fixed in Phase 11**, discovered while building the near-identical post-game review replay pass: `analyzeGameForCheating()` had the *exact same* "no rules passed, silently defaults to 8x8" bug Phase 3 already fixed in `analysis.controller.ts` — just never caught here. Confirmed directly (not assumed): for a 10x10 game, the very first recorded move already fails to apply on the wrong-sized engine, freezing the "replay" at the initial position for the whole game. Fixed by accepting an optional `rules` parameter (backward compatible) and passing `room.rules` from the gateway call site. New regression test proves a real 10x10 self-play replay tracks genuinely distinct positions move-to-move with rules passed, versus staying frozen (well under the move count) without them. **Phase 12** rebuilt detection on top of this: engine-correlation now restricted to critical positions (see below), plus a new move-timing anomaly detector. Both only ever create `CheatFlag` rows — see "Phase 12" below for the full moderator-review/graduated-response design and the exact thresholds. |
+| `anticheat/move-timing-stats.ts` | Y | Y | Y | Y | **New in Phase 12.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter/move-classification modules) — coefficient-of-variation-based think-time consistency check. 10 tests. |
+| Moderator review queue (`GET/POST /anticheat/admin/*`) | Y | Y | Y | Y | **New in Phase 12.** No admin-role system exists in this codebase (same documented simplification as Phase 7's puzzle admin routes and Phase 8b's tournament lifecycle routes) — lists flags, and applies a moderator's decision. Explicitly the *only* code path that can ever write `User.moderationStatus` — the detection methods themselves never do. |
+| Graduated response (`User.moderationStatus`/`tempBanUntil`) | Y | Y | Y | Y | **New in Phase 12.** WARNED/RATING_RESET_FLAGGED/TEMP_BANNED/PERMA_BANNED states, settable only via the moderator endpoint above. Real enforcement wired at both `AuthService.signIn` (login rejected) and `GameGateway.handleConnection` (WebSocket authentication rejected) — live-verified end-to-end, not just scaffolding that sits unused. |
 | `game/review/move-classification.ts` | Y | Y | Y | Y | **New in Phase 11.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter) — explicit, documented eval-delta thresholds classify each move as BEST/GOOD/INACCURACY/MISTAKE/BLUNDER, plus a simple credit-weighted accuracy-percentage formula. 14 tests covering every threshold boundary on both sides and the accuracy formula's edge cases. See "Phase 11" below for the exact thresholds and their reasoning. |
 | `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. |
 | `GET /game-review/:gameId` | Y | Y (via service tests) | Y | Y | **New in Phase 11.** Returns the stored review instantly, or an explicit `NOT_STARTED`/`PENDING` status while the async pass hasn't finished — never recomputes on a GET. |
@@ -44,7 +49,7 @@ phase specifically.
 | `SwissRound` / `SwissPairingRecord` entities | Y | Y (via service tests) | Y | Y | **New in Phase 8.** Persist each round and its pairings/results against real relational queries in `tournaments-swiss.service.spec.ts` (in-memory sqlite, not mocked repos). |
 | Tournament organizer settings (`Tournament.maxParticipants`/`timeControlName`/`boardSize`/`ruleVariant`/`pointsWin`/`pointsDraw`/`pointsLoss`) | Y | Y | Y | Y | **New in Phase 8b (2026-08-12).** Registration caps, per-tournament board variant + time control (overrides any individual player's request for a Swiss game), and a fully configurable points system. See "Phase 8b" below — including a real pre-existing scoring bug (drawn games always recorded 0 points instead of 0.5) found and fixed along the way. |
 | Puzzles (`puzzles.service.ts` + entity) | Y | Y | Y | Y | **Rebuilt in Phase 7 (2026-08-11)** — real engine-validated solving, its own Glicko-2 rating pool, Storm mode, and a generation pipeline. See "Phase 7" below for the full breakdown, including a real bug fixed: the previous version sent the puzzle's solution straight to the client and validated moves with a client-side coordinate comparison, meaning it could be read out of the network tab and solved without knowing draughts at all. |
-| History | Y | Y | Y | Y | **Live-verified in Phase 7**: a real PvP game's resignation correctly produced a `GameHistory` row, confirmed by querying `/history/player/:id` on the running server. |
+| History | Y | Y | Y | Y | **Live-verified in Phase 7**: a real PvP game's resignation correctly produced a `GameHistory` row, confirmed by querying `/history/player/:id` on the running server. **Phase 12** adds `moveTimings` — per-move think-time in ms, parallel-indexed to `moves`, nullable for pre-existing rows — the raw data move-time anomaly detection is built on. |
 | `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. Reused as-is for puzzle ratings in Phase 7. See "Phase 6" below. |
 | `rating/rating.service.ts` + entities (`PlayerRating`, `RatingHistoryEntry`) | Y | Y | Y | Y | **New in Phase 6.** Per-(variant, time control) rating pools, provisional status, rating history. 7 tests against a real in-memory sqlite DB. |
 | `GET /rating/:userId`, `GET /rating/:userId/history` | Y | Y | Y | Y | **New in Phase 6.** Live-verified against a real completed PvP game — see "Phase 6" below for the actual before/after numbers. |
@@ -52,11 +57,13 @@ phase specifically.
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
-**Test run:** `npx jest` from `backend/` → 30 suites, 237 tests, all passing, ~1s (up from 213 as of
-Phase 10 — the +24 are Phase 11's `move-classification.spec.ts` (14 new), `game-review.service.spec.ts`
-(7 new, real in-memory sqlite + a real, non-mocked `AiService`), `anticheat.service.spec.ts` (+1, the
-wrong-sized-engine regression), and 2 new tests in `game.gateway.spec.ts` proving `handleGameOver` actually
-triggers the review — see "Phase 11" below). `tsc --noEmit` clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
+**Test run:** `npx jest` from `backend/` → 33 suites, 283 tests, all passing, ~1s (up from 237 as of
+Phase 11 — the +46 are Phase 12's `move-timing-stats.spec.ts` (10 new), `anticheat-review.service.spec.ts`
+(14 new, real in-memory sqlite — engine-correlation, timing detection, and the full moderator review queue
+end to end), `anticheat.controller.spec.ts` (7 new), `users.service.spec.ts` (+7, graduated-response
+persistence), `auth.service.spec.ts` (+5, ban enforcement at login), and 3 new tests in `game.gateway.spec.ts`
+(anti-cheat call-argument wiring + banned-connection rejection) — see "Phase 12" below). `tsc --noEmit`
+clean across the whole backend. No `TODO`/`FIXME`/`not implemented`/
 `placeholder` markers anywhere in `backend/src`. Caveat on the remaining unbolded modules above is
 unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path only.
 
@@ -82,10 +89,11 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | `Timer.tsx` | Y | Y | Y | Wired in during Phase 4 (was orphaned since Phase 0); **as of Phase 5, genuinely server-authoritative** — it's fed a live-computed snapshot of the backend's real clock/turnStartedAt on every move, not a fixed cosmetic constant. See "Phase 5" below. |
 | Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in scope for Phases 4 or 5. |
 | Direct-challenge-by-user-ID UI | Y | Y | Y | **Built in Phase 10** (the gap this row tracked since Phase 5) — "Friends Online" list + Challenge button on `/`, an incoming-challenge banner with Accept/Decline, wired to the existing `challengePlayer`/`challengeReceived`/`respondToChallenge` events. Live-verified with two real browser tabs (see "Phase 10" below). |
+| `/moderation` (moderator review queue) | Y | Y | Y | **New in Phase 12.** Lists real unreviewed `CheatFlag` rows with user/reason/score/sample size, a link to the supporting game where one exists, and Dismiss/Warn/Rating-Reset/Temp-Ban/Perma-Ban actions. Not linked from any nav — same "no admin-role system, just requires login" simplification as the backend endpoints it calls. Live-verified with Playwright against a real flag, including the toggle to reveal reviewed flags. |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
-not just the type-check) → succeeds, all 13 routes generated (Phase 10 adds `/clubs` + `/clubs/[id]`), zero
-build errors.
+not just the type-check) → succeeds, all 14 routes generated (Phase 12 adds `/moderation`), zero build
+errors.
 
 ## How this was verified (Phase 1 method)
 
@@ -1110,6 +1118,149 @@ Redis connection warnings.
   only happen for a corrupted/foreign move history — every game actually played through this gateway only
   ever records engine-validated moves), that move is skipped from classification rather than guessed at; the
   replay still continues correctly for the rest of the game.
+
+## Phase 12: anti-cheat — detection, moderator review queue, graduated response (2026-08-18)
+
+Per the brief, "a basic anti-cheat module exists — verify and extend." It did (engine-correlation, built in
+Phase 5, extended and bug-fixed in Phase 11) — this phase refines that detection, adds the second detection
+method the brief asks for, and builds everything downstream of "a flag exists": the review queue and the
+graduated response it can lead to.
+
+**1. Move-time anomaly detection.** New `anticheat/move-timing-stats.ts` — pure, framework-independent, same
+pattern as every other statistics/threshold module in this codebase. Uses the **coefficient of variation**
+(CV = standard deviation ÷ mean) of a player's own think-time, not raw variance — CV is scale-invariant, so
+a fast bullet player and a slow correspondence player can both look perfectly natural at their own pace;
+comparing raw millisecond variance across different players would be meaningless. Exact thresholds, and why:
+
+| Constant | Value | Reasoning |
+|---|---|---|
+| `MIN_MEANINGFUL_THINK_MS` | 200ms | Below this, a "move" is UI lag or a genuinely forced position, not a real think — including it would deflate variance for every player alike. A simplification: this is an absolute floor, not a replay-verified "was this actually forced" check (that would mean re-running the engine per historical move at flag-computation time — accepted as future work, see below). |
+| `MIN_SAMPLE_SIZE` | 30 samples | Below this, a low CV is as likely to be a lucky streak as a bot. Deliberately requires *more than one game's worth* of moves, matching the brief's own "across many games/moves" framing rather than judging from a single game. |
+| `MAX_NATURAL_CV` | 0.15 | Real human think-time is highly skewed (fast obvious moves, occasional long thinks) — CV comfortably above 0.4 in practice. A fixed-delay script typically shows CV under 0.1–0.15. 0.15 leaves deliberate margin toward *fewer* false positives, since a false positive here only costs a moderator a look (see "no automatic bans" below), never a wrongly-banned player. |
+
+New `GameRoom.moveTimings: number[]` (parallel-indexed to `moves`) captures `Date.now() - turnStartedAt` at
+the moment each move is accepted (both PvP and vs-AI, so the two arrays never drift apart), persisted onto
+`GameHistory.moveTimings`. `AnticheatService.analyzeMoveTimingForPlayer()` aggregates a player's own
+think-times (filtered to their own color — Light moves on even indices, Dark on odd) across their recent
+game history **plus** the game that was just completed, and flags if the combined sample clears both
+thresholds.
+
+**2. Engine-correlation, refined to "complex/critical positions rather than forced/obvious ones".** This was
+the brief's explicit ask, and a real weakness in the pre-existing check: matching the engine in a position
+with only one legal move (or where every option scores about the same) proves nothing — anyone, cheating or
+not, "matches" there. `analyzeEngineCorrelation()` now only counts a position if it had more than one legal
+move **and** the gap between the engine's best and worst-rated option exceeded `CLASSIFICATION_THRESHOLDS.GOOD_MAX`
+(reusing Phase 11's own "a real, non-cosmetic difference existed" threshold rather than inventing a second
+arbitrary number for the same underlying question). Requires **10+ such critical positions** and a **≥90%**
+match rate within them to flag — both intentionally strict: even strong human players deviate from
+engine-optimal regularly, especially under a real clock, so sustained >90% agreement specifically in
+positions that actually had a meaningful alternative is far beyond normal play.
+
+**3. Moderator review queue.** New `AnticheatController` (`/anticheat/admin/*` — no admin-role system exists
+anywhere in this codebase, same documented simplification as Phase 7's puzzle admin routes and Phase 8b's
+tournament lifecycle routes): lists flags (filterable by reviewed status), a single flag, or all flags for a
+user, and a review endpoint that applies a moderator's decision. `CheatFlag` now records `flagType`,
+`gameId` (the specific supporting game, for engine-correlation flags — null for timing flags, which
+aggregate across many games with no single "supporting game" to point at), `sampleSize`, and a full audit
+trail (`reviewedByUserId`, `moderatorNote`, `moderatorAction`, `reviewedAt`).
+
+**4. Graduated response — and the "no automatic bans" guarantee, structurally, not just by convention.**
+New `User.moderationStatus` (`NONE → WARNED → RATING_RESET_FLAGGED → TEMP_BANNED/PERMA_BANNED`) and
+`tempBanUntil`. The critical design point, directly answering this phase's STOP AND REPORT requirement:
+**`UsersService.applyModeration()` — the only method anywhere in the codebase that writes
+`moderationStatus` — is called from exactly one place**, `AnticheatService.applyModeratorAction()`, which
+is itself only reachable via the `POST /anticheat/admin/flags/:id/review` endpoint. Neither detection method
+(`analyzeEngineCorrelation`, `analyzeMoveTimingForPlayer`) calls it, imports it, or has any path to it —
+they only ever call `flagUser()`, which does nothing but insert a `CheatFlag` row. This isn't just tested
+behavior, it's structurally true from the module's own dependency shape; a test proves flags accumulate
+freely while `moderationStatus` stays `'NONE'` throughout (see below), but the real guarantee is that there
+is no code path from detection to consequence that doesn't pass through a human hitting the review endpoint.
+
+Real enforcement, not just a status field sitting unused: `AuthService.signIn()` now rejects login for a
+currently-banned user (`UsersService.isCurrentlyBanned()` — true for `PERMA_BANNED`, or `TEMP_BANNED` with
+a `tempBanUntil` still in the future; a `TEMP_BANNED` user whose ban already expired reads as not-banned
+without the status itself being auto-cleared, since that would itself be an automated status change).
+`GameGateway.handleConnection()` performs the same check before attaching a JWT-verified identity to a
+socket — a still-valid token from before the ban doesn't grant a live authenticated session, even if the
+raw WebSocket connection itself isn't dropped (an anonymous, unauthenticated connection is harmless on its
+own — see known simplifications below for what this doesn't yet cover).
+
+**46 new tests**: `move-timing-stats.spec.ts` (10 — CV boundary behavior, the trivial-move filter, realistic
+human-shaped timing correctly NOT flagged), `anticheat-review.service.spec.ts` (14, real in-memory sqlite —
+engine-correlation restricted to critical positions including the "100% match but zero critical positions"
+case, timing detection aggregated across multiple real games, the full moderator action set including
+rejection of a second review and a missing `tempBanDays`, and a direct proof that `moderationStatus` never
+moves no matter how many flags accumulate), `anticheat.controller.spec.ts` (7), `users.service.spec.ts`
+(+7 — `applyModeration`/`isCurrentlyBanned` including the expired-temp-ban edge case), `auth.service.spec.ts`
+(+5, real bcrypt — correct password + ban still rejects, wrong password never even reaches the ban check),
+and 3 new `game.gateway.spec.ts` tests (exact call-argument wiring into `analyzeGameForCheating`, and
+banned-connection rejection).
+
+### Live verification
+
+A real end-to-end run against the real running server, not just the test suite: real users played several
+real games via real WebSocket connections, where one side ("alice") submitted a fixed ~900ms delay before
+every move while the other ("bob", the control) played with fully randomized, highly variable delays.
+
+```
+--- Polling the real admin flags endpoint ---
+  ✓ at least one real unreviewed flag exists for alice (found 1)
+  ✓ real MOVE_TIMING flag: score(CV)=0.011090131376108254, sampleSize=30
+  ✓ at least one of the two detection methods actually fired for real
+  ✓ the random-play control (bob) was NOT flagged (found 0 flags)
+
+--- Confirming no automatic ban happened — alice can still log in normally right now ---
+  ✓ alice can still log in — flags alone never ban anyone automatically
+
+--- Applying a real moderator action (TEMP_BAN) through the real endpoint ---
+  ✓ moderator action applied (flag 1 -> TEMP_BAN)
+  ✓ the flag itself is now marked reviewed
+  ✓ reviewing the same flag twice is rejected
+
+--- Confirming real enforcement now that a moderator actually banned the account ---
+  ✓ login now rejected (401): "This account is temporarily banned until 2026-08-18T15:59:51.677Z."
+  ✓ WebSocket authentication also rejected: "This account is banned and cannot authenticate."
+
+--- Confirming bob (never flagged) logs in completely normally ---
+  ✓ bob logs in fine — the ban only ever affects the specific reviewed account
+```
+
+The real coefficient of variation landed at 0.011 — two orders of magnitude tighter than the 0.15 threshold,
+exactly what a fixed-delay pattern should look like, confirmed against a real network round trip (not a
+synthetic timestamp array). Engine-correlation didn't happen to cross its own threshold in this particular
+run (20 plies/game wasn't always enough to accumulate 10+ critical positions on an 8x8 board) — a fair,
+unforced result rather than one engineered to guarantee both detectors fire, and the timing detector alone
+was sufficient to demonstrate the full pipeline. Also live-verified with Playwright: a real logged-in
+"moderator" (just a regular account — no role system) opening `/moderation`, seeing a real flag with its
+real reason text, dismissing it with a note, confirming it disappears from the default unreviewed view, and
+reappears correctly labeled once "show reviewed" is toggled on. Zero console errors. Backend log checked for
+errors throughout: none beyond the pre-existing, already-documented Redis connection warnings.
+
+One incidental, real observation from this run: because `analyzeGameForCheating` re-runs its full aggregate
+timing analysis after *every* completed game (not just once), a persistent pattern can generate multiple
+independent `CheatFlag` rows over time rather than being deduplicated into one — confirmed directly (a
+second flag for the same account, same `flagType`, larger `sampleSize`, appeared after further games in the
+same live run). This is arguably a feature, not a bug, for a review queue — more corroborating evidence
+for a moderator, not less — but it's real, undocumented-until-now behavior worth naming plainly rather than
+leaving as a surprise.
+
+**Known simplifications, stated plainly:**
+- The `MIN_MEANINGFUL_THINK_MS` filter for "was this move actually forced" is a flat time floor, not a
+  replay-verified check of how many legal moves were actually available at that exact position (which would
+  mean re-running the engine per historical move at flag-computation time, not just once per completed
+  game). A fast genuine move and a genuinely-forced one aren't perfectly distinguished — a documented,
+  deliberate trade-off, not an oversight.
+- Detection flags are not deduplicated across repeated triggers for the same underlying pattern (see above)
+  — each completed game's analysis pass stands alone. A real production system might collapse these into
+  one evolving flag; this phase's queue just shows every one, which a moderator can still make sense of.
+- Ban enforcement covers new login sessions and new authenticated WebSocket connections — it does not
+  forcibly disconnect or downgrade an *already-connected, already-authenticated* socket the instant a ban is
+  applied (that socket's session simply expires/reconnects normally later, at which point the ban takes
+  effect). A genuinely real-time "kick immediately" mechanism is a reasonable follow-up, not built here.
+- Thresholds (`MAX_NATURAL_CV`, `ENGINE_MATCH_THRESHOLD`, `MIN_CRITICAL_POSITIONS`, etc.) are explicit,
+  documented, reasoned constants — not statistically calibrated against a labeled dataset of confirmed
+  cheaters vs. clean players, which this project has no access to. Exactly the same honest caveat Phase 11's
+  move-classification thresholds already carry.
 
 ## Repo cleanup notes (Phase 0)
 

@@ -21,6 +21,12 @@ export class GameHistory {
   @Column('simple-json', { nullable: true })
   rules: any; // Serialized GameRules object (boardSize, forceMajorityCapture)
 
+  // Phase 12: per-move think time in ms, parallel-indexed to `moves` — the raw signal
+  // move-time anomaly detection is built on. Nullable so older rows (saved before
+  // this column existed) just have no timing data rather than a migration.
+  @Column('simple-json', { nullable: true })
+  moveTimings: number[] | null;
+
   @CreateDateColumn()
   playedAt: Date;
 }

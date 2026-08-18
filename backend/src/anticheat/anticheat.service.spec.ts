@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AnticheatService } from './anticheat.service';
 import { AiService } from '../game/ai/ai/ai.service';
+import { UsersService } from '../users/users.service';
+import { HistoryService } from '../history/history.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { CheatFlag } from './cheat-flag.entity';
 import { DraughtsEngine } from '../game/engine/engine.service';
@@ -29,6 +31,8 @@ describe('AnticheatService', () => {
           },
         },
         { provide: getRepositoryToken(CheatFlag), useValue: { create: (x: any) => x, save: async (x: any) => x } },
+        { provide: UsersService, useValue: {} },
+        { provide: HistoryService, useValue: { getPlayerHistory: async () => [] } },
       ],
     }).compile();
 
