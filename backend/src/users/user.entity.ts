@@ -25,4 +25,17 @@ export class User {
 
   @Column({ default: 0 })
   draws: number;
+
+  // Phase 12: graduated anti-cheat response. Settable ONLY through
+  // AnticheatService.applyModeratorAction (reachable only via the moderator review
+  // endpoint) — never written by the automated detection methods themselves, which
+  // only ever create CheatFlag rows for a human to look at.
+  @Column({ default: 'NONE' })
+  moderationStatus: string; // 'NONE' | 'WARNED' | 'RATING_RESET_FLAGGED' | 'TEMP_BANNED' | 'PERMA_BANNED'
+
+  @Column({ type: 'datetime', nullable: true })
+  tempBanUntil: Date | null; // only meaningful while moderationStatus === 'TEMP_BANNED'
+
+  @Column({ type: 'text', nullable: true })
+  moderationNote: string | null;
 }

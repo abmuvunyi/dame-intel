@@ -69,6 +69,12 @@ interface GameRoom {
     [PieceColor.DARK]?: any;
   }
   moves: Move[];
+  // Phase 12: per-move think time in ms (Date.now() - turnStartedAt at the moment
+  // each move was accepted), parallel-indexed to `moves` — the raw signal move-time
+  // anomaly detection needs. Populated for every move including vs-AI ones (kept
+  // parallel to `moves`, even though only PvP games are ever actually analyzed for
+  // cheating) so the two arrays never drift out of index alignment.
+  moveTimings: number[];
   tournamentId?: number;
 }
 
@@ -117,7 +123,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       try {
         const payload = await this.jwtService.verifyAsync(token, { secret: jwtConstants.secret });
         const user = await this.usersService.findOneById(payload.sub);
-        if (user) {
+        if (user && this.usersService.isCurrentlyBanned(user)) {
+          // Phase 12: a currently-banned user's token might still be valid (they
+          // signed in before the ban, or the token just hasn't expired yet) — this
+          // is the second enforcement point alongside AuthService.signIn, refusing
+          // them a live *authenticated* session even so. The connection itself isn't
+          // dropped (an anonymous spectator-style connection is still harmless), just
+          // never gets attached to their identity.
+          client.emit('error', { message: 'This account is banned and cannot authenticate.' });
+        } else if (user) {
           const { passwordHash, ...profile } = user;
           this.socketToUser.set(client.id, profile);
           this.userIdToSocket.set(profile.id, client.id);
@@ -478,7 +492,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),
       },
-      moves: []
+      moves: [],
+      moveTimings: [],
     };
 
     this.activeGames.set(roomId, room);
@@ -677,6 +692,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         [PieceColor.DARK]: this.socketToUser.get(player2Id),
       },
       moves: [],
+      moveTimings: [],
       tournamentId,
     };
 
@@ -739,6 +755,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     if (success && exactLegalMove) {
       room.moves.push(exactLegalMove);
+      // Captured before applyClockForMove resets turnStartedAt — this IS the
+      // player's think time for this move (Phase 12).
+      room.moveTimings.push(Date.now() - room.turnStartedAt);
       this.applyClockForMove(room, color);
       const currentTurn = room.engine.getCurrentTurn();
 
@@ -797,6 +816,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         const success = room.engine.makeMove(bestMove);
         if (success) {
           room.moves.push(bestMove);
+          room.moveTimings.push(Date.now() - room.turnStartedAt); // keeps the two arrays parallel — see GameRoom.moveTimings
           this.applyClockForMove(room, room.aiColor!);
           const newTurn = room.engine.getCurrentTurn();
 
@@ -846,7 +866,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           room.playerProfiles[PieceColor.DARK] || null,
           winner as 'L'|'D'|'DRAW',
           room.moves,
-          room.rules
+          room.rules,
+          room.moveTimings
        );
 
        // Update ELO if both are authenticated real players
@@ -868,6 +889,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
               room.playerProfiles[PieceColor.DARK] || null,
               room.moves,
               room.rules, // fixes a real bug — see the comment on analyzeGameForCheating's rules param
+              room.moveTimings, // Phase 12: move-time anomaly detection
+              savedGame.id, // Phase 12: supporting game reference for engine-correlation flags
            ).catch(err => console.error('Anticheat Error:', err));
        }
 
