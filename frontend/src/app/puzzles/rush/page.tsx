@@ -110,15 +110,15 @@ export default function PuzzleRushPage() {
 
   if (ended) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-        <h1 className="text-4xl font-bold">⏱️ Time's up!</h1>
-        <p className="text-2xl">Score: <span className="font-bold">{score}</span></p>
-        <p className="text-lg text-gray-600">Best streak: {bestStreak}</p>
+      <div className="flex-1 w-full flex flex-col items-center justify-center gap-4">
+        <h1 className="text-4xl font-bold text-white">⏱️ Time's up!</h1>
+        <p className="text-2xl text-white">Score: <span className="font-bold">{score}</span></p>
+        <p className="text-lg text-[#c3c3c2]">Best streak: {bestStreak}</p>
         <div className="flex gap-4 mt-4">
-          <button onClick={start} className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
+          <button onClick={start} className="px-6 py-2 bg-[#b64b1f] text-white font-bold rounded shadow-md hover:bg-[#c95322] transition">
             Run it back
           </button>
-          <button onClick={() => router.push('/puzzles')} className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+          <button onClick={() => router.push('/puzzles')} className="px-6 py-2 bg-[#3c3a38] text-white font-bold rounded shadow-md hover:bg-[#4d4a48] transition">
             Back to Puzzles
           </button>
         </div>
@@ -126,13 +126,13 @@ export default function PuzzleRushPage() {
     );
   }
 
-  if (!board || !puzzle) return <div className="p-10 text-center">Starting Puzzle Storm...</div>;
+  if (!board || !puzzle) return <div className="p-10 text-center text-[#c3c3c2]">Starting Puzzle Storm...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 gap-4">
-      <h1 className="text-3xl font-bold">Puzzle Storm 🔥</h1>
-      <div className="flex gap-6 text-lg font-semibold">
-        <span className={`px-4 py-1 rounded ${displaySeconds <= 20 ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-200'}`}>⏱ {displaySeconds}s</span>
+    <div className="flex-1 w-full flex flex-col items-center py-10 gap-4">
+      <h1 className="text-3xl font-bold text-white">Puzzle Storm 🔥</h1>
+      <div className="flex gap-6 text-lg font-bold text-white">
+        <span className={`px-4 py-1 rounded ${displaySeconds <= 20 ? 'bg-[#b64b1f] text-white animate-pulse' : 'bg-[#262421] border border-[#3c3a38]'}`}>⏱ {displaySeconds}s</span>
         <span>Score: {score}</span>
         <span>Streak: {streak} (best {bestStreak})</span>
       </div>
@@ -149,7 +149,7 @@ export default function PuzzleRushPage() {
         />
       </div>
 
-      <button onClick={() => router.push('/puzzles')} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm">
+      <button onClick={() => router.push('/puzzles')} className="px-4 py-2 bg-[#3c3a38] text-white font-bold rounded shadow-md hover:bg-[#4d4a48] text-sm transition">
         Quit run
       </button>
     </div>

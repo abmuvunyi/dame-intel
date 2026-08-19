@@ -111,19 +111,19 @@ export default function PuzzlesPage() {
     }
   };
 
-  if (!puzzle || !board) return <div className="p-10 text-center">{status}</div>;
+  if (!puzzle || !board) return <div className="p-10 text-center text-[#c3c3c2]">{status}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 gap-4">
+    <div className="flex-1 w-full flex flex-col items-center py-10 gap-4">
       <div className="flex items-center gap-4">
-        <h1 className="text-3xl font-bold">Draughts Puzzles</h1>
+        <h1 className="text-3xl font-bold text-white">Draughts Puzzles</h1>
         {myRating !== null && (
-          <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-semibold">
+          <span className="px-3 py-1 bg-[#262421] text-[#739552] border border-[#3c3a38] rounded-full text-sm font-bold">
             Puzzle rating: {myRating}
           </span>
         )}
       </div>
-      <p className="text-lg text-center max-w-lg">{status}</p>
+      <p className="text-lg text-[#c3c3c2] text-center max-w-lg">{status}</p>
 
       <Board
         board={board}
@@ -137,14 +137,14 @@ export default function PuzzlesPage() {
 
       <div className="flex gap-4 mt-2">
         {(solved || failed) && (
-          <button onClick={loadRandomPuzzle} className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+          <button onClick={loadRandomPuzzle} className="px-6 py-2 bg-[#739552] text-white font-bold rounded shadow-md hover:bg-[#81a55d] transition">
             Next Puzzle
           </button>
         )}
-        <button onClick={() => router.push('/puzzles/rush')} className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
+        <button onClick={() => router.push('/puzzles/rush')} className="px-6 py-2 bg-[#b64b1f] text-white font-bold rounded shadow-md hover:bg-[#c95322] transition">
           Puzzle Storm 🔥
         </button>
-        <button onClick={() => router.push('/')} className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+        <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#3c3a38] text-white font-bold rounded shadow-md hover:bg-[#4d4a48] transition">
           Back to Dashboard
         </button>
       </div>

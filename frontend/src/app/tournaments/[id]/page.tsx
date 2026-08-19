@@ -66,36 +66,36 @@ export default function TournamentDetails() {
   if (error || !tournament) return <div className="p-10 text-center text-red-500">{error}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
+    <div className="flex-1 w-full flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-4xl flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-4xl font-bold text-gray-800">{tournament.name}</h1>
-          <p className="text-gray-600 mt-2">Format: {tournament.format} | Status: {tournament.status}</p>
+          <h1 className="text-4xl font-bold text-white">{tournament.name}</h1>
+          <p className="text-[#c3c3c2] mt-2">Format: {tournament.format} | Status: {tournament.status}</p>
         </div>
         <div className="flex gap-4">
           <button
             onClick={() => router.push('/tournaments')}
-            className="px-4 py-2 text-gray-600 hover:text-gray-900 border border-gray-300 rounded bg-white shadow-sm"
+            className="px-4 py-2 text-[#c3c3c2] hover:text-white border border-[#3c3a38] rounded bg-[#3c3a38] font-bold shadow-sm transition"
           >
             Back
           </button>
           {!joined && tournament.status === 'UPCOMING' && (
             <button
               onClick={handleJoin}
-              className="px-6 py-2 bg-green-600 text-white font-medium rounded hover:bg-green-700 shadow transition"
+              className="px-6 py-2 bg-[#739552] text-white font-bold rounded shadow-md hover:bg-[#81a55d] transition"
             >
               Join Tournament
             </button>
           )}
           {joined && tournament.status === 'UPCOMING' && (
-             <span className="px-6 py-2 bg-slate-200 text-slate-700 font-medium rounded border border-slate-300">
+             <span className="px-6 py-2 bg-[#302e2b] text-[#c3c3c2] font-bold rounded border border-[#3c3a38]">
                Registered (Waiting to Start)
              </span>
           )}
           {joined && tournament.status === 'IN_PROGRESS' && (
              <button
                onClick={() => router.push(`/?tournamentId=${tournament.id}`)}
-               className="px-6 py-2 bg-blue-600 text-white font-medium rounded shadow hover:bg-blue-700"
+               className="px-6 py-2 bg-[#739552] text-white font-bold rounded shadow-md hover:bg-[#81a55d] transition"
              >
                Play Match
              </button>
@@ -103,27 +103,27 @@ export default function TournamentDetails() {
         </div>
       </div>
 
-      <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl p-8">
-        <h2 className="text-2xl font-semibold mb-4">Current Standings</h2>
+      <div className="w-full max-w-4xl bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-8">
+        <h2 className="text-2xl font-bold mb-4 text-white">Current Standings</h2>
 
         {standings.length === 0 ? (
-          <p className="text-gray-500">No players registered yet.</p>
+          <p className="text-[#c3c3c2]">No players registered yet.</p>
         ) : (
-          <div className="overflow-hidden border border-gray-200 rounded-lg">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="overflow-hidden border border-[#3c3a38] rounded-lg">
+            <table className="min-w-full divide-y divide-[#3c3a38]">
+              <thead className="bg-[#3c3a38]">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Player</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-[#c3c3c2] uppercase tracking-wider">Rank</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-[#c3c3c2] uppercase tracking-wider">Player</th>
+                  <th className="px-6 py-3 text-right text-xs font-bold text-[#c3c3c2] uppercase tracking-wider">Score</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-[#262421] divide-y divide-[#3c3a38]">
                 {standings.map((player, index) => (
-                  <tr key={player.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">#{index + 1}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{player.user.username}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-gray-900">{player.score} pts</td>
+                  <tr key={player.id} className={index % 2 === 0 ? 'bg-[#262421]' : 'bg-[#302e2b]'}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-white">#{index + 1}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-[#c3c3c2]">{player.user.username}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-white">{player.score} pts</td>
                   </tr>
                 ))}
               </tbody>
