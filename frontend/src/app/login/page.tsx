@@ -28,48 +28,48 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8">
-        <h1 className="text-3xl font-bold text-center mb-6">
+    <div className="flex-1 w-full flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-8">
+        <h1 className="text-3xl font-bold text-center mb-6 text-white">
           {isRegistering ? 'Create Account' : 'Welcome Back'}
         </h1>
 
-        {error && <p className="text-red-500 text-center mb-4">{error}</p>}
+        {error && <p className="text-[#b64b1f] text-center mb-4 font-bold">{error}</p>}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Username</label>
+            <label className="block text-sm font-bold text-[#c3c3c2]">Username</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border"
+              className="mt-1 block w-full rounded border-[#3c3a38] shadow-sm p-2 border bg-[#302e2b] text-white focus:outline-none focus:border-[#858482]"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Password</label>
+            <label className="block text-sm font-bold text-[#c3c3c2]">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border"
+              className="mt-1 block w-full rounded border-[#3c3a38] shadow-sm p-2 border bg-[#302e2b] text-white focus:outline-none focus:border-[#858482]"
             />
           </div>
           <button
             type="submit"
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+            className="w-full py-2 px-4 bg-[#739552] text-white font-bold rounded hover:bg-[#81a55d] transition shadow-md"
           >
             {isRegistering ? 'Register' : 'Sign In'}
           </button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-gray-600">
+        <p className="mt-4 text-center text-sm text-[#c3c3c2]">
           {isRegistering ? "Already have an account? " : "Don't have an account? "}
           <button
             onClick={() => setIsRegistering(!isRegistering)}
-            className="text-blue-600 hover:underline"
+            className="text-[#ebecd0] font-bold hover:underline"
           >
             {isRegistering ? 'Sign In' : 'Register'}
           </button>

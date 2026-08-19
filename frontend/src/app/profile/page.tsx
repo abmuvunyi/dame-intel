@@ -101,38 +101,38 @@ export default function Profile() {
   if (!profile) return <div className="text-center p-10">Loading profile...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10">
-      <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl p-8 mb-6 flex justify-between items-center">
+    <div className="flex-1 w-full flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-4xl bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-8 mb-6 flex justify-between items-center">
         <div>
-          <h1 className="text-4xl font-bold text-gray-800">{profile.username}</h1>
-          <p className="text-xl text-blue-600 font-semibold mt-2">Rating: {profile.rating}</p>
+          <h1 className="text-4xl font-bold text-white">{profile.username}</h1>
+          <p className="text-xl text-[#739552] font-bold mt-2">Rating: {profile.rating}</p>
         </div>
         <div className="flex gap-4">
-          <div className="text-center p-4 bg-gray-100 rounded">
+          <div className="text-center p-4 bg-[#3c3a38] rounded">
             <p className="text-2xl font-bold text-green-600">{profile.wins}</p>
-            <p className="text-xs text-gray-500 uppercase tracking-widest">Wins</p>
+            <p className="text-xs text-[#c3c3c2] uppercase tracking-widest">Wins</p>
           </div>
-          <div className="text-center p-4 bg-gray-100 rounded">
-            <p className="text-2xl font-bold text-gray-600">{profile.draws}</p>
-            <p className="text-xs text-gray-500 uppercase tracking-widest">Draws</p>
+          <div className="text-center p-4 bg-[#3c3a38] rounded">
+            <p className="text-2xl font-bold text-white">{profile.draws}</p>
+            <p className="text-xs text-[#c3c3c2] uppercase tracking-widest">Draws</p>
           </div>
-          <div className="text-center p-4 bg-gray-100 rounded">
+          <div className="text-center p-4 bg-[#3c3a38] rounded">
             <p className="text-2xl font-bold text-red-600">{profile.losses}</p>
-            <p className="text-xs text-gray-500 uppercase tracking-widest">Losses</p>
+            <p className="text-xs text-[#c3c3c2] uppercase tracking-widest">Losses</p>
           </div>
         </div>
       </div>
 
-      <div className="w-full max-w-4xl bg-white rounded-lg shadow-xl p-8">
-        <div className="flex space-x-6 border-b border-gray-200 mb-6">
+      <div className="w-full max-w-4xl bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-8">
+        <div className="flex space-x-6 border-b border-[#3c3a38] mb-6">
            <button
-             className={`pb-2 font-semibold ${activeTab === 'history' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+             className={`pb-2 font-semibold ${activeTab === 'history' ? 'border-b-2 border-[#739552] text-[#ebecd0]' : 'text-[#c3c3c2] hover:text-white'}`}
              onClick={() => setActiveTab('history')}
            >
              Match History ({profile.gamesPlayed})
            </button>
            <button
-             className={`pb-2 font-semibold ${activeTab === 'friends' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+             className={`pb-2 font-semibold ${activeTab === 'friends' ? 'border-b-2 border-[#739552] text-[#ebecd0]' : 'text-[#c3c3c2] hover:text-white'}`}
              onClick={() => setActiveTab('friends')}
            >
              Friends ({friends.length})
@@ -142,7 +142,7 @@ export default function Profile() {
         {activeTab === 'history' && (
           <>
             {history.length === 0 ? (
-              <p className="text-gray-500">No matches played yet.</p>
+              <p className="text-[#c3c3c2]">No matches played yet.</p>
             ) : (
               <ul className="divide-y divide-gray-200">
                 {history.map((game, i) => {
@@ -160,12 +160,12 @@ export default function Profile() {
                     : null;
 
                   return (
-                    <li key={i} className="py-4 flex justify-between items-center hover:bg-gray-50 px-2 rounded">
+                    <li key={i} className="py-4 flex justify-between items-center hover:bg-[#3c3a38] px-2 rounded transition">
                       <div>
                         <span className={`font-bold uppercase ${resultColor}`}>{isWin ? 'WIN' : (isDraw ? 'DRAW' : 'LOSS')}</span>
-                        <span className="text-gray-600 ml-3">vs {opponent}</span>
+                        <span className="text-[#c3c3c2] ml-3">vs {opponent}</span>
                         {myAccuracy !== null && (
-                          <span className="ml-3 text-xs font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                          <span className="ml-3 text-xs font-medium px-2 py-0.5 rounded bg-[#302e2b] text-[#c3c3c2]">
                             {myAccuracy}% accuracy
                           </span>
                         )}
@@ -176,7 +176,7 @@ export default function Profile() {
                         </span>
                         <button
                            onClick={() => router.push(`/analysis/${game.id}`)}
-                           className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-medium rounded hover:bg-blue-200"
+                           className="px-3 py-1 bg-[#3c3a38] text-white text-sm font-bold rounded hover:bg-[#4d4a48] transition"
                         >
                            Analyze
                         </button>
@@ -197,14 +197,14 @@ export default function Profile() {
                 placeholder="Add friend by username..."
                 value={newFriendName}
                 onChange={e => setNewFriendName(e.target.value)}
-                className="border p-2 rounded flex-grow"
+                className="border border-[#3c3a38] p-2 rounded flex-grow bg-[#302e2b] text-white focus:outline-none"
                 required
               />
-              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
+              <button type="submit" className="bg-[#739552] text-white font-bold px-4 py-2 rounded hover:bg-[#81a55d] transition">Add</button>
             </form>
 
             <ul className="divide-y divide-gray-200">
-              {friends.length === 0 && <p className="text-gray-500">No friends added yet.</p>}
+              {friends.length === 0 && <p className="text-[#c3c3c2]">No friends added yet.</p>}
               {friends.map((f, i) => (
                 <li key={i} className="py-3 flex justify-between items-center">
                   <span className="font-medium flex items-center gap-2">
@@ -224,33 +224,33 @@ export default function Profile() {
                      <div className="flex gap-2">
                        <button
                          onClick={() => handleAcceptFriend(f.id)}
-                         className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                         className="px-3 py-1 bg-[#739552] text-white font-bold rounded text-sm hover:bg-[#81a55d] transition"
                        >
                          Accept
                        </button>
                        <button
                          onClick={() => handleDeclineFriend(f.id)}
-                         className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+                         className="px-3 py-1 bg-[#3c3a38] text-white font-bold rounded text-sm hover:bg-[#4d4a48] transition"
                        >
                          Decline
                        </button>
                      </div>
                   ) : (
-                     <span className="text-gray-400 text-sm">Request Sent</span>
+                     <span className="text-[#858482] text-sm">Request Sent</span>
                   )}
                 </li>
               ))}
             </ul>
 
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <a href="/clubs" className="text-sm text-blue-600 hover:underline">Browse Clubs →</a>
+            <div className="mt-6 pt-4 border-t border-[#3c3a38]">
+              <a href="/clubs" className="text-sm text-[#c3c3c2] hover:text-white underline">Browse Clubs →</a>
             </div>
           </>
         )}
       </div>
 
       <button
-        className="mt-6 text-gray-500 hover:text-gray-800 underline"
+        className="mt-6 text-[#c3c3c2] hover:text-white underline"
         onClick={() => router.push('/')}
       >
         Back to Dashboard

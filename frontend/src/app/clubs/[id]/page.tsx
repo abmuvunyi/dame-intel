@@ -91,23 +91,23 @@ export default function ClubDetail() {
   if (!club) return <div className="p-10 text-center text-red-500">Club not found</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
+    <div className="flex-1 w-full flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-4xl flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-4xl font-bold text-gray-800">{club.name}</h1>
-          {club.description && <p className="text-gray-600 mt-2">{club.description}</p>}
-          <p className="text-gray-400 text-sm mt-1">{club.memberCount} member{club.memberCount === 1 ? '' : 's'}</p>
+          <h1 className="text-4xl font-bold text-white">{club.name}</h1>
+          {club.description && <p className="text-[#c3c3c2] mt-2">{club.description}</p>}
+          <p className="text-[#858482] text-sm mt-1">{club.memberCount} member{club.memberCount === 1 ? '' : 's'}</p>
         </div>
         <div className="flex gap-3 shrink-0">
-          <button onClick={() => router.push('/clubs')} className="px-4 py-2 text-gray-600 hover:text-gray-900 border border-gray-300 rounded bg-white shadow-sm">
+          <button onClick={() => router.push('/clubs')} className="px-4 py-2 text-[#c3c3c2] hover:text-white border border-[#3c3a38] rounded bg-[#3c3a38] font-bold shadow-sm transition">
             Back
           </button>
           {isMember ? (
-            <button onClick={handleLeave} className="px-6 py-2 bg-gray-200 text-gray-700 font-medium rounded hover:bg-gray-300 shadow transition">
+            <button onClick={handleLeave} className="px-6 py-2 bg-[#302e2b] text-[#c3c3c2] font-bold rounded border border-[#3c3a38] shadow transition">
               Leave Club
             </button>
           ) : (
-            <button onClick={handleJoin} className="px-6 py-2 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 shadow transition">
+            <button onClick={handleJoin} className="px-6 py-2 bg-[#739552] text-white font-bold rounded shadow-md hover:bg-[#81a55d] transition">
               Join Club
             </button>
           )}
@@ -115,8 +115,8 @@ export default function ClubDetail() {
       </div>
 
       <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 bg-white rounded-lg shadow-xl p-6">
-          <h2 className="text-xl font-semibold mb-4">Discussion</h2>
+        <div className="md:col-span-2 bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-6">
+          <h2 className="text-xl font-bold mb-4 text-white">Discussion</h2>
 
           {isMember ? (
             <>
@@ -126,38 +126,38 @@ export default function ClubDetail() {
                   value={postContent}
                   onChange={e => setPostContent(e.target.value)}
                   placeholder="Share something with the club..."
-                  className="border p-2 rounded text-sm"
+                  className="border border-[#3c3a38] bg-[#302e2b] text-white p-2 rounded text-sm focus:outline-none focus:border-[#858482]"
                   rows={2}
                 />
-                <button type="submit" className="self-start px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Post</button>
+                <button type="submit" className="self-start px-4 py-1.5 bg-[#739552] text-white rounded font-bold text-sm hover:bg-[#81a55d] transition">Post</button>
               </form>
 
               {feed.length === 0 ? (
-                <p className="text-gray-400 text-sm">No posts yet. Say something!</p>
+                <p className="text-[#858482] text-sm">No posts yet. Say something!</p>
               ) : (
                 <ul className="space-y-4">
                   {feed.map((post) => (
-                    <li key={post.id} className="border-b border-gray-100 pb-3">
+                    <li key={post.id} className="border-b border-[#3c3a38] pb-3">
                       <div className="flex justify-between items-baseline">
-                        <span className="font-semibold text-gray-800">{post.author?.username ?? 'Unknown'}</span>
-                        <span className="text-xs text-gray-400">{new Date(post.createdAt).toLocaleString()}</span>
+                        <span className="font-bold text-white">{post.author?.username ?? 'Unknown'}</span>
+                        <span className="text-xs text-[#858482]">{new Date(post.createdAt).toLocaleString()}</span>
                       </div>
-                      <p className="text-gray-700 text-sm mt-1 whitespace-pre-wrap">{post.content}</p>
+                      <p className="text-[#c3c3c2] text-sm mt-1 whitespace-pre-wrap">{post.content}</p>
                     </li>
                   ))}
                 </ul>
               )}
             </>
           ) : (
-            <p className="text-gray-500 text-sm">Join this club to see and post in its discussion feed.</p>
+            <p className="text-[#c3c3c2] text-sm">Join this club to see and post in its discussion feed.</p>
           )}
         </div>
 
-        <div className="bg-white rounded-lg shadow-xl p-6">
-          <h2 className="text-xl font-semibold mb-4">Members</h2>
+        <div className="bg-[#262421] border border-[#3c3a38] rounded-lg shadow-xl p-6">
+          <h2 className="text-xl font-bold mb-4 text-white">Members</h2>
           <ul className="space-y-2">
             {members.map((m) => (
-              <li key={m.id} className="text-sm text-gray-700">{m.username}</li>
+              <li key={m.id} className="text-sm text-[#c3c3c2]">{m.username}</li>
             ))}
           </ul>
         </div>

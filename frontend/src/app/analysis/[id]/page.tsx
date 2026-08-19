@@ -186,17 +186,17 @@ export default function AnalysisPage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
+    <div className="flex-1 w-full flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-5xl flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Analysis Board</h1>
-          <p className="text-gray-600 mt-2">
+          <h1 className="text-3xl font-bold text-white">Analysis Board</h1>
+          <p className="text-[#c3c3c2] mt-2">
             {game.lightPlayer?.username || 'AI'} (Light) vs {game.darkPlayer?.username || 'AI'} (Dark)
           </p>
         </div>
         <button
           onClick={() => router.push('/profile')}
-          className="text-blue-600 hover:underline font-medium"
+          className="text-[#c3c3c2] hover:text-white underline font-bold"
         >
           Back to Profile
         </button>
@@ -206,25 +206,25 @@ export default function AnalysisPage() {
           instantly here rather than recomputed on every view. */}
       <div className="w-full max-w-5xl mb-6">
         {!review || review.status === 'NOT_STARTED' || review.status === 'PENDING' ? (
-          <div className="bg-white rounded-lg shadow p-4 text-sm text-gray-500 flex items-center gap-2">
+          <div className="bg-[#262421] border border-[#3c3a38] rounded-lg shadow p-4 text-sm text-[#c3c3c2] flex items-center gap-2">
             <span className="inline-block w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
             Post-game analysis {review?.status === 'PENDING' ? 'in progress' : 'not started yet'}...
           </div>
         ) : review.status === 'FAILED' ? (
-          <div className="bg-white rounded-lg shadow p-4 text-sm text-red-600">
+          <div className="bg-[#262421] border border-[#3c3a38] rounded-lg shadow p-4 text-sm text-[#b64b1f]">
             Post-game analysis failed: {review.errorMessage || 'unknown error'}
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow p-4 flex gap-8">
+          <div className="bg-[#262421] border border-[#3c3a38] rounded-lg shadow p-4 flex gap-8">
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Light accuracy</p>
-              <p className="text-2xl font-bold text-slate-700">
+              <p className="text-xs text-[#c3c3c2] uppercase tracking-wide">Light accuracy</p>
+              <p className="text-2xl font-bold text-white">
                 {review.lightAccuracy !== null ? `${review.lightAccuracy}%` : '—'}
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Dark accuracy</p>
-              <p className="text-2xl font-bold text-slate-900">
+              <p className="text-xs text-[#c3c3c2] uppercase tracking-wide">Dark accuracy</p>
+              <p className="text-2xl font-bold text-white">
                 {review.darkAccuracy !== null ? `${review.darkAccuracy}%` : '—'}
               </p>
             </div>
@@ -236,12 +236,12 @@ export default function AnalysisPage() {
 
         {/* Left side: Board */}
         <div className="flex flex-col items-center">
-            <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-4">
+            <div className="border-4 border-slate-800 p-1 bg-slate-200 shadow-xl mb-4 bg-[#302e2b]">
               {currentBoard.map((row: any[], r: number) => (
                 <div key={r} className="flex">
                   {row.map((cell: any, c: number) => {
                     const isDarkSquare = (r + c) % 2 !== 0;
-                    let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
+                    let squareBg = isDarkSquare ? 'bg-[#739552]' : 'bg-[#ebecd0]';
 
                     // Highlight the best move calculated by the engine if available
                     const bestMove = evaluations.length > 0 ? evaluations[0].move : null;
@@ -285,11 +285,11 @@ export default function AnalysisPage() {
             </div>
 
             <div className="flex gap-4">
-               <button onClick={prevMove} disabled={currentMoveIndex === 0} className="px-6 py-2 bg-gray-800 text-white rounded disabled:opacity-50">Previous Move</button>
-               <button onClick={nextMove} disabled={currentMoveIndex === boardStates.length - 1} className="px-6 py-2 bg-gray-800 text-white rounded disabled:opacity-50">Next Move</button>
+               <button onClick={prevMove} disabled={currentMoveIndex === 0} className="px-6 py-2 bg-[#3c3a38] text-white font-bold rounded shadow-md hover:bg-[#4d4a48] transition disabled:opacity-50 disabled:cursor-not-allowed">Previous Move</button>
+               <button onClick={nextMove} disabled={currentMoveIndex === boardStates.length - 1} className="px-6 py-2 bg-[#3c3a38] text-white font-bold rounded shadow-md hover:bg-[#4d4a48] transition disabled:opacity-50 disabled:cursor-not-allowed">Next Move</button>
             </div>
             <div className="mt-4 flex items-center gap-2">
-              <p className="font-medium text-gray-700">Move {currentMoveIndex} of {boardStates.length - 1}</p>
+              <p className="font-bold text-white">Move {currentMoveIndex} of {boardStates.length - 1}</p>
               {currentMoveReview && (
                 <span className={`px-2 py-0.5 rounded text-xs font-semibold ${CLASSIFICATION_STYLE[currentMoveReview.classification].badge}`}>
                   {CLASSIFICATION_STYLE[currentMoveReview.classification].label}
@@ -314,13 +314,13 @@ export default function AnalysisPage() {
         </div>
 
         {/* Right side: Engine */}
-        <div className="flex-1 bg-white p-6 rounded-lg shadow border border-gray-200 h-fit">
-           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+        <div className="flex-1 bg-[#262421] p-6 rounded-lg shadow border border-[#3c3a38] h-fit">
+           <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-white">
                Engine Evaluation
                <button
                   onClick={handleAnalyze}
                   disabled={isAnalyzing}
-                  className="ml-auto px-4 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                  className="ml-auto px-4 py-1 text-sm bg-[#739552] text-white font-bold rounded shadow-md hover:bg-[#81a55d] transition disabled:opacity-50 disabled:cursor-not-allowed"
                >
                    {isAnalyzing ? 'Analyzing...' : 'Run Engine'}
                </button>
@@ -328,10 +328,10 @@ export default function AnalysisPage() {
 
            {evaluations.length > 0 ? (
                <div className="space-y-3 mt-4">
-                   <p className="text-sm text-gray-500 mb-2">Best calculated moves for {boardStates[currentMoveIndex].turn === 'L' ? 'Light' : 'Dark'} at Depth 4:</p>
+                   <p className="text-sm text-[#c3c3c2] mb-2">Best calculated moves for {boardStates[currentMoveIndex].turn === 'L' ? 'Light' : 'Dark'} at Depth 4:</p>
                    {evaluations.slice(0, 5).map((ev, idx) => (
-                       <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
-                           <div className="font-mono text-sm text-gray-800">
+                       <div key={idx} className="flex justify-between items-center p-3 bg-[#302e2b] rounded border border-[#3c3a38]">
+                           <div className="font-mono text-sm text-white">
                                ({ev.move.from.row},{ev.move.from.col}) → ({ev.move.to.row},{ev.move.to.col})
                                {ev.move.captured && ev.move.captured.length > 0 && <span className="text-red-500 font-bold ml-2">x{ev.move.captured.length}</span>}
                            </div>
@@ -342,7 +342,7 @@ export default function AnalysisPage() {
                    ))}
                </div>
            ) : (
-               <p className="text-gray-500 italic mt-10 text-center">Click 'Run Engine' to see evaluations for this position.</p>
+               <p className="text-[#858482] italic mt-10 text-center">Click 'Run Engine' to see evaluations for this position.</p>
            )}
         </div>
 
