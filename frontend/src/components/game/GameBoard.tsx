@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
 import { BoardState, Move, Piece, PieceColor } from '@/lib/draughts';
@@ -55,6 +55,11 @@ function GameBoardInner() {
   const [chatInput, setChatInput] = useState('');
   const [drawOfferPending, setDrawOfferPending] = useState(false);
   const [gameOver, setGameOver] = useState(false);
+  // The id gameOver's payload now carries (see game.gateway.ts's handleGameOver) — null
+  // if the game somehow failed to save server-side, so the review button below only
+  // ever renders once there's a real game to link to.
+  const [finishedGameId, setFinishedGameId] = useState<number | null>(null);
+  const router = useRouter();
   const [manualFlip, setManualFlip] = useState(false);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
@@ -158,6 +163,7 @@ function GameBoardInner() {
       setLastMove(null); // fresh position, nothing to animate from
       setCaptured({ [PieceColor.LIGHT]: [], [PieceColor.DARK]: [] });
       setGameOver(false);
+      setFinishedGameId(null);
       setManualFlip(false);
       setOpponentDisconnected(false);
       setStatus(data.color
@@ -210,9 +216,10 @@ function GameBoardInner() {
 
     newSocket.on('legalMoves', (moves: Move[]) => setLegalMoves(moves));
 
-    newSocket.on('gameOver', (data: { winner: PieceColor | 'DRAW', reason?: string }) => {
+    newSocket.on('gameOver', (data: { winner: PieceColor | 'DRAW', reason?: string, gameId?: number | null }) => {
       setGameOver(true);
       setOpponentDisconnected(false);
+      setFinishedGameId(data.gameId ?? null);
       const reasonTxt = data.reason ? ` (${data.reason.replace('-', ' ')})` : '';
       setStatus(
         data.winner === 'DRAW'
@@ -540,6 +547,18 @@ function GameBoardInner() {
                 Resign
               </button>
             </>
+          )}
+          {/* Only appears once the game actually saved server-side (gameOver's payload
+              now carries the real id — see game.gateway.ts's handleGameOver). Before
+              this fix there was no way to reach the review board straight from here at
+              all, regardless of gameOver — a real reported gap, not a design choice. */}
+          {gameOver && finishedGameId != null && (
+            <button
+              onClick={() => router.push(`/analysis/${finishedGameId}`)}
+              className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 text-sm font-semibold transition"
+            >
+              Review Game
+            </button>
           )}
         </div>
 

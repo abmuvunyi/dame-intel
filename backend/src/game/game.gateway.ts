@@ -857,11 +857,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW', reason?: string) {
     this.clearRoomTimers(room);
-    this.server.to(roomId).emit('gameOver', { winner, reason });
 
-    // Save to database
+    // Save to database FIRST, so the gameOver broadcast below can carry a real gameId.
+    // This used to fire before the save even started, which meant the frontend had no
+    // id to link to /analysis/:id right after a game ended — the only way to reach the
+    // review board was a manual trip through the profile page's match history. A real,
+    // reported gap, not a design choice.
+    let savedGame: { id: number } | null = null;
     try {
-       const savedGame = await this.historyService.saveGame(
+       savedGame = await this.historyService.saveGame(
           room.playerProfiles[PieceColor.LIGHT] || null,
           room.playerProfiles[PieceColor.DARK] || null,
           winner as 'L'|'D'|'DRAW',
@@ -869,6 +873,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           room.rules,
           room.moveTimings
        );
+    } catch (err) {
+       console.error('Failed to save game history:', err);
+    }
+
+    this.server.to(roomId).emit('gameOver', { winner, reason, gameId: savedGame?.id ?? null });
+
+    // Everything below needs the saved game's id — if the save itself failed, there's
+    // nothing more to do here (already logged above).
+    try {
+       if (savedGame) {
+       const gameId = savedGame.id;
 
        // Update ELO if both are authenticated real players
        const p1 = room.playerProfiles[PieceColor.LIGHT];
@@ -879,7 +894,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        // human players). Same "don't await, it's CPU intensive" reasoning as
        // anti-cheat; see GameReviewService.analyzeCompletedGame's own comment for why
        // this is a background PASS rather than a background PROCESS.
-       this.gameReviewService.analyzeCompletedGame(savedGame.id).catch(err => console.error('Game Review Error:', err));
+       this.gameReviewService.analyzeCompletedGame(gameId).catch(err => console.error('Game Review Error:', err));
 
        // Trigger async anti-cheat analysis
        // We don't await this because it's CPU intensive and we don't want to block the gateway
@@ -890,7 +905,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
               room.moves,
               room.rules, // fixes a real bug — see the comment on analyzeGameForCheating's rules param
               room.moveTimings, // Phase 12: move-time anomaly detection
-              savedGame.id, // Phase 12: supporting game reference for engine-correlation flags
+              gameId, // Phase 12: supporting game reference for engine-correlation flags
            ).catch(err => console.error('Anticheat Error:', err));
        }
 
@@ -903,7 +918,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
                 // possibly the tournament) can now auto-advance, so this is the only
                 // call needed for a Swiss game, unlike Arena below.
                 const winnerUserId = winner === PieceColor.LIGHT ? p1.id : winner === PieceColor.DARK ? p2.id : null;
-                await this.tournamentsService.recordSwissPairingResult(room.tournamentId, p1.id, p2.id, winnerUserId, savedGame.id);
+                await this.tournamentsService.recordSwissPairingResult(room.tournamentId, p1.id, p2.id, winnerUserId, gameId);
              } else if (winner === PieceColor.LIGHT) {
                 // Arena (unchanged): update tournament scores instead of raw ELO
                 await this.tournamentsService.updateTournamentScore(p1.id, room.tournamentId, 'WIN');
@@ -959,8 +974,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
             );
           }
        }
+       } // end if (savedGame)
     } catch(err) {
-       console.error('Failed to save game history:', err);
+       console.error('Failed to process post-game updates:', err);
     }
 
     const p1id = room.playerProfiles[PieceColor.LIGHT]?.id;
