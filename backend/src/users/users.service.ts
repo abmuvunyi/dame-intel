@@ -62,6 +62,44 @@ export class UsersService {
     return false;
   }
 
+  // Phase 13: the ONE feature-flag check every gated feature calls — "a simple
+  // feature-flag check on the user entity, not scattered ad-hoc checks" per the
+  // brief. Nothing outside UsersService/SubscriptionsService should read
+  // `membershipTier` directly.
+  hasPremium(user: User | null | undefined): boolean {
+    return user?.membershipTier === 'PREMIUM';
+  }
+
+  findByStripeCustomerId(stripeCustomerId: string): Promise<User | null> {
+    return this.usersRepository.findOneBy({ stripeCustomerId });
+  }
+
+  // Persists the Stripe Customer mapping the first time a user starts checkout —
+  // separate from applyMembershipUpdate below because this can happen before any
+  // subscription (or webhook event) exists at all.
+  async setStripeCustomerId(userId: number, stripeCustomerId: string): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    user.stripeCustomerId = stripeCustomerId;
+    return this.usersRepository.save(user);
+  }
+
+  // Phase 13: the ONLY place membershipTier/membershipStatus are ever written.
+  // Called exclusively from SubscriptionsService's Stripe webhook handler — the
+  // single source of truth is Stripe's own event stream, never a client request.
+  async applyMembershipUpdate(
+    userId: number,
+    update: { tier: string, status: string, stripeSubscriptionId: string | null, renewsAt: Date | null },
+  ): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    user.membershipTier = update.tier;
+    user.membershipStatus = update.status;
+    user.stripeSubscriptionId = update.stripeSubscriptionId;
+    user.membershipRenewsAt = update.renewsAt;
+    return this.usersRepository.save(user);
+  }
+
   async getRankings(limit: number = 100): Promise<User[]> {
     return this.usersRepository.find({
       order: { rating: 'DESC' },

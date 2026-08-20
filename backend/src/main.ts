@@ -3,7 +3,12 @@ import { AppModule } from './app.module';
 import { RedisIoAdapter } from './redis.adapter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true attaches the untouched request body (req.rawBody) alongside Nest's
+  // usual JSON-parsed one, on every request. Needed specifically for the Stripe
+  // webhook route (Phase 13) — Stripe's signature verification is computed over the
+  // exact raw bytes, so a JSON.parse()-then-reserialize round trip would break it
+  // even if the parsed content is byte-for-byte "the same" data.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Enable CORS so Next.js frontend can connect
   app.enableCors();

@@ -1262,6 +1262,168 @@ leaving as a surprise.
   cheaters vs. clean players, which this project has no access to. Exactly the same honest caveat Phase 11's
   move-classification thresholds already carry.
 
+## Phase 13: monetization — Stripe subscriptions and notifications (2026-08-18)
+
+**Credentials disclosure, up front, per explicit instruction.** No real Stripe account or transactional email
+provider account was available in this environment. I raised this before writing any code; told to proceed
+with "build it, skip live webhook/email verification entirely" — build the full integration with genuine unit
+test coverage, but do not attempt a live or simulated Stripe-CLI test-mode event pass, and do not attempt to
+actually send an email. Everything below reflects that: extensive tests using hand-constructed payloads shaped
+exactly like Stripe's own documented event schema, but never run through Stripe's real test-mode
+infrastructure, and no email ever actually delivered anywhere. **Directly answering this phase's own STOP AND
+REPORT requirement: webhook handling was NOT tested with Stripe's real test-mode events** — this is a real gap
+against the brief's ask, disclosed rather than glossed over. What follows is what full-strength coverage
+without that piece actually looks like.
+
+**1. What's gated behind Premium — a single feature-flag check, per the brief.** `User.membershipTier`
+(`'FREE' | 'PREMIUM'`) is the one field every gated feature reads, always through `UsersService.hasPremium()`
+— never a scattered ad-hoc `user.membershipTier === 'PREMIUM'` inline check. Two real features gated, at
+every layer they can be reached from, not just the obvious one:
+- **Engine analysis depth** (`analysis.controller.ts`): FREE/anonymous capped at depth 4 (the endpoint's
+  pre-existing default — an unauthenticated or free caller who never asks for more than that sees
+  byte-for-byte unchanged behavior), PREMIUM up to depth 8. The response now reports back
+  `{ evaluations, depthUsed, depthCapped, maxDepth }` instead of a bare array, so a capped caller can be told
+  why, not just served a shallower line silently.
+- **Exclusive puzzles** (`Puzzle.isPremium`): gated at all three reachable points — random-serve
+  (`getRandomPuzzle` filters premium puzzles out of the pool entirely for non-premium callers, not just
+  after-the-fact), direct legal-moves fetch, and the solve/attempt endpoint — specifically so a premium
+  puzzle can't be reached by guessing or already knowing its numeric id once one of the three were missed.
+
+**2. Stripe integration — hosted flow only, by construction.** `StripeService` wraps the SDK with the same
+graceful-degradation shape `main.ts`'s Redis-adapter fallback already established: no `STRIPE_SECRET_KEY` set
+→ the app still boots, and only a checkout/portal/webhook call at request time returns a clear 503, not a
+boot-time crash. Checkout Sessions and Billing Portal Sessions are the only two things it ever creates — the
+brief's "do not store any raw payment card data" requirement is satisfied by construction, not by care: no
+code path anywhere in this app accepts, parses, or touches a card number: Stripe's hosted pages own that
+entirely. `SubscriptionsController`'s three authenticated endpoints (`GET /subscriptions/me`,
+`POST /subscriptions/checkout`, `POST /subscriptions/portal`) all require a logged-in user;
+`POST /subscriptions/webhook` deliberately does not (Stripe calls it directly, with no user session at all)
+and instead trusts only a verified signature over the **exact raw request body** — `main.ts` now boots Nest
+with `{ rawBody: true }` specifically so `req.rawBody` survives alongside the normal JSON-parsed body, since
+Stripe's signature check would break on a `JSON.parse` → reserialize round trip even if the parsed content
+looks identical.
+
+**3. Webhook lifecycle handling.** `SubscriptionsService.handleWebhookEvent` switches on four event types:
+`checkout.session.completed` (links `stripeCustomerId` to the right user via `client_reference_id`, set when
+the Checkout Session was created — doesn't touch membership tier itself), `customer.subscription.created` /
+`.updated` (maps Stripe's subscription `status` through a small pure function, `mapStripeSubscriptionStatus`
+in `subscription-status.ts` — `active`/`trialing` → `PREMIUM`/`ACTIVE`, `past_due` → `PREMIUM`/`PAST_DUE`
+(kept usable during Stripe's own dunning/retry window, not instantly downgraded), `canceled`/`unpaid`/
+`incomplete_expired` → `FREE`/`CANCELED`, anything else → `FREE`/`NONE`), `customer.subscription.deleted`
+(hard reset: tier, status, `stripeSubscriptionId`, and `membershipRenewsAt` all cleared), and
+`invoice.payment_failed` (status forced to `PAST_DUE` while the existing tier and subscription id are left
+alone — a payment failure is a grace-period signal, not an instant downgrade; Stripe's own subscription
+`.updated` event handles the eventual downgrade if the retries all fail). Every other Stripe event type this
+app doesn't act on is silently ignored, not an error. Exactly one method writes membership fields —
+`UsersService.applyMembershipUpdate()` — called only from these four webhook handlers, the same
+detection-can't-reach-consequence structural guarantee Phase 12 established for `moderationStatus`.
+
+**4. Notifications — one entry point, four real trigger points, in-app plus email together.**
+`NotificationsService.notify(userId, type, message, data)` is the single method every trigger calls: it always
+persists a `Notification` row first, then best-effort sends a matching email via `EmailService` (same
+graceful-fallback shape as Stripe — no `RESEND_API_KEY` configured in this environment, so every email this
+phase "sent" landed in a console log, never an inbox; a real key would make it a genuine Resend API POST with
+no code change). A failed or skipped email never blocks or rolls back the in-app notification, which is
+already saved by the time the email is attempted. Four real triggers wired, not stubs:
+- **Friend request** — `FriendsService.sendFriendRequest`, notifies the recipient (not the sender).
+- **Challenge received** — `GameGateway.handleChallengePlayer`, alongside the pre-existing live
+  `challengeReceived` socket event (this is the persisted/emailed record that survives even if the recipient
+  is online but not looking, or checks back later).
+- **Tournament starting** — both tournament formats' actual start paths: Arena's cron-driven auto-start
+  (`TournamentsService.handleTournamentState`) and Swiss's explicit `startTournament`, both fanning out to
+  every registered player.
+- **Correspondence-game turn reminder** — new `GameGateway.checkCorrespondenceReminders()`, swept hourly.
+  Reminds the *current mover* once their turn has run 12+ hours (half of correspondence's 24h-per-move bank —
+  generous lead time, not naggy) without a move, tracked via the turn's own `turnStartedAt` timestamp rather
+  than a plain sent/unsent flag, so a fresh turn is automatically eligible for its own reminder with no
+  explicit reset needed anywhere a move gets made. Reads the mover's identity from `playerProfiles`, which
+  (unlike the live-socket-only `socketToUser` map) survives disconnects — the whole point for a format whose
+  players are expected to be away from the board between moves.
+
+**5. Frontend.** New `/membership` page: current tier/status/renewal date, upgrade buttons (redirect to a
+real Stripe-hosted Checkout Session URL), a "Manage Billing" button once a Stripe customer exists (redirects
+to a real Billing Portal Session), and handles the `?checkout=success`/`?checkout=cancelled` redirect Stripe
+sends back to. New `NotificationBell` component (bell icon + unread badge, polls every 30s, dropdown lists
+recent notifications, click-to-mark-read, mark-all-read) — wired into the home page and profile page headers,
+renders nothing at all for a logged-out visitor, same convention as the rest of the app's auth-gated UI.
+**Fixed a real regression this phase's own backend change introduced**: `/analysis/[id]/page.tsx` (built in
+Phase 11) expected `POST /analysis`'s response to be a bare evaluations array; this phase's depth-capping
+change made it `{ evaluations, depthUsed, depthCapped, maxDepth }` instead, which would have silently broken
+the existing analysis board had it shipped unnoticed. Fixed to read `res.data.evaluations`, and the capped
+state is now surfaced in the UI ("Free tier is capped at depth 4 — Upgrade to Premium for deeper analysis").
+
+**~60 new tests added across this phase, 343 total across 37 suites, all passing; `tsc --noEmit` clean.**
+New or changed:
+`subscription-status.spec.ts` (9, pure mapping function), `subscriptions.service.spec.ts` (13 — real
+in-memory sqlite + real `UsersService` so membership persistence is genuinely exercised, StripeService itself
+mocked; webhook payloads hand-built to match Stripe's documented event schema field-for-field), 6 new
+"analysis-depth gate" tests in `analysis.controller.spec.ts`, 6 new "premium puzzle gating" tests in
+`puzzles.service.spec.ts`, `email.service.spec.ts` (6), `notifications.service.spec.ts` (9 — **found and
+fixed a real bug**: `getForUser`'s `ORDER BY createdAt DESC` alone ties on sqlite's second-resolution
+timestamp for notifications created in the same second, e.g. a tournament-starting fan-out to many players at
+once, and returns them in unspecified order; fixed by adding `id DESC` as a tiebreak), plus new/updated tests
+across `friends.service.spec.ts`, `tournaments-swiss.service.spec.ts` (Swiss start + Arena auto-start
+notification wiring, both directions), and `game.gateway.spec.ts` (7 new — 2 for challenge notification
+wiring, and 5 dedicated to the correspondence-reminder sweep: fires past threshold, doesn't fire before it, fires only
+once per turn not once per sweep tick, fires again on a fresh turn, and never fires for a slot with no
+attached user profile such as an AI opponent).
+
+### Live verification
+
+Real running backend + frontend, real registered users, real WebSocket connections, a real headless-Chromium
+Playwright pass — everything that doesn't require actual Stripe/email infrastructure. 22/22 checks passed:
+
+```
+--- REST: friend-request notification, subscriptions/me, FREE-tier analysis capping ---
+  ✓ friend request creates a real PENDING friendship
+  ✓ recipient receives a persisted FRIEND_REQUEST notification
+  ✓ unread count reflects it; markRead flips it to read
+  ✓ subscriptions/me returns FREE/NONE by default for a fresh user
+  ✓ FREE and anonymous analysis requests both capped at depth 4
+
+--- REST: DB-flipped PREMIUM tier (no real Stripe purchase possible — see disclosure above) ---
+  ✓ subscriptions/me reflects PREMIUM/ACTIVE once the DB row is flipped
+  ✓ PREMIUM analysis reaches depth 8, uncapped
+  ✓ admin set-premium marks a real puzzle premium-only
+  ✓ FREE user refused direct access to it (403); PREMIUM user granted (200)
+
+--- Real WebSocket connections (socket.io-client), two real authenticated users ---
+  ✓ target receives the live challengeReceived socket event
+  ✓ target also has a persisted CHALLENGE_RECEIVED notification
+
+--- Playwright, real headless Chromium, real registration through the actual login UI ---
+  ✓ home page renders the notification bell for a logged-in user
+  ✓ membership page renders Free plan + upgrade buttons
+  ✓ clicking Upgrade surfaces a graceful, readable error (Stripe unconfigured) — no crash
+  ✓ analysis page renders "Depth 4" — confirms the fixed response-shape regression above
+  ✓ zero unexpected browser console errors across the whole run
+```
+
+The DB-level PREMIUM flip (direct `UPDATE user SET membershipTier='PREMIUM'`) stands in for a real Stripe
+purchase specifically because a real one isn't possible in this environment — genuinely exercises the *read*
+side of every gate (analysis depth, puzzle access, `/subscriptions/me`) even though the *write* side
+(`applyMembershipUpdate`, only reachable from a real webhook) is covered by unit tests alone. Both the FREE
+and PREMIUM DB states were reverted to their original values after verification.
+
+**Known simplifications and honest gaps, stated plainly:**
+- **Webhook handling was not tested with Stripe's real test-mode events** (Stripe CLI event triggering, or a
+  schema-accurate simulated replay pass) — per the explicit instruction covering this phase. Coverage is
+  hand-constructed unit-test payloads shaped like Stripe's documented schema, run directly against
+  `handleWebhookEvent`, never through Stripe's actual test-mode infrastructure or signature-verification path
+  end-to-end.
+- No email was ever actually delivered anywhere in this phase — `RESEND_API_KEY` was never configured, so
+  every notification's email landed in a console log via `EmailService`'s fallback path, by design (same
+  reasoning as above).
+- `User.email` is a real, honestly-nullable field — no registration-flow UI exists yet to collect it, so no
+  user in this dev environment actually has one on file; a synthesized fake address was deliberately avoided.
+- Correspondence turn-reminders are checked hourly, not instantly at the 12-hour mark — a reminder can arrive
+  up to ~1 hour late relative to the threshold. Fine for a 24-hour-per-move format; not appropriate to reuse
+  as-is for a tighter deadline.
+- No push notifications — explicitly deferred to the mobile app phase per the brief itself.
+- Ban/moderation status (Phase 12) and membership tier (this phase) are deliberately separate fields with
+  separate write paths; a banned PREMIUM user still shows as PREMIUM in `/subscriptions/me` (login itself is
+  refused instead, per Phase 12's enforcement) — not a gap, just worth naming since both phases touch `User`.
+
 ## Repo cleanup notes (Phase 0)
 
 - Original state: 96 branches, 95 open PRs, no `main` — default branch was the auto-named

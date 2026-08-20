@@ -51,4 +51,11 @@ export class Puzzle {
 
   @Column({ default: 0 })
   timesSolved: number;
+
+  // Phase 13: one of the two features actually gated behind PREMIUM in this app (see
+  // UsersService.hasPremium() — the single feature-flag check everything routes
+  // through). Defaults to false so every existing puzzle stays freely accessible;
+  // only newly marked ones are exclusive.
+  @Column({ default: false })
+  isPremium: boolean;
 }

@@ -13,6 +13,7 @@ import { PresenceModule } from '../presence/presence.module';
 import { GameReview } from './review/game-review.entity';
 import { GameReviewService } from './review/game-review.service';
 import { GameReviewController } from './review/game-review.controller';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { GameReviewController } from './review/game-review.controller';
     AnticheatModule,
     RatingModule,
     PresenceModule,
+    NotificationsModule,
   ],
   providers: [DraughtsEngine, GameGateway, AiService, GameReviewService],
   controllers: [AnalysisController, GameReviewController],

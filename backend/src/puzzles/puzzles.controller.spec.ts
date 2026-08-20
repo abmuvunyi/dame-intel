@@ -4,6 +4,7 @@ import { PuzzlesService } from './puzzles.service';
 import { PuzzleRushService } from './puzzle-rush.service';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
 import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 
 describe('PuzzlesController', () => {
   let controller: PuzzlesController;
@@ -16,6 +17,7 @@ describe('PuzzlesController', () => {
         { provide: PuzzleRushService, useValue: {} },
         { provide: PuzzleGeneratorService, useValue: {} },
         { provide: JwtService, useValue: {} },
+        { provide: UsersService, useValue: {} },
       ],
     }).compile();
 

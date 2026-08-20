@@ -4,6 +4,7 @@ import { BadRequestException } from '@nestjs/common';
 import { FriendsService } from './friends.service';
 import { UsersService } from '../users/users.service';
 import { PresenceService } from '../presence/presence.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Friendship } from './friendship.entity';
 import { User } from '../users/user.entity';
 
@@ -13,12 +14,15 @@ describe('FriendsService', () => {
   let service: FriendsService;
   let usersService: UsersService;
   let presenceService: PresenceService;
+  let notificationsService: { notify: jest.Mock };
 
   async function makeUser(username: string) {
     return usersService.create(username, 'hash');
   }
 
   beforeEach(async () => {
+    notificationsService = { notify: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot({
@@ -29,7 +33,12 @@ describe('FriendsService', () => {
         }),
         TypeOrmModule.forFeature([Friendship, User]),
       ],
-      providers: [FriendsService, UsersService, PresenceService],
+      providers: [
+        FriendsService,
+        UsersService,
+        PresenceService,
+        { provide: NotificationsService, useValue: notificationsService },
+      ],
     }).compile();
 
     service = module.get<FriendsService>(FriendsService);
@@ -48,6 +57,19 @@ describe('FriendsService', () => {
       const list = await service.getFriendsList(bob.id);
       expect(list).toHaveLength(1);
       expect(list[0]).toMatchObject({ friendId: alice.id, status: 'PENDING', isIncomingRequest: true });
+    });
+
+    it('notifies the recipient, not the sender (Phase 13)', async () => {
+      const alice = await makeUser('alice');
+      const bob = await makeUser('bob');
+
+      const req = await service.sendFriendRequest(alice.id, 'bob');
+      expect(notificationsService.notify).toHaveBeenCalledWith(
+        bob.id,
+        'FRIEND_REQUEST',
+        expect.stringContaining('alice'),
+        { friendshipId: req.id },
+      );
     });
 
     it('rejects a request to a nonexistent user', async () => {

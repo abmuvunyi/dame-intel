@@ -69,6 +69,11 @@ export default function AnalysisPage() {
   const [currentMoveIndex, setCurrentMoveIndex] = useState(0);
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Phase 13: the analysis endpoint now caps search depth by membership tier (see
+  // analysis.controller.ts) and reports back what actually ran, rather than always
+  // honoring the requested depth — surfaced here so a capped free-tier user sees why
+  // and gets a path to upgrade, instead of a silently shallower engine line.
+  const [depthInfo, setDepthInfo] = useState<{ depthUsed: number, depthCapped: boolean, maxDepth: number } | null>(null);
   // Phase 11: the automated post-game review (move classifications + accuracy),
   // computed asynchronously server-side — see GameReviewService. Separate from
   // `evaluations` above, which is this page's own pre-existing on-demand "Run Engine"
@@ -143,12 +148,18 @@ export default function AnalysisPage() {
     setIsAnalyzing(true);
     try {
       const state = boardStates[currentMoveIndex];
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/analysis`, {
-        board: state.board,
-        turn: state.turn,
-        depth: 4
-      });
-      setEvaluations(res.data);
+      // Ask for the premium ceiling (8) regardless of who's asking — the endpoint
+      // itself silently clamps this down to whatever the caller's actual tier allows
+      // (see FREE_MAX_DEPTH/PREMIUM_MAX_DEPTH in analysis.controller.ts) and reports
+      // back what it really used, so there's no benefit to under-requesting here.
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/analysis`,
+        { board: state.board, turn: state.turn, depth: 8 },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+      );
+      setEvaluations(res.data.evaluations);
+      setDepthInfo({ depthUsed: res.data.depthUsed, depthCapped: res.data.depthCapped, maxDepth: res.data.maxDepth });
     } catch(err) {
       console.error(err);
     } finally {
@@ -160,6 +171,7 @@ export default function AnalysisPage() {
       if (currentMoveIndex < boardStates.length - 1) {
           setCurrentMoveIndex(currentMoveIndex + 1);
           setEvaluations([]); // Clear evals when moving
+          setDepthInfo(null);
       }
   };
 
@@ -167,6 +179,7 @@ export default function AnalysisPage() {
       if (currentMoveIndex > 0) {
           setCurrentMoveIndex(currentMoveIndex - 1);
           setEvaluations([]);
+          setDepthInfo(null);
       }
   };
 
@@ -305,7 +318,7 @@ export default function AnalysisPage() {
                   <button
                     key={mr.moveIndex}
                     title={`Move ${mr.moveIndex + 1}: ${CLASSIFICATION_STYLE[mr.classification].label}`}
-                    onClick={() => { setCurrentMoveIndex(mr.moveIndex + 1); setEvaluations([]); }}
+                    onClick={() => { setCurrentMoveIndex(mr.moveIndex + 1); setEvaluations([]); setDepthInfo(null); }}
                     className={`w-3 h-3 rounded-full ${CLASSIFICATION_STYLE[mr.classification].dot} ${currentMoveIndex === mr.moveIndex + 1 ? 'ring-2 ring-offset-1 ring-slate-500' : ''}`}
                   />
                 ))}
@@ -328,7 +341,18 @@ export default function AnalysisPage() {
 
            {evaluations.length > 0 ? (
                <div className="space-y-3 mt-4">
-                   <p className="text-sm text-gray-500 mb-2">Best calculated moves for {boardStates[currentMoveIndex].turn === 'L' ? 'Light' : 'Dark'} at Depth 4:</p>
+                   <p className="text-sm text-gray-500 mb-2">
+                     Best calculated moves for {boardStates[currentMoveIndex].turn === 'L' ? 'Light' : 'Dark'} at Depth {depthInfo?.depthUsed ?? '?'}:
+                   </p>
+                   {depthInfo?.depthCapped && (
+                     <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                       Free tier is capped at depth {depthInfo.maxDepth}.{' '}
+                       <a href="/membership" className="font-semibold underline hover:text-amber-900">
+                         Upgrade to Premium
+                       </a>{' '}
+                       for deeper analysis.
+                     </div>
+                   )}
                    {evaluations.slice(0, 5).map((ev, idx) => (
                        <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
                            <div className="font-mono text-sm text-gray-800">
