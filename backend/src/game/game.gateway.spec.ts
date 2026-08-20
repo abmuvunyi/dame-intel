@@ -745,6 +745,66 @@ describe('GameGateway: post-game review trigger (Phase 11)', () => {
 
     expect(analyzeCompletedGame).toHaveBeenCalledWith(4242);
   });
+
+  // Real reported bug: the gameOver broadcast used to fire BEFORE the game was even
+  // saved, so it never carried an id — the frontend had no way to link straight to
+  // /analysis/:id right after a game ended (the only path was a manual trip through
+  // the profile page's match history).
+  it('includes the real saved gameId in the gameOver broadcast, not just internally', async () => {
+    gw.handlePlayVsAi(mockSocket('p1', '1') as any, { difficulty: 1, rules: { boardSize: 8 } });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    const room = (gw as any).activeGames.get(roomId);
+
+    await (gw as any).handleGameOver(roomId, room, 'L', 'resignation');
+
+    const gameOver = mockServer.emitted.find((e: any) => e.event === 'gameOver');
+    expect(gameOver?.payload.gameId).toBe(4242);
+  });
+});
+
+describe('GameGateway: gameOver broadcast degrades gracefully if the save itself fails', () => {
+  let gw: GameGateway;
+  let mockServer: ReturnType<typeof createMockServer>;
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GameGateway,
+        AiService,
+        PresenceService,
+        { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: JwtService, useValue: {} },
+        { provide: UsersService, useValue: { isCurrentlyBanned: () => false } },
+        { provide: HistoryService, useValue: { saveGame: async () => { throw new Error('DB unavailable'); } } },
+        { provide: TournamentsService, useValue: {} },
+        { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
+        { provide: RatingService, useValue: { recordGameResult: async () => {} } },
+      ],
+    }).compile();
+
+    gw = module.get<GameGateway>(GameGateway);
+    mockServer = createMockServer();
+    (gw as any).server = mockServer;
+  });
+
+  afterEach(() => {
+    (gw as any).onModuleDestroy?.();
+    jest.useRealTimers();
+  });
+
+  it('still broadcasts gameOver (with gameId: null) when saving the game history throws', async () => {
+    gw.handlePlayVsAi(mockSocket('p1') as any, { difficulty: 1, rules: { boardSize: 8 } });
+    const roomId = (gw as any).socketToRoom.get('p1');
+    const room = (gw as any).activeGames.get(roomId);
+
+    await (gw as any).handleGameOver(roomId, room, 'L', 'resignation');
+
+    const gameOver = mockServer.emitted.find((e: any) => e.event === 'gameOver');
+    expect(gameOver).toBeDefined();
+    expect(gameOver!.payload.gameId).toBeNull();
+    expect(gameOver!.payload.winner).toBe('L');
+  });
 });
 
 describe('GameGateway: anti-cheat wiring and banned-user connection rejection (Phase 12)', () => {
