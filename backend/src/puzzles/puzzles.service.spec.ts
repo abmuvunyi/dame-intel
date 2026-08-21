@@ -279,4 +279,54 @@ describe('PuzzlesService', () => {
       await expect(service.getLegalMoves(puzzle.id, 0, false)).resolves.toBeDefined();
     });
   });
+
+  // Home-dashboard "Daily Puzzle" — one shared puzzle per day, free for everyone.
+  describe('getDailyPuzzle', () => {
+    async function seedPuzzles(count: number, isPremium = false) {
+      for (let i = 0; i < count; i++) {
+        await (service as any).puzzlesRepository.save(
+          (service as any).puzzlesRepository.create({
+            difficulty: 1, boardSize: 8, board: emptyBoard(8), turnToMove: 'L',
+            solution: [{ from: { row: 5, col: 0 }, to: { row: 4, col: 1 } }],
+            status: 'published', isPremium,
+          }),
+        );
+      }
+    }
+
+    it('returns null when there are no published puzzles at all', async () => {
+      await expect(service.getDailyPuzzle()).resolves.toBeNull();
+    });
+
+    it('returns the same puzzle across repeated calls on the same day', async () => {
+      await seedPuzzles(10);
+      const first = await service.getDailyPuzzle();
+      const second = await service.getDailyPuzzle();
+      expect(first!.id).toBe(second!.id);
+    });
+
+    it('never leaks the solution field', async () => {
+      await seedPuzzles(3);
+      const daily = await service.getDailyPuzzle();
+      expect((daily as any).solution).toBeUndefined();
+    });
+
+    it('bypasses premium gating entirely — a real puzzle is always returned even if every one is premium-only', async () => {
+      await seedPuzzles(5, true); // every puzzle marked isPremium: true
+      const daily = await service.getDailyPuzzle();
+      expect(daily).not.toBeNull();
+      expect(daily!.isPremium).toBe(true); // confirms this really is a premium puzzle, served anyway
+    });
+
+    it('ignores unpublished puzzles', async () => {
+      await (service as any).puzzlesRepository.save(
+        (service as any).puzzlesRepository.create({
+          difficulty: 1, boardSize: 8, board: emptyBoard(8), turnToMove: 'L',
+          solution: [{ from: { row: 5, col: 0 }, to: { row: 4, col: 1 } }],
+          status: 'pending_review',
+        }),
+      );
+      await expect(service.getDailyPuzzle()).resolves.toBeNull();
+    });
+  });
 });

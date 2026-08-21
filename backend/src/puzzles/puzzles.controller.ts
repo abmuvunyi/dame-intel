@@ -44,6 +44,12 @@ export class PuzzlesController {
     return this.usersService.hasPremium(user);
   }
 
+  // No auth needed and deliberately not premium-gated — see PuzzlesService.getDailyPuzzle.
+  @Get('daily')
+  async getDailyPuzzle() {
+    return this.puzzlesService.getDailyPuzzle();
+  }
+
   @Get('random')
   async getRandomPuzzle(@Req() req: Request, @Query('difficulty') difficulty?: string) {
     const diff = difficulty ? parseInt(difficulty, 10) : undefined;

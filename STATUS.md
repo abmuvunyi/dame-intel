@@ -1424,6 +1424,95 @@ and PREMIUM DB states were reverted to their original values after verification.
   separate write paths; a banned PREMIUM user still shows as PREMIUM in `/subscriptions/me` (login itself is
   refused instead, per Phase 12's enforcement) — not a gap, just worth naming since both phases touch `User`.
 
+## Post-launch fixes: game-over review link, AI engine rewrite (2026-08-20)
+
+Two targeted fixes made directly in response to trying the running app, outside the phase-prompt cadence —
+recorded here rather than as a numbered phase since neither changes scope, both are bug/quality fixes against
+existing phases.
+
+**1. Post-game review was unreachable.** `GameGateway.handleGameOver()` broadcast the `gameOver` socket event
+*before* the game was even saved to the database, so it never carried a `gameId` — the frontend had no way to
+link straight to `/analysis/:id` when a game ended; the only path was a manual trip through the profile page's
+match history. Fixed: save first, then broadcast with the real `gameId` (or `null` if the save itself failed,
+verified to still degrade gracefully). `GameBoard` now shows a "Review Game" button once a finished game
+actually has one. 2 new tests; live-verified end-to-end with Playwright (register → play → resign → click
+Review Game → lands on a real, loaded `/analysis/:id`).
+
+**2. AI engine — slow and easy to beat at the hardest difficulty.** Root-caused to a checklist of missing
+classical-engine techniques, not a mystery, and not something ML was needed for: `JSON.parse(JSON.stringify())`
+board cloning on every search node, no transposition table, no quiescence search (a forced-capture sequence
+still unresolved exactly at the search horizon was scored as if it had already happened — the classic
+horizon-effect blunder), no proper terminal scoring ("opponent has zero legal moves" fell through to the same
+material-only eval as any other position), and a fixed search depth regardless of position complexity. Fixed
+all five with the same tools every real checkers/chess engine uses; kept `WEIGHT_MAN`/`WEIGHT_KING` numerically
+unchanged since `move-classification.ts`'s review thresholds are explicitly calibrated in those exact units.
+11 new tests, all behavioral (a hand-verified board proving quiescence discounts a hanging piece by 16 points,
+another proving terminal scoring reports 100,000+ vs. a naive material count under 100 for an identical forced
+win) — testing itself caught a real bug (the time budget was only checked between search depths, so one slow
+iteration could blow through it; fixed with a periodic mid-search check). Real before/after: 6466ms → 4504ms on
+a 10x10 opening at the hardest difficulty, and now reliably *bounded* regardless of position complexity
+(previously unbounded). Live-verified through the real socket flow: ~5s bounded reply, zero server errors.
+
+**A genuine cross-PR regression, caught and fixed the same day.** Both fixes above and Phase 13 were on
+separate branches off `main`, all individually green. Merging all three in sequence revealed one test module
+(added by the review-link fix, before Phase 13's `NotificationsService` dependency existed) was now missing a
+required DI provider — different regions of the same file, so git merged cleanly with no conflict, but the
+combined result broke one describe block. Caught immediately by re-running the full suite on the merged `main`
+before moving on, not left for someone else to discover — exactly why "green on each branch" isn't the same
+guarantee as "green after merging," and why re-running the full suite post-merge matters even when every
+individual PR was clean.
+
+## Home dashboard redesign (2026-08-21)
+
+Direct feedback after trying the app: "the home page is not even close" to chess.com's. Before touching the
+UI, real backend features were built to back it — no placeholder numbers, matching this project's standing
+rule against faking progress. Four new, tested, real capabilities:
+
+- **Daily play streak** — `streak.ts`, a pure function modeled on chess.com's own streak (consecutive UTC
+  calendar days with at least one completed game, not consecutive wins; a gap resets to 1, not 0). Wired into
+  `HistoryService.saveGame` — the single choke point every completed game, PvP or vs-AI, already passes
+  through — so no caller anywhere needs to remember to call it separately. Awaited, not fire-and-forget (unlike
+  the CPU-heavy background review/anti-cheat passes triggered from the same place): a real bug surfaced during
+  testing where a fire-and-forget version left the streak stale immediately after `saveGame` resolved, exactly
+  when the frontend would want to read it.
+- **Global rank** — `UsersService.getRankFor`, a cheap `COUNT(*) WHERE rating > mine` rather than sorting/
+  fetching the whole user table, reusing the exact `rating` column `/users/rankings` already sorts by.
+- **Recommended Match** — `UsersService.getRecommendedMatch`, the closest-rated currently-*online* player
+  (from `PresenceService`'s real live-socket registry, the same one the friends list's online indicator
+  already uses), excluding the requester. The "Challenge" button reuses the exact Phase 10 `challengePlayer`
+  socket mechanism — `GameBoard` gained an `autoChallengeUserId` prop so the dashboard (which doesn't own the
+  game socket) can trigger a real challenge through the component that does, the moment it's connected.
+- **Daily Puzzle** — `PuzzlesService.getDailyPuzzle`, a deterministic date-hash pick (`daily-puzzle.ts`, pure
+  and unit-tested) so every visitor sees the same puzzle on a given UTC day, refreshing doesn't change it, and
+  it needs no new storage. Deliberately bypasses the Phase 13 premium-puzzle gate — chess.com's own daily
+  puzzle is a shared free-for-everyone hook feature, not a paid perk, confirmed by a test that seeds an
+  all-premium puzzle pool and asserts one is still served. `/puzzles` gained `?daily=1` support to open this
+  specific puzzle instead of a random one, reusing its existing solve UI rather than building a second one.
+
+**What was deliberately left out, and why**: a weekly league/division ladder with promotion/relegation (a
+substantial standalone system in its own right — reused the existing global-rank leaderboard instead, a
+simpler real feature rather than an invented one) and lesson/course content (no content pipeline exists for
+it at all). Named explicitly per the brief's "build the missing backend features first, don't fake it"
+instruction, not silently dropped.
+
+**Frontend**: the home page is now a real dashboard — header with the streak/rank badges alongside existing
+nav, and a right-hand sidebar (Recommended Match, Daily Puzzle, Recent Games with working Review links,
+Friends with live online status) next to the existing embedded `GameBoard`. Anonymous visitors still see the
+simple pre-redesign layout (board only) since every new widget requires a real logged-in user's data.
+
+**26 new backend tests** (`streak.ts` 8, `daily-puzzle.ts` 4, `UsersService` home-dashboard block 9,
+`HistoryService` streak-wiring 5) plus updated DI wiring across `HistoryModule`/`UsersModule`/
+`game-review.service.spec.ts` (a real in-memory `HistoryService` there needed the same new `UsersService`
+dependency). Full suite: 381 tests, 39 suites, all green; `tsc --noEmit` clean, `next build` clean.
+
+**Live verification**: real Playwright run against the real running app — two real registered users (one
+kept online via a live socket so the other's Recommended Match card has a genuine candidate), a real vs-AI
+game played to build a real streak of 1, then the actual browser dashboard checked end-to-end: streak badge,
+rank badge, Recommended Match card (and a real challenge sent and received on click), Daily Puzzle card (and
+its Solve button loading the actual daily puzzle, not a random one), Recent Games card (and its Review button
+landing on a real, loaded analysis page), Friends card. **15/15 checks passed**, zero unexpected console
+errors.
+
 ## Repo cleanup notes (Phase 0)
 
 - Original state: 96 branches, 95 open PRs, no `main` — default branch was the auto-named

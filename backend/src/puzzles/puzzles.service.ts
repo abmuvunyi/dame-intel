@@ -6,6 +6,7 @@ import { PlayerPuzzleRating } from './player-puzzle-rating.entity';
 import { PieceColor, PieceType, Move, BoardState, DraughtsEngine } from '../game/engine/engine.service';
 import { updateRating, GLICKO2_DEFAULTS } from '../rating/glicko2';
 import { sameMove } from './move-utils';
+import { hashDateToIndex } from './daily-puzzle';
 
 export interface PuzzleAttemptResult {
   correct: boolean;
@@ -83,6 +84,22 @@ export class PuzzlesService implements OnModuleInit {
       result = all[Math.floor(Math.random() * all.length)];
     }
     return result ? this.toPublic(result) : null;
+  }
+
+  // Home-dashboard "Daily Puzzle": one shared puzzle, the same for every visitor on a
+  // given UTC calendar day, deterministically selected (see daily-puzzle.ts) rather
+  // than random — a random pick would show a different puzzle on every page load,
+  // which isn't what "daily" means. Free for everyone regardless of membership tier
+  // on purpose: this mirrors chess.com's own daily puzzle, which is a shared
+  // free-for-all hook feature, not a premium perk — so it deliberately bypasses the
+  // isPremium gating getRandomPuzzle/getLegalMoves/attemptMove enforce elsewhere.
+  async getDailyPuzzle() {
+    const all = await this.puzzlesRepository.find({ where: { status: 'published' }, order: { id: 'ASC' } });
+    if (all.length === 0) return null;
+
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, UTC
+    const index = hashDateToIndex(today, all.length);
+    return this.toPublic(all[index]);
   }
 
   async getPuzzleEntity(id: number): Promise<Puzzle> {

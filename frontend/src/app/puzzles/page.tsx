@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BoardState, Move, PieceColor } from '@/lib/draughts';
 import Board from '@/components/game/Board';
 
@@ -17,7 +17,20 @@ interface PublicPuzzle {
   rating: number;
 }
 
+// useSearchParams() requires a Suspense boundary somewhere above it in the App
+// Router (same reason GameBoard.tsx/membership/page.tsx wrap their own use of it) —
+// this reads the ?daily=1 param the home dashboard's Daily Puzzle card links here with.
 export default function PuzzlesPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-center">Loading puzzle...</div>}>
+      <PuzzlesPageInner />
+    </Suspense>
+  );
+}
+
+function PuzzlesPageInner() {
+  const searchParams = useSearchParams();
+  const wantsDaily = searchParams.get('daily') === '1';
   const [puzzle, setPuzzle] = useState<PublicPuzzle | null>(null);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [turn, setTurn] = useState<PieceColor | null>(null);
@@ -57,6 +70,31 @@ export default function PuzzlesPage() {
     }
   }, [loadLegalMoves]);
 
+  // The home dashboard's Daily Puzzle card links here with ?daily=1 — same shared
+  // puzzle every visitor gets today (see PuzzlesService.getDailyPuzzle), free
+  // regardless of membership tier. Falls back to a random puzzle if, for whatever
+  // reason, no daily puzzle is available (e.g. a brand-new install with zero
+  // published puzzles yet) rather than showing a dead end.
+  const loadDailyPuzzle = useCallback(async () => {
+    try {
+      setStatus('Loading today\'s puzzle...');
+      setSolved(false);
+      setFailed(false);
+      setLastMove(null);
+      setMoveIndex(0);
+      const res = await axios.get<PublicPuzzle | null>(`${API_URL}/puzzles/daily`);
+      if (!res.data) {
+        await loadRandomPuzzle();
+        return;
+      }
+      setPuzzle(res.data);
+      setStatus(`Daily Puzzle #${res.data.id} (rating ${Math.round(res.data.rating)}) — Find the best move for ${res.data.turnToMove === 'L' ? 'Light' : 'Dark'}`);
+      await loadLegalMoves(res.data.id, 0);
+    } catch (err) {
+      setStatus('Failed to load the daily puzzle.');
+    }
+  }, [loadLegalMoves, loadRandomPuzzle]);
+
   const loadMyRating = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -69,9 +107,17 @@ export default function PuzzlesPage() {
   }, []);
 
   useEffect(() => {
-    loadRandomPuzzle();
+    if (wantsDaily) {
+      loadDailyPuzzle();
+    } else {
+      loadRandomPuzzle();
+    }
     loadMyRating();
-  }, [loadRandomPuzzle, loadMyRating]);
+    // Deliberately only on mount — this reads the ?daily=1 param once to decide how
+    // to open, the same way a page load would; it doesn't need to re-trigger every
+    // time loadRandomPuzzle/loadDailyPuzzle's own identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleMove = async (move: Move) => {
     if (!puzzle || solved || failed) return;

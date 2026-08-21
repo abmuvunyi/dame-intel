@@ -111,3 +111,95 @@ describe('UsersService: graduated moderation response (Phase 12)', () => {
     await expect(service.applyModeration(999999, 'WARNED', null, null)).resolves.toBeNull();
   });
 });
+
+// Home-dashboard redesign: real in-memory sqlite, same pattern as the moderation
+// block above — this is genuine persisted state (streaks) and genuine cross-row
+// queries (rank, recommended match), not pure functions in isolation.
+describe('UsersService: home-dashboard features', () => {
+  let service: UsersService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      imports: [
+        TypeOrmModule.forRoot({ type: 'sqlite', database: ':memory:', entities: [User], synchronize: true }),
+        TypeOrmModule.forFeature([User]),
+      ],
+      providers: [UsersService],
+    }).compile();
+
+    service = module.get<UsersService>(UsersService);
+  });
+
+  describe('recordDailyPlay', () => {
+    it('sets a brand-new user to a streak of 1 on their first recorded game', async () => {
+      const user = await service.create('alice', 'hash');
+      await service.recordDailyPlay(user.id);
+
+      const fresh = await service.findOneById(user.id);
+      expect(fresh!.currentStreak).toBe(1);
+      expect(fresh!.lastPlayedDate).toBe(new Date().toISOString().slice(0, 10));
+    });
+
+    it('does not double-count a second call on the same day', async () => {
+      const user = await service.create('bob', 'hash');
+      await service.recordDailyPlay(user.id);
+      await service.recordDailyPlay(user.id);
+
+      const fresh = await service.findOneById(user.id);
+      expect(fresh!.currentStreak).toBe(1);
+    });
+
+    it('does nothing (and does not throw) for a nonexistent user', async () => {
+      await expect(service.recordDailyPlay(999999)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getRankFor', () => {
+    it('ranks the single highest-rated user as #1', async () => {
+      const top = await service.create('top', 'hash');
+      await service.updateRating(top.id, 500, 'win'); // 1200 -> 1700, well clear of the default
+      await service.create('mid', 'hash'); // stays at the 1200 default
+
+      const rank = await service.getRankFor(top.id);
+      expect(rank).toEqual({ rank: 1, totalPlayers: 2 });
+    });
+
+    it('reflects a lower rank for a lower-rated user among the same players', async () => {
+      const top = await service.create('top', 'hash');
+      await service.updateRating(top.id, 500, 'win');
+      const mid = await service.create('mid', 'hash');
+
+      const rank = await service.getRankFor(mid.id);
+      expect(rank).toEqual({ rank: 2, totalPlayers: 2 });
+    });
+
+    it('returns null for a nonexistent user', async () => {
+      await expect(service.getRankFor(999999)).resolves.toBeNull();
+    });
+  });
+
+  describe('getRecommendedMatch', () => {
+    it('picks the online candidate whose rating is closest to the requester\'s', async () => {
+      const me = await service.create('me', 'hash'); // rating 1200
+      const near = await service.create('near', 'hash');
+      await service.updateRating(near.id, 50, 'win'); // 1250 — closer
+      const far = await service.create('far', 'hash');
+      await service.updateRating(far.id, 400, 'win'); // 1600 — further
+
+      const recommended = await service.getRecommendedMatch(me.id, [me.id, near.id, far.id]);
+      expect(recommended!.id).toBe(near.id);
+    });
+
+    it('never recommends the requester to themselves', async () => {
+      const me = await service.create('me', 'hash');
+      const recommended = await service.getRecommendedMatch(me.id, [me.id]);
+      expect(recommended).toBeNull();
+    });
+
+    it('returns null when no one else is online', async () => {
+      const me = await service.create('me', 'hash');
+      const recommended = await service.getRecommendedMatch(me.id, []);
+      expect(recommended).toBeNull();
+    });
+  });
+});
