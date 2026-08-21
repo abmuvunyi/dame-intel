@@ -781,6 +781,7 @@ describe('GameGateway: gameOver broadcast degrades gracefully if the save itself
         AiService,
         PresenceService,
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
+        { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: {} },
         { provide: UsersService, useValue: { isCurrentlyBanned: () => false } },
         { provide: HistoryService, useValue: { saveGame: async () => { throw new Error('DB unavailable'); } } },
