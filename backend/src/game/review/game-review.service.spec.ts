@@ -8,6 +8,7 @@ import { GameHistory } from '../../history/history.entity';
 import { AiService } from '../ai/ai/ai.service';
 import { DraughtsEngine, PieceColor } from '../engine/engine.service';
 import { User } from '../../users/user.entity';
+import { UsersService } from '../../users/users.service';
 
 // Real in-memory sqlite (GameHistory + GameReview), real HistoryService, real
 // AiService (not mocked) — this is the actual "worked example" the Phase 11 brief
@@ -26,9 +27,9 @@ describe('GameReviewService: real end-to-end analysis', () => {
           entities: [GameReview, GameHistory, User],
           synchronize: true,
         }),
-        TypeOrmModule.forFeature([GameReview, GameHistory]),
+        TypeOrmModule.forFeature([GameReview, GameHistory, User]),
       ],
-      providers: [GameReviewService, HistoryService, AiService],
+      providers: [GameReviewService, HistoryService, AiService, UsersService],
     }).compile();
 
     service = module.get<GameReviewService>(GameReviewService);

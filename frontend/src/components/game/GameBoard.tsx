@@ -20,15 +20,25 @@ type Clocks = { [PieceColor.LIGHT]: number; [PieceColor.DARK]: number };
 // useSearchParams() requires a Suspense boundary somewhere above it in the App
 // Router — this wrapper is that boundary, keeping the exported component's own
 // signature/usage (`<GameBoard />`) unchanged for page.tsx.
-export default function GameBoard() {
+interface GameBoardProps {
+  // Home dashboard's Recommended Match card: set once the user clicks "Challenge" on
+  // a suggested opponent, so this component (which owns the actual game socket) can
+  // issue the real challenge the moment it's ready — see the effect below and
+  // handleChallengeFriend, the exact same mechanism the online-friends list already
+  // uses, just triggered from outside instead of a click inside this component.
+  autoChallengeUserId?: number | null;
+  onAutoChallengeSent?: () => void;
+}
+
+export default function GameBoard(props: GameBoardProps = {}) {
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-screen text-gray-500">Loading...</div>}>
-      <GameBoardInner />
+      <GameBoardInner {...props} />
     </Suspense>
   );
 }
 
-function GameBoardInner() {
+function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
@@ -293,6 +303,16 @@ function GameBoardInner() {
     socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture }, timeControl });
     setChallengeNotice('Challenge sent — waiting for a response...');
   };
+
+  // Fires the moment both the socket is connected and a target was actually
+  // requested — either can become true first (the socket usually connects almost
+  // instantly, but a click landing before that finishes is entirely possible).
+  useEffect(() => {
+    if (!connected || !socket || !autoChallengeUserId) return;
+    handleChallengeFriend(autoChallengeUserId);
+    onAutoChallengeSent?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, socket, autoChallengeUserId]);
 
   const handleRespondToChallenge = (accept: boolean) => {
     if (!incomingChallenge) return;

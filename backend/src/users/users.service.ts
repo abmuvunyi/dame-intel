@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, MoreThan, Repository } from 'typeorm';
 import { User } from './user.entity';
+import { updateStreak } from './streak';
 
 @Injectable()
 export class UsersService {
@@ -120,6 +121,56 @@ export class UsersService {
     });
 
     return Object.entries(buckets).map(([bucket, count]) => ({ bucket, count }));
+  }
+
+  // The only place that writes currentStreak/lastPlayedDate — see streak.ts for the
+  // pure update rule. Called once per real (non-null, non-AI) player from
+  // HistoryService.saveGame, the single choke point every completed game already
+  // passes through, so no caller needs to remember to call this separately.
+  async recordDailyPlay(userId: number): Promise<void> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return;
+
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, UTC
+    const { streak, lastPlayedDate } = updateStreak(user.lastPlayedDate, user.currentStreak, today);
+    if (streak !== user.currentStreak || lastPlayedDate !== user.lastPlayedDate) {
+      await this.usersRepository.update(userId, { currentStreak: streak, lastPlayedDate });
+    }
+  }
+
+  // 1-indexed global rank by rating (a #1 rank means "the highest rated player").
+  // Counts strictly-higher ratings rather than sorting the whole table, so this stays
+  // cheap regardless of how many users exist.
+  async getRankFor(userId: number): Promise<{ rank: number, totalPlayers: number } | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+
+    const [higherRated, totalPlayers] = await Promise.all([
+      this.usersRepository.count({ where: { rating: MoreThan(user.rating) } }),
+      this.usersRepository.count(),
+    ]);
+    return { rank: higherRated + 1, totalPlayers };
+  }
+
+  // "Recommended Match" (home dashboard): the closest-rated currently-online player,
+  // excluding the requester. Real data only — `onlineUserIds` comes from
+  // PresenceService, the same live-socket registry the friends list's "online"
+  // indicator already uses (Phase 10), not anything invented for this feature.
+  async getRecommendedMatch(userId: number, onlineUserIds: number[]): Promise<User | null> {
+    const me = await this.usersRepository.findOneBy({ id: userId });
+    if (!me) return null;
+
+    const candidateIds = onlineUserIds.filter((id) => id !== userId);
+    if (candidateIds.length === 0) return null;
+
+    const candidates = await this.usersRepository.find({
+      where: { id: In(candidateIds) },
+      select: ['id', 'username', 'rating'],
+    });
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => Math.abs(a.rating - me.rating) - Math.abs(b.rating - me.rating));
+    return candidates[0];
   }
 
   // Calculates the standard ELO rating change

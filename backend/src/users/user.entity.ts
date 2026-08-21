@@ -70,4 +70,15 @@ export class User {
   // NotificationsService always has "something" to send to.
   @Column({ type: 'text', nullable: true })
   email: string | null;
+
+  // Home-dashboard redesign: a chess.com-style "daily play streak" — consecutive
+  // calendar days (UTC) with at least one completed game. The pure update rule lives
+  // in streak.ts; UsersService.recordDailyPlay is the only place that writes these
+  // two fields (called once per real player from HistoryService.saveGame, the single
+  // choke point every completed game — PvP or vs-AI — already passes through).
+  @Column({ default: 0 })
+  currentStreak: number;
+
+  @Column({ type: 'text', nullable: true })
+  lastPlayedDate: string | null; // YYYY-MM-DD, UTC
 }
