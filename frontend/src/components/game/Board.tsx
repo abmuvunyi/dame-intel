@@ -187,9 +187,9 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
           const isSelected = selectedPos?.row === row && selectedPos?.col === col;
           const isHighlighted = validDestinations.some(m => m.to.row === row && m.to.col === col);
 
-          let bg = isDarkSquare ? 'bg-[#764b36]' : 'bg-[#e5d0aa]';
-          if (isSelected) bg = 'bg-yellow-400';
-          else if (isHighlighted) bg = 'bg-green-400/80';
+          let bg = isDarkSquare ? 'bg-[#739552]' : 'bg-[#ebecd0]';
+          if (isSelected) bg = 'bg-[#f6f669]';
+          else if (isHighlighted) bg = 'bg-black/20';
 
           return (
             <div
@@ -202,7 +202,7 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               style={{ width: cellPx, height: cellPx, left: dc * cellPx + 4, top: dr * cellPx + 4 }}
             >
               {isHighlighted && !board[row][col] && (
-                <div className="w-1/3 h-1/3 rounded-full bg-green-700/40 pointer-events-none" />
+                <div className="w-1/3 h-1/3 rounded-full bg-black/20 pointer-events-none" />
               )}
             </div>
           );

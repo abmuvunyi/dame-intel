@@ -289,7 +289,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture }, timeControl });
   };
 
-  const handlePlayAI = (difficulty: number) => {
+  const handlePlayVsAi = (difficulty: number) => {
     socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture }, timeControl });
   };
 
@@ -393,42 +393,40 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
 
   if (!board) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen space-y-4">
+      <div className="flex flex-col items-center justify-center h-full w-full max-w-md mx-auto">
         {challengeBanner}
         {challengeNoticeBanner}
         <div className="absolute top-4 right-4"><ConnectionStatus connected={connected} /></div>
-        <h1 className="text-3xl font-bold">Online Draughts Platform</h1>
-        <p className="text-gray-600">{status}</p>
 
-        <div className="flex flex-col space-y-4 pt-4 border-t border-gray-200 w-64">
-          <div className="bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col space-y-3">
-            <h4 className="text-sm font-bold text-gray-700">Game Rules</h4>
-            <label className="text-sm flex justify-between items-center text-gray-600">
+        <div className="flex flex-col space-y-4 pt-4 w-full">
+          <div className="bg-[#3c3a38] p-4 rounded text-white flex flex-col space-y-3">
+            <h4 className="text-sm font-bold text-gray-400">Game Rules</h4>
+            <label className="text-sm flex justify-between items-center">
               Board Size:
               <select
                 value={boardSize}
                 onChange={e => setBoardSize(parseInt(e.target.value))}
-                className="ml-2 border rounded p-1 text-sm bg-white"
+                className="ml-2 border border-gray-600 rounded p-1 text-sm bg-[#302e2b] text-white focus:outline-none"
               >
                 <option value={8}>8x8 (Standard)</option>
                 <option value={10}>10x10 (International)</option>
               </select>
             </label>
-            <label className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer">
+            <label className="text-sm flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={forceMajorityCapture}
                 onChange={e => setForceMajorityCapture(e.target.checked)}
-                className="rounded"
+                className="rounded text-[#739552]"
               />
               Force Majority Capture
             </label>
-            <label className="text-sm flex justify-between items-center text-gray-600">
+            <label className="text-sm flex justify-between items-center">
               Time Control:
               <select
                 value={timeControl}
                 onChange={e => setTimeControl(e.target.value as typeof timeControl)}
-                className="ml-2 border rounded p-1 text-sm bg-white"
+                className="ml-2 border border-gray-600 rounded p-1 text-sm bg-[#302e2b] text-white focus:outline-none"
               >
                 <option value="bullet">Bullet (2+1)</option>
                 <option value="blitz">Blitz (5+3)</option>
@@ -440,19 +438,21 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
 
           <button
             onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+            className="w-full px-6 py-4 bg-[#739552] text-white font-bold rounded shadow hover:bg-[#86a865] transition text-xl"
           >
             {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
           </button>
 
-          <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
+          <div className="text-center py-4 text-sm text-gray-400 font-bold">OR Play Computer</div>
+
+
 
           <div className="grid grid-cols-2 gap-2">
             {[1, 2, 3, 4, 5, 6, 7].map(level => (
               <button
                 key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
+                onClick={() => handlePlayVsAi(level)}
+                className={`w-full px-4 py-2 text-white rounded font-semibold transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-[#3c3a38] hover:bg-[#4c4a48]'}`}
               >
                 AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
               </button>
@@ -528,14 +528,14 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
       {/* Board Column */}
       <div className="flex flex-col items-center space-y-4">
         <div className="w-full flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
+          <h1 className="text-2xl font-bold text-[#739552]">Game Room</h1>
           <ConnectionStatus connected={connected} />
         </div>
         <div className="flex space-x-4 text-sm text-gray-500 font-medium">
           <span>{spectatorCount} Spectator(s)</span>
         </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
+        <p className="text-md text-gray-300">{status}</p>
+        <p className="text-xl font-semibold text-white">
           {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : 'Waiting for opponent...')}
         </p>
 
