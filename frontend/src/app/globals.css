@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
+/* Dark theme by default (not tied to prefers-color-scheme) — matches the app's
+   redesigned dark dashboard shell rather than following the OS setting, the same
+   way chess.com's own site defaults dark regardless of system preference. This is
+   the body-level fallback painted before/behind each page's own bg-slate-900 (etc.)
+   classes take over, so there's no light flash on first paint. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0f172a;
+  --foreground: #f1f5f9;
 }
 
 @theme inline {
@@ -10,13 +15,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

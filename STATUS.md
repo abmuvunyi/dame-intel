@@ -1513,6 +1513,55 @@ its Solve button loading the actual daily puzzle, not a random one), Recent Game
 landing on a real, loaded analysis page), Friends card. **15/15 checks passed**, zero unexpected console
 errors.
 
+## Dark theme redesign across the app (2026-08-27)
+
+Direct follow-up feedback: "the home page is not even close" to chess.com's, and after the home dashboard
+redesign above, a request to keep extending it. Two decisions confirmed directly rather than assumed: switch
+to a dark theme (the reference screenshot is dark-navy with a left icon sidebar; the app had been light
+throughout), and continue the redesign to more pages rather than stop at the home page.
+
+**New shared shell.** `DashboardShell.tsx` — a persistent left icon sidebar (Play / Puzzles / Tournaments /
+Watch / Clubs / Rankings, plus Premium / Profile / notification bell / Log Out pinned to the bottom),
+replacing the old pattern of every page duplicating its own top-nav link row. Emoji icons, not an icon
+library — the same lightweight convention this codebase already used for 🔔/🔥/⇅ elsewhere, no new dependency.
+`NotificationBell` gained a `variant` prop (`'light' | 'dark'`, defaulting to `'light'`) so it keeps its
+original appearance on pages not yet converted, rather than forcing every consumer to redesign in lockstep.
+
+**Pages converted**: home, puzzles (including its daily-puzzle mode), profile, tournaments list, and login
+(no sidebar there — a standalone auth gate, restyled but structurally unchanged). `globals.css`'s root
+background/foreground now default dark unconditionally (previously only via `prefers-color-scheme`), so
+there's no light flash on first paint before a page's own classes apply. The embedded game board
+(`GameBoard.tsx`) deliberately keeps its own white "island" styling rather than being redesigned internally
+this pass — a real product pattern (the board itself staying on a light/neutral surface distinct from the
+surrounding chrome), and a scope decision that avoided touching this codebase's largest, highest-risk
+component's internals. Its two most prominent buttons (Play Multiplayer, Review Game) were recolored from
+blue to green for cohesion with the new accent color; nothing else inside it was touched.
+
+**Two real layout bugs found by looking at actual screenshots, not just checking the DOM for element
+existence** — the value of live visual verification over a purely programmatic check:
+- The sidebar used `flex` `align-items: stretch` by default, so it stretched to match `main`'s content height
+  rather than the viewport — on a page whose main content is taller than the screen (e.g. the home dashboard
+  with its embedded board), the bottom section (Profile/Premium/bell/Log Out, pinned there via `mt-auto`)
+  ended up scrolled far below the fold, unreachable without scrolling past the entire page. Fixed with
+  `sticky top-0 h-screen overflow-y-auto` on the `aside`, so it's always exactly viewport-height and pinned,
+  independent of how tall the page content grows.
+- The notification dropdown always opened downward, which worked fine in its original page-header placement
+  but clips almost entirely off-screen now that the dark variant lives at the very bottom of the sidebar.
+  Fixed: the dark variant opens upward (`bottom-full` instead of `mt-2`); the light variant (still used on
+  pages not yet converted) is unchanged.
+
+**Live verification**: real Playwright run against the real app, real registered user, every converted page
+visited and screenshotted (visually reviewed, not just asserted on) — dark background applied, sidebar
+present and pinned correctly after the fix, sidebar nav actually navigates, notification bell opens
+correctly after the fix, Log Out actually clears the token and redirects. **19/19 checks passed**, zero
+unexpected console errors. `tsc --noEmit` and `next build` both clean; backend suite untouched and confirmed
+still green (381 tests, 39 suites) since this phase is frontend-only.
+
+**Not yet converted** (real, explicit scope note, not silently incomplete): `/clubs`, `/rankings`, `/watch`,
+`/moderation`, `/membership`, `/analysis/[id]`, and the tournament detail page all still use the original
+light styling and lack the sidebar shell — `NotificationBell`'s light-variant default keeps them looking
+correct on their own, just visually inconsistent with the newly-converted pages until they're redesigned too.
+
 ## Repo cleanup notes (Phase 0)
 
 - Original state: 96 branches, 95 open PRs, no `main` — default branch was the auto-named

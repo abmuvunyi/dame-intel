@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BoardState, Move, PieceColor } from '@/lib/draughts';
 import Board from '@/components/game/Board';
+import DashboardShell from '@/components/DashboardShell';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -22,7 +23,7 @@ interface PublicPuzzle {
 // this reads the ?daily=1 param the home dashboard's Daily Puzzle card links here with.
 export default function PuzzlesPage() {
   return (
-    <Suspense fallback={<div className="p-10 text-center">Loading puzzle...</div>}>
+    <Suspense fallback={<div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading puzzle...</div>}>
       <PuzzlesPageInner />
     </Suspense>
   );
@@ -157,43 +158,51 @@ function PuzzlesPageInner() {
     }
   };
 
-  if (!puzzle || !board) return <div className="p-10 text-center">{status}</div>;
+  if (!puzzle || !board) {
+    return (
+      <DashboardShell>
+        <div className="min-h-screen flex items-center justify-center text-slate-400">{status}</div>
+      </DashboardShell>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 gap-4">
-      <div className="flex items-center gap-4">
-        <h1 className="text-3xl font-bold">Draughts Puzzles</h1>
-        {myRating !== null && (
-          <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-semibold">
-            Puzzle rating: {myRating}
-          </span>
-        )}
-      </div>
-      <p className="text-lg text-center max-w-lg">{status}</p>
+    <DashboardShell>
+      <div className="min-h-screen flex flex-col items-center py-10 gap-4 px-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-bold text-slate-100">Draughts Puzzles</h1>
+          {myRating !== null && (
+            <span className="px-3 py-1 bg-indigo-950/40 border border-indigo-800/60 text-indigo-300 rounded-full text-sm font-semibold">
+              Puzzle rating: {myRating}
+            </span>
+          )}
+        </div>
+        <p className="text-lg text-center max-w-lg text-slate-300">{status}</p>
 
-      <Board
-        board={board}
-        myColor={solved || failed ? null : puzzle.turnToMove}
-        currentTurn={solved || failed ? null : turn}
-        legalMoves={legalMoves}
-        lastMove={lastMove}
-        flipped={puzzle.turnToMove === PieceColor.DARK}
-        onMove={handleMove}
-      />
+        <Board
+          board={board}
+          myColor={solved || failed ? null : puzzle.turnToMove}
+          currentTurn={solved || failed ? null : turn}
+          legalMoves={legalMoves}
+          lastMove={lastMove}
+          flipped={puzzle.turnToMove === PieceColor.DARK}
+          onMove={handleMove}
+        />
 
-      <div className="flex gap-4 mt-2">
-        {(solved || failed) && (
-          <button onClick={loadRandomPuzzle} className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-            Next Puzzle
+        <div className="flex gap-4 mt-2">
+          {(solved || failed) && (
+            <button onClick={loadRandomPuzzle} className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">
+              Next Puzzle
+            </button>
+          )}
+          <button onClick={() => router.push('/puzzles/rush')} className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition">
+            Puzzle Storm 🔥
           </button>
-        )}
-        <button onClick={() => router.push('/puzzles/rush')} className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
-          Puzzle Storm 🔥
-        </button>
-        <button onClick={() => router.push('/')} className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
-          Back to Dashboard
-        </button>
+          <button onClick={() => router.push('/')} className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-600 transition">
+            Back to Dashboard
+          </button>
+        </div>
       </div>
-    </div>
+    </DashboardShell>
   );
 }
