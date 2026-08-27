@@ -440,7 +440,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
 
           <button
             onClick={handleFindMatch}
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+            className="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded shadow hover:bg-green-700 transition"
           >
             {tournamentIdToJoin ? 'Find Tournament Match' : 'Play Multiplayer'}
           </button>
@@ -575,7 +575,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
           {gameOver && finishedGameId != null && (
             <button
               onClick={() => router.push(`/analysis/${finishedGameId}`)}
-              className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 text-sm font-semibold transition"
+              className="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 text-sm font-semibold transition"
             >
               Review Game
             </button>
