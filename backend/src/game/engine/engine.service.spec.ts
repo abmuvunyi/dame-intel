@@ -189,6 +189,99 @@ describe('DraughtsEngine: maximum-capture-sequence enforcement (FMJD 4.13, 4.14)
     expect(findMove(moves, [9, 2], [7, 4])).toBeDefined();
     expect(findMove(moves, [9, 6], [7, 8])).toBeDefined();
   });
+
+  // Not an FMJD rule — 4.13 explicitly gives a king no priority over a man here, and
+  // that's this engine's default (see scenario C above: a man's and a king's capture
+  // tie exactly the same way). This block instead covers the opt-in
+  // kingMustCaptureWhenTied house rule some players/traditions use instead.
+  describe('optional kingMustCaptureWhenTied house rule', () => {
+    function buildTiedManAndKingBoard(): BoardState {
+      const board = emptyBoard(10);
+      // Man P: a single 1-piece capture.
+      place(board, 9, 2, PieceColor.LIGHT, PieceType.MAN);
+      place(board, 8, 3, PieceColor.DARK);
+      // (7,4) empty landing for P.
+
+      // King Q: a single 1-piece capture, same length as P's. Q is a FLYING king
+      // (international default) so, left alone, it would have TWO legal landing
+      // squares beyond the captured piece ((7,8) and (6,9)) rather than one — an own
+      // piece at (6,9) blocks the second, keeping this a clean single-capture tie
+      // rather than accidentally exercising FMJD 4.3's free-landing-choice rule too.
+      place(board, 9, 6, PieceColor.LIGHT, PieceType.KING);
+      place(board, 8, 7, PieceColor.DARK);
+      place(board, 6, 9, PieceColor.LIGHT, PieceType.MAN);
+      // (7,8) empty landing for Q.
+      return board;
+    }
+
+    it('defaults to FMJD 4.13/4.14 behavior: both the man\'s and the king\'s tied capture remain legal', () => {
+      const engine = DraughtsEngine.createInternational(); // kingMustCaptureWhenTied not set
+      engine.loadBoard(buildTiedManAndKingBoard(), PieceColor.LIGHT);
+      const moves = engine.getLegalMoves();
+
+      expect(moves).toHaveLength(2);
+      expect(findMove(moves, [9, 2], [7, 4])).toBeDefined(); // the man's capture
+      expect(findMove(moves, [9, 6], [7, 8])).toBeDefined(); // the king's capture
+    });
+
+    it('when enabled, narrows a tie down to the king\'s capture only', () => {
+      const engine = DraughtsEngine.createInternational({ kingMustCaptureWhenTied: true });
+      engine.loadBoard(buildTiedManAndKingBoard(), PieceColor.LIGHT);
+      const moves = engine.getLegalMoves();
+
+      expect(moves).toHaveLength(1);
+      expect(findMove(moves, [9, 6], [7, 8])).toBeDefined(); // the king's capture only
+      expect(findMove(moves, [9, 2], [7, 4])).toBeUndefined(); // the man's capture is filtered out
+    });
+
+    it('when enabled but no king is among the tied captures, every tied capture stays legal (nothing to prefer)', () => {
+      const engine = DraughtsEngine.createInternational({ kingMustCaptureWhenTied: true });
+      const board = emptyBoard(10);
+      // Two men, same as scenario C, no king anywhere on the board.
+      place(board, 9, 2, PieceColor.LIGHT);
+      place(board, 8, 3, PieceColor.DARK);
+      place(board, 9, 6, PieceColor.LIGHT);
+      place(board, 8, 7, PieceColor.DARK);
+      engine.loadBoard(board, PieceColor.LIGHT);
+
+      const moves = engine.getLegalMoves();
+      expect(moves).toHaveLength(2);
+    });
+
+    it('has no effect at all when forceMajorityCapture is off — there is no "maximum" to tie for', () => {
+      const engine = DraughtsEngine.createInternational({ forceMajorityCapture: false, kingMustCaptureWhenTied: true });
+      engine.loadBoard(buildTiedManAndKingBoard(), PieceColor.LIGHT);
+      const moves = engine.getLegalMoves();
+
+      // Both are still 1-capture jumps and forceMajorityCapture is off, so this falls
+      // into the `return jumps;` branch entirely — kingMustCaptureWhenTied is never
+      // even consulted.
+      expect(moves).toHaveLength(2);
+    });
+
+    it('defaults to false for the American variant too, and can be enabled there the same way', () => {
+      const tiedBoard = (): BoardState => {
+        const board = emptyBoard(8);
+        place(board, 7, 0, PieceColor.LIGHT, PieceType.MAN);
+        place(board, 6, 1, PieceColor.DARK);
+        // (5,2) empty landing.
+        place(board, 7, 4, PieceColor.LIGHT, PieceType.KING);
+        place(board, 6, 5, PieceColor.DARK);
+        // (5,6) empty landing.
+        return board;
+      };
+
+      const defaultEngine = DraughtsEngine.createAmerican({ forceMajorityCapture: true });
+      defaultEngine.loadBoard(tiedBoard(), PieceColor.LIGHT);
+      expect(defaultEngine.getLegalMoves()).toHaveLength(2);
+
+      const houseRuleEngine = DraughtsEngine.createAmerican({ forceMajorityCapture: true, kingMustCaptureWhenTied: true });
+      houseRuleEngine.loadBoard(tiedBoard(), PieceColor.LIGHT);
+      const moves = houseRuleEngine.getLegalMoves();
+      expect(moves).toHaveLength(1);
+      expect(findMove(moves, [7, 4], [5, 6])).toBeDefined(); // the king's capture only
+    });
+  });
 });
 
 describe('DraughtsEngine: flying king "turning a corner" mid-capture (FMJD 4.6)', () => {

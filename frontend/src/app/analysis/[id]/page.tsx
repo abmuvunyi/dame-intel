@@ -227,11 +227,12 @@ export default function AnalysisPage() {
     ? upcomingMoveReview.bestMove
     : null;
 
-  // Matches the board's own rendered size (see cellClass below: 64px cells + 4px
-  // border + 4px padding per side for 8x8, 48px cells for 10x10) so the eval bar
-  // sits flush against the board rather than floating at some unrelated height.
+  // Matches the board's own rendered size (see cellClass below: 80px cells for 8x8,
+  // 64px cells for 10x10, plus the board's own 4px border + 4px padding per side) so
+  // the eval bar sits flush against the board rather than floating at some unrelated
+  // height.
   const is10x10Board = currentBoard.length === 10;
-  const boardHeightPx = is10x10Board ? 10 * 48 + 16 : 8 * 64 + 16;
+  const boardHeightPx = is10x10Board ? 10 * 64 + 16 : 8 * 80 + 16;
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
@@ -305,11 +306,14 @@ export default function AnalysisPage() {
                     if (isBestMoveFrom) squareBg = 'bg-blue-400';
                     if (isBestMoveTo) squareBg = 'bg-green-400 opacity-90';
 
-                    // Dynamically adjust sizes for 10x10 boards
+                    // Board/king visual pass (matches Board.tsx's own treatment):
+                    // a bigger board (12/16 -> 16/20) and a king shown as a gold
+                    // ring + crown glyph rather than a second stacked disc of the
+                    // same color, which read as just another man at a glance.
                     const is10x10 = currentBoard.length === 10;
-                    const cellClass = is10x10 ? 'w-12 h-12' : 'w-16 h-16';
-                    const pieceClass = is10x10 ? 'w-10 h-10 border-2' : 'w-12 h-12 border-4';
-                    const stackClass = is10x10 ? 'w-10 h-10 border-2 absolute -top-1 -left-1' : 'w-12 h-12 border-4 absolute -top-1.5 -left-1.5';
+                    const cellClass = is10x10 ? 'w-16 h-16' : 'w-20 h-20';
+                    const pieceClass = is10x10 ? 'w-[52px] h-[52px] border-2' : 'w-16 h-16 border-4';
+                    const isKing = cell?.type === PieceType.KING;
 
                     return (
                       <div
@@ -320,14 +324,10 @@ export default function AnalysisPage() {
                           <div className={`
                             ${pieceClass} rounded-full shadow-md flex items-center justify-center text-white font-bold
                             ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                            ${cell.type === PieceType.KING ? 'absolute bottom-1 right-1' : ''}
+                            ${isKing ? 'ring-4 ring-amber-400 shadow-amber-400/70 shadow-lg' : ''}
                           `}>
-                            {/* Stacked piece visual for King */}
-                            {cell.type === PieceType.KING && (
-                              <div className={`
-                                ${stackClass} rounded-full shadow-md
-                                ${cell.color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}
-                              `} />
+                            {isKing && (
+                              <span className="pointer-events-none select-none leading-none text-2xl">👑</span>
                             )}
                           </div>
                         )}

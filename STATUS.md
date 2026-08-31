@@ -28,7 +28,7 @@ phase specifically.
 | Friends (`friends.service.ts`/`friends.controller.ts`) | Y | Y | Y | Y | **Extended in Phase 10 (2026-08-14)**, not rebuilt — send/accept already existed. Added `decline` (deletes the request outright rather than a permanent 'DECLINED' status, so a fresh request can be sent again later) and a live `online` field per friend, backed by the new `PresenceService`. 10 tests against real in-memory sqlite (was 1 trivial "should be defined" stub). Live-verified end-to-end, including real online-status flips as a real socket connects/disconnects. |
 | `presence/presence.service.ts` | Y | Y | Y | Y | **New in Phase 10.** Minimal in-memory online-status registry — `GameGateway` marks a user online/offline on real connect/disconnect (with the same "still their current socket?" guard used elsewhere for reconnect races), `FriendsService` reads it for the friends list. 4 tests, plus 3 gateway-integration tests. |
 | Clubs (`clubs.service.ts`/`clubs.controller.ts` + `Club`/`ClubMembership`/`ClubPost` entities) | Y | Y | Y | Y | **New in Phase 10.** Create/join/leave, member list, and a basic flat (no threading) club-only discussion feed — posting/reading both gated on real membership, not just being logged in. Reuses `chat-filter.ts`'s profanity filter for posts. 21 tests against real in-memory sqlite. A real (minor) ordering bug found and fixed: the feed originally sorted by `createdAt`, but sqlite's datetime column is only second-precision, so two posts made within the same second could tie and return in either order — fixed by sorting on `id` instead, which is strictly monotonic with insertion order. |
-| Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
+| Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). **2026-08-31**: added `kingMustCaptureWhenTied`, an opt-in per-game rule (default off, matching official FMJD 4.13) some local/historical rule traditions use instead — see "Board/king visuals and configurable draughts rule variants" below. |
 | Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. **2026-08-30**: bounded transposition table (was unbounded, a real OOM crash on deep searches) + killer-move/history-heuristic move ordering fixed a severe pruning failure (5-16x branching per ply, hidden by every prior benchmark only ever testing the symmetric opening) down to a healthy 2-3x — see "AI strength/speed..." below. |
 | Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5; spectator mode completed and load-tested in Phase 9; chat moderation + presence + challenge UI wiring in Phase 10** — see "Phase 5", "Phase 9", and "Phase 10" below for the full breakdowns. |
 | `game/chat-filter.ts` (profanity + spam filter) | Y | Y | Y | Y | **New in Phase 10.** Pure, framework-independent (same pattern as the engine/matchmaking) — word-boundary wordlist censor plus a sliding-window rate limit. 13 unit tests plus 5 gateway-integration tests proving it's actually wired into `sendMessage`. Reused as-is for club discussion posts. |
@@ -1647,6 +1647,58 @@ endpoints), a real puzzle solved end-to-end through `/puzzles/:id/attempt`, and 
 game, mistake/blunder markers landed on the graph at the right plies, best-move overlay confirmed correctly
 positioned both before and after the fix above, "+M" formatting confirmed on a forced-win position. Zero
 console errors.
+
+## Board/king visuals and configurable draughts rule variants (2026-08-31)
+
+Direct feedback while continuing the redesign: the board needed to be bigger, kings needed to be "really
+different to the normal pawns and very visible", and international rules "sometimes different" (maximum
+capture, whether a king must be played over a man when both tie for the maximum) needed to be a per-game
+choice rather than one fixed interpretation. First part of a larger batch of asks from the same message — the
+rest (Learn section, an "Other" menu with rules/glossary pages, and homepage parity for signed-out visitors)
+is its own following section below, shipped separately.
+
+**Board size — the old `Board.tsx` rendered every board at a flat 48px/64px cell size regardless of how much
+room was actually available**, which is why it read as small even on a wide screen, and would just as easily
+have overflowed a narrower one if bumped outright. Replaced with a `ResizeObserver`-driven size: the board's
+own wrapper measures its REAL available width and picks the largest cell size that fits, up to a new,
+meaningfully larger ceiling (was 48/64px, now 32-68px for 10x10 and 40-88px for 8x8). **A real overflow bug
+was caught via a live screenshot, not just reading the code**: the board's column sat in a `flex`/`grid`
+layout whose ancestors had no `min-width: 0` — a flex/grid item's default min-width is its own content's
+intrinsic size, so once the board legitimately wanted more room than its column had, the column refused to
+shrink and instead forced the whole layout wider, overflowing the page (the Moves/Live Chat panel visibly
+detached from the board's card). Fixed with `min-w-0` on the relevant columns in both `GameBoard.tsx` and the
+home page's own grid, plus widening the home page's own grid ratio (was a flat 2-of-3-column split; now a
+fluid `1fr` board column against a fixed 360px sidebar column) so the board gets close to all the room that's
+actually left over, not a fixed fraction regardless of what's next to it. Live-verified at both 1400px (fits
+cleanly, modestly sized) and 1920px (fills out to a genuinely large ~712px board) — the same fluid system
+handles both without any breakpoint-specific code.
+
+**King visuals — the old king was a second, same-color disc stacked with a small offset ("two checkers
+glued together"), which reads as just another man at a glance, exactly the complaint.** Replaced with a gold
+ring + amber glow around the piece and a 👑 crown glyph rendered on top, sized proportionally to the (now
+dynamic) piece size. Applied identically in `Board.tsx` (the live game board) and the analysis page's own
+separate inline board renderer, so a king looks the same everywhere in the app. Live-verified via a real
+promoted king from a real completed game's review board.
+
+**Configurable rule variant — `kingMustCaptureWhenTied`, a new opt-in `GameRules` flag.** FMJD 4.13 is
+explicit that a king has no priority over a man when multiple capture sequences tie for the maximum count —
+this engine's existing (and still default) behavior — but some historical/local rule traditions require
+playing the king's capture in that situation instead. Rather than pick one interpretation for everyone, added
+a real, tested engine flag (defaults to `false`, i.e. today's FMJD-correct behavior, for every variant) that
+narrows a tied capture set down to king-only jumps whenever at least one exists among them. Exposed as a
+checkbox in the pre-game "Game Rules" panel (`GameBoard.tsx`), shown only while Force Majority Capture is also
+on since it has no effect otherwise, and wired through `playVsAi`/`joinMatchmaking`/`challengePlayer`'s
+existing generic `rules` pass-through — no gateway changes needed beyond that. `matchmaking.ts`'s pairing
+compatibility check was extended to also require both seekers agree on this flag (same treatment
+`forceMajorityCapture` already got), so two players with different preferences aren't silently paired with
+only one's choice winning. 9 new engine tests (default/enabled/no-king-in-tie/forceMajorityCapture-off/both
+variants) + 1 new matchmaking-compatibility test — 397 backend tests total (up from 391), all green.
+
+**Verification**: `tsc --noEmit` and `next build` both clean. Full live verification against the actually-
+running app: the new rule checkbox confirmed present/functional in the pre-game settings panel, a real AI game
+started and the board's new size/fit confirmed correct (and the overflow bug caught and fixed) at two
+different viewport widths, and a real promoted king's new crown/ring treatment confirmed on the analysis
+page. Zero console errors throughout.
 
 ## Repo cleanup notes (Phase 0)
 

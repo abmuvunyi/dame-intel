@@ -1,7 +1,7 @@
 import { findMatch, ratingBandFor, sweepMatches, SeekEntry } from './matchmaking';
 
-const VARIANT_10 = { boardSize: 10, forceMajorityCapture: true };
-const VARIANT_8 = { boardSize: 8, forceMajorityCapture: false };
+const VARIANT_10 = { boardSize: 10, forceMajorityCapture: true, kingMustCaptureWhenTied: false };
+const VARIANT_8 = { boardSize: 8, forceMajorityCapture: false, kingMustCaptureWhenTied: false };
 
 function entry(overrides: Partial<SeekEntry>): SeekEntry {
   return {
@@ -68,6 +68,12 @@ describe('findMatch', () => {
   it('does not match different board sizes/variants even with identical rating', () => {
     const me = entry({ id: 'a', rating: 1200, joinedAt: 0, variant: VARIANT_10 });
     const opponent = entry({ id: 'b', rating: 1200, joinedAt: 0, variant: VARIANT_8 });
+    expect(findMatch(me, [opponent], 0)).toBeNull();
+  });
+
+  it('does not match players who disagree on the kingMustCaptureWhenTied house rule, even with an otherwise identical variant', () => {
+    const me = entry({ id: 'a', rating: 1200, joinedAt: 0, variant: VARIANT_10 });
+    const opponent = entry({ id: 'b', rating: 1200, joinedAt: 0, variant: { ...VARIANT_10, kingMustCaptureWhenTied: true } });
     expect(findMatch(me, [opponent], 0)).toBeNull();
   });
 
