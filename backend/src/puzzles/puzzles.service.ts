@@ -3,10 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Puzzle } from './puzzle.entity';
 import { PlayerPuzzleRating } from './player-puzzle-rating.entity';
-import { PieceColor, PieceType, Move, BoardState, DraughtsEngine } from '../game/engine/engine.service';
+import { PieceColor, Move, BoardState, DraughtsEngine } from '../game/engine/engine.service';
 import { updateRating, GLICKO2_DEFAULTS } from '../rating/glicko2';
 import { sameMove } from './move-utils';
 import { hashDateToIndex } from './daily-puzzle';
+import { PuzzleGeneratorService } from './puzzle-generator.service';
 
 export interface PuzzleAttemptResult {
   correct: boolean;
@@ -41,14 +42,20 @@ export class PuzzlesService implements OnModuleInit {
     private puzzlesRepository: Repository<Puzzle>,
     @InjectRepository(PlayerPuzzleRating)
     private playerRatingRepository: Repository<PlayerPuzzleRating>,
+    private puzzleGeneratorService: PuzzleGeneratorService,
   ) {}
 
   async onModuleInit() {
-    // Seed initial puzzles if none exist
+    // Seed initial puzzles if none exist. Self-played and scanned for real tactical/
+    // positional moments (see PuzzleGeneratorService.seedFromSelfPlay) rather than a
+    // handful of hand-authored, artificial 2-3-piece toy positions — this used to be
+    // ~4 hardcoded puzzles, none of which were real middlegame or proper endgame
+    // material, exactly the complaint this rewrite fixes.
     const count = await this.puzzlesRepository.count();
     if (count === 0) {
-      console.log('Seeding initial draughts puzzles...');
-      await this.seedPuzzles();
+      console.log('Seeding initial draughts puzzles via self-play...');
+      const result = await this.puzzleGeneratorService.seedFromSelfPlay();
+      console.log(`Seeded ${result.puzzlesCreated} puzzles from ${result.gamesPlayed} self-played games.`);
     }
   }
 
@@ -247,37 +254,4 @@ export class PuzzlesService implements OnModuleInit {
     }
   }
 
-  private async seedPuzzles() {
-    // Puzzle 1: Basic forced capture for Light
-    const board1: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
-    board1[4][3] = { color: PieceColor.DARK, type: PieceType.MAN };
-    board1[5][4] = { color: PieceColor.LIGHT, type: PieceType.MAN };
-    const move1: Move = { from: { row: 5, col: 4 }, to: { row: 3, col: 2 }, captured: [{ row: 4, col: 3 }] };
-    const p1 = this.puzzlesRepository.create({ difficulty: 1, boardSize: 8, board: board1, turnToMove: 'L', solution: [move1] });
-
-    // Puzzle 2: Multi-jump
-    const board2: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
-    board2[2][1] = { color: PieceColor.DARK, type: PieceType.MAN };
-    board2[4][3] = { color: PieceColor.DARK, type: PieceType.MAN };
-    board2[5][4] = { color: PieceColor.LIGHT, type: PieceType.MAN };
-    const move2: Move = { from: { row: 5, col: 4 }, to: { row: 1, col: 0 }, captured: [{ row: 4, col: 3 }, { row: 2, col: 1 }] };
-    const p2 = this.puzzlesRepository.create({ difficulty: 2, boardSize: 8, board: board2, turnToMove: 'L', solution: [move2] });
-
-    // Puzzle 3: King Multi-Jump (Hard)
-    const board3: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
-    board3[7][0] = { color: PieceColor.LIGHT, type: PieceType.KING };
-    board3[6][1] = { color: PieceColor.DARK, type: PieceType.MAN };
-    board3[4][3] = { color: PieceColor.DARK, type: PieceType.KING };
-    const move3: Move = { from: { row: 7, col: 0 }, to: { row: 3, col: 4 }, captured: [{ row: 6, col: 1 }, { row: 4, col: 3 }] };
-    const p3 = this.puzzlesRepository.create({ difficulty: 3, boardSize: 8, board: board3, turnToMove: 'L', solution: [move3] });
-
-    // Puzzle 4: Dark to Move - simple jump to win
-    const board4: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
-    board4[1][4] = { color: PieceColor.DARK, type: PieceType.MAN };
-    board4[2][3] = { color: PieceColor.LIGHT, type: PieceType.MAN };
-    const move4: Move = { from: { row: 1, col: 4 }, to: { row: 3, col: 2 }, captured: [{ row: 2, col: 3 }] };
-    const p4 = this.puzzlesRepository.create({ difficulty: 1, boardSize: 8, board: board4, turnToMove: 'D', solution: [move4] });
-
-    await this.puzzlesRepository.save([p1, p2, p3, p4]);
-  }
 }

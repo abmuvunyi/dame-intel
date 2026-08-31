@@ -2,8 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { PuzzlesService } from './puzzles.service';
+import { PuzzleGeneratorService } from './puzzle-generator.service';
+import { AiService } from '../game/ai/ai/ai.service';
 import { Puzzle } from './puzzle.entity';
 import { PlayerPuzzleRating } from './player-puzzle-rating.entity';
+import { GameHistory } from '../history/history.entity';
+import { User } from '../users/user.entity';
 import { PieceColor, PieceType, BoardState, Move } from '../game/engine/engine.service';
 import { GLICKO2_DEFAULTS } from '../rating/glicko2';
 
@@ -13,7 +17,11 @@ function emptyBoard(size: number): BoardState {
 
 // Real in-memory sqlite, same reasoning as rating.service.spec.ts — this exercises
 // genuine persistence and, more importantly, genuine engine-backed move validation,
-// not a mocked repository standing in for "trust me, it's right".
+// not a mocked repository standing in for "trust me, it's right". PuzzleGeneratorService
+// (real, not mocked — PuzzlesService now depends on it for seeding, see
+// onModuleInit/seedFromSelfPlay) needs GameHistory registered too, and AiService, even
+// though none of these tests actually trigger seeding themselves (NestJS's
+// TestingModule.compile() alone doesn't invoke onModuleInit — only .init() would).
 describe('PuzzlesService', () => {
   let service: PuzzlesService;
 
@@ -23,12 +31,12 @@ describe('PuzzlesService', () => {
         TypeOrmModule.forRoot({
           type: 'sqlite',
           database: ':memory:',
-          entities: [Puzzle, PlayerPuzzleRating],
+          entities: [Puzzle, PlayerPuzzleRating, GameHistory, User],
           synchronize: true,
         }),
-        TypeOrmModule.forFeature([Puzzle, PlayerPuzzleRating]),
+        TypeOrmModule.forFeature([Puzzle, PlayerPuzzleRating, GameHistory]),
       ],
-      providers: [PuzzlesService],
+      providers: [PuzzlesService, PuzzleGeneratorService, AiService],
     }).compile();
 
     service = module.get<PuzzlesService>(PuzzlesService);

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useParams, useRouter } from 'next/navigation';
 import { PieceColor, PieceType } from '@/lib/draughts';
+import EvalBar from '@/components/game/EvalBar';
+import EvalGraph from '@/components/game/EvalGraph';
 
 // Simplified local engine state just for replaying moves
 class ReplayEngine {
@@ -198,6 +200,39 @@ export default function AnalysisPage() {
     ? review?.moveReviews?.find((m: any) => m.moveIndex === currentMoveIndex - 1)
     : null;
 
+  // The eval bar's reading for whatever position is currently showing: the starting
+  // position is a known, symmetric 0 (no move has been made yet to have a stored
+  // review for); every later position's evaluation is the LIGHT-normalized value
+  // GameReviewService already computed and stored alongside that move's
+  // classification — see game-review.entity.ts's MoveReview.evaluation. `null` (not
+  // 0) whenever the review genuinely isn't ready yet, so the bar can tell "even
+  // position" apart from "no data yet" instead of defaulting to a misleading 50/50.
+  const currentEvaluation: number | null = currentMoveIndex === 0
+    ? 0
+    : (currentMoveReview ? currentMoveReview.evaluation : null);
+
+  // Auto-surface the engine's own best move the moment a review is available and the
+  // move about to be played FROM this position wasn't it — the same "here's what you
+  // should play instead" signal chess.com shows automatically on a mistake/blunder,
+  // not gated behind manually clicking "Run Engine". Deliberately keyed by
+  // moveIndex === currentMoveIndex (the move this position is ABOUT to produce), not
+  // currentMoveReview above (moveIndex === currentMoveIndex - 1, the move that
+  // already produced this position) — that review's bestMove is a move from the
+  // PREVIOUS position, and would overlay onto totally unrelated squares here. Falls
+  // back to the on-demand evaluations panel's own top pick otherwise (e.g. review not
+  // ready yet, this is the final position with no next move, or the move actually
+  // played from here WAS best and there's nothing to point out).
+  const upcomingMoveReview = review?.moveReviews?.find((m: any) => m.moveIndex === currentMoveIndex);
+  const reviewBestMove = upcomingMoveReview && upcomingMoveReview.classification !== 'BEST'
+    ? upcomingMoveReview.bestMove
+    : null;
+
+  // Matches the board's own rendered size (see cellClass below: 64px cells + 4px
+  // border + 4px padding per side for 8x8, 48px cells for 10x10) so the eval bar
+  // sits flush against the board rather than floating at some unrelated height.
+  const is10x10Board = currentBoard.length === 10;
+  const boardHeightPx = is10x10Board ? 10 * 48 + 16 : 8 * 64 + 16;
+
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4 flex flex-col items-center">
       <div className="w-full max-w-5xl flex justify-between items-center mb-8">
@@ -247,8 +282,11 @@ export default function AnalysisPage() {
 
       <div className="w-full max-w-5xl flex flex-col md:flex-row gap-8">
 
-        {/* Left side: Board */}
+        {/* Left side: Eval bar + Board */}
         <div className="flex flex-col items-center">
+          <div className="flex items-start gap-3">
+            <EvalBar evaluation={currentEvaluation} heightPx={boardHeightPx} />
+            <div>
             <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-4">
               {currentBoard.map((row: any[], r: number) => (
                 <div key={r} className="flex">
@@ -256,8 +294,11 @@ export default function AnalysisPage() {
                     const isDarkSquare = (r + c) % 2 !== 0;
                     let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
 
-                    // Highlight the best move calculated by the engine if available
-                    const bestMove = evaluations.length > 0 ? evaluations[0].move : null;
+                    // Highlight the best move: prefer the stored review's own best
+                    // move (available immediately, no click needed — see
+                    // reviewBestMove above) and fall back to the on-demand "Run
+                    // Engine" panel's top pick.
+                    const bestMove = reviewBestMove || (evaluations.length > 0 ? evaluations[0].move : null);
                     const isBestMoveFrom = bestMove && bestMove.from.row === r && bestMove.from.col === c;
                     const isBestMoveTo = bestMove && bestMove.to.row === r && bestMove.to.col === c;
 
@@ -296,6 +337,8 @@ export default function AnalysisPage() {
                 </div>
               ))}
             </div>
+            </div>
+          </div>
 
             <div className="flex gap-4">
                <button onClick={prevMove} disabled={currentMoveIndex === 0} className="px-6 py-2 bg-gray-800 text-white rounded disabled:opacity-50">Previous Move</button>
@@ -310,18 +353,24 @@ export default function AnalysisPage() {
               )}
             </div>
 
-            {/* Move-by-move classification strip — click any dot to jump straight to
-                that position. Only rendered once the review has real data. */}
+            {/* Full-game evaluation graph — the eval bar's reading plotted across
+                every ply, with mistake/blunder markers landing right where the swing
+                actually happened. Click anywhere to jump straight to that position;
+                replaces the old plain classification-dot strip with something that
+                actually shows the shape of the game, not just a row of colored
+                dots. */}
             {review?.moveReviews && review.moveReviews.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1 max-w-md justify-center">
-                {review.moveReviews.map((mr: any) => (
-                  <button
-                    key={mr.moveIndex}
-                    title={`Move ${mr.moveIndex + 1}: ${CLASSIFICATION_STYLE[mr.classification].label}`}
-                    onClick={() => { setCurrentMoveIndex(mr.moveIndex + 1); setEvaluations([]); setDepthInfo(null); }}
-                    className={`w-3 h-3 rounded-full ${CLASSIFICATION_STYLE[mr.classification].dot} ${currentMoveIndex === mr.moveIndex + 1 ? 'ring-2 ring-offset-1 ring-slate-500' : ''}`}
-                  />
-                ))}
+              <div className="mt-3 w-full max-w-md">
+                <EvalGraph
+                  moveReviews={review.moveReviews}
+                  totalMoves={boardStates.length - 1}
+                  currentMoveIndex={currentMoveIndex}
+                  onSelectMove={(idx: number) => { setCurrentMoveIndex(idx); setEvaluations([]); setDepthInfo(null); }}
+                />
+                <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-400 justify-center">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Mistake</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Blunder</span>
+                </div>
               </div>
             )}
         </div>

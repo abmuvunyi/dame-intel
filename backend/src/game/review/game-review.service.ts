@@ -91,11 +91,19 @@ export class GameReviewService {
             // analyzePosition() already sorts best-first, so this is never negative
             // in practice; clamped defensively rather than assumed.
             const evalDelta = Math.max(0, bestEval - playedEntry.evaluation);
+            // playedEntry.evaluation is from `mover`'s own perspective (see
+            // AiService.searchRoot/evaluateBoard — every leaf is scored relative to
+            // whoever was on move at the root). Flip it onto a fixed LIGHT-positive
+            // axis so the eval bar has one consistent direction across the whole
+            // game instead of alternating meaning every ply.
+            const evaluation = mover === PieceColor.LIGHT ? playedEntry.evaluation : -playedEntry.evaluation;
             moveReviews.push({
               moveIndex: i,
               mover,
               classification: classifyMove(evalDelta),
               evalDelta,
+              evaluation,
+              bestMove: evaluations[0].move,
             });
           }
           // If the recorded move isn't found among the engine's own legal moves at

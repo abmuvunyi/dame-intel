@@ -9,6 +9,7 @@ import { PlayerPuzzleRating } from './player-puzzle-rating.entity';
 import { PuzzleRushSession } from './puzzle-rush-session.entity';
 import { GameHistory } from '../history/history.entity';
 import { UsersModule } from '../users/users.module';
+import { AiService } from '../game/ai/ai/ai.service';
 
 @Module({
   imports: [
@@ -19,7 +20,12 @@ import { UsersModule } from '../users/users.module';
     TypeOrmModule.forFeature([Puzzle, PlayerPuzzleRating, PuzzleRushSession, GameHistory]),
     UsersModule, // Phase 13: needed to resolve a caller's membership tier for premium-puzzle gating
   ],
-  providers: [PuzzlesService, PuzzleRushService, PuzzleGeneratorService],
+  // AiService has no dependencies of its own (see ai.service.ts), so providing it
+  // again here — rather than importing GameModule, which doesn't export it — is the
+  // simplest correct wiring; NestJS gives this module its own instance, which is
+  // fine since AiService carries no state across calls beyond what each top-level
+  // search call itself resets.
+  providers: [PuzzlesService, PuzzleRushService, PuzzleGeneratorService, AiService],
   controllers: [PuzzlesController],
   exports: [PuzzlesService],
 })

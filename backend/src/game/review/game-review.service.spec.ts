@@ -112,6 +112,40 @@ describe('GameReviewService: real end-to-end analysis', () => {
     }
   });
 
+  it('normalizes each move\'s evaluation onto a fixed LIGHT-positive axis, and records the engine\'s own best move at every ply', async () => {
+    const { savedGame, moves, SUBOPTIMAL_PLY } = await playGameWithOneDeliberateMistake();
+    await service.analyzeCompletedGame(savedGame.id);
+    const review = await service.getReview(savedGame.id);
+
+    for (const mr of review!.moveReviews!) {
+      expect(typeof mr.evaluation).toBe('number');
+      expect(mr.bestMove).not.toBeNull();
+    }
+
+    // Direct perspective check, re-derived independently from the real AiService
+    // rather than hardcoded: for every move except the deliberate mistake, the move
+    // actually played WAS the engine's own best move, so its own-perspective eval is
+    // exactly evaluations[0].evaluation at that ply. Confirm the review's stored,
+    // LIGHT-normalized `evaluation` matches that value directly for LIGHT-moved plies
+    // and negated for DARK-moved plies — proving the sign flip actually happens, not
+    // just that some number got stored.
+    const rules = { boardSize: 8, variant: 'american' as const };
+    const replay = new DraughtsEngine(rules);
+    for (let i = 0; i < moves.length; i++) {
+      const mover = replay.getCurrentTurn();
+      const mr = review!.moveReviews!.find(m => m.moveIndex === i)!;
+      expect(mr.mover).toBe(mover);
+
+      if (i !== SUBOPTIMAL_PLY) {
+        const evaluations = aiService.analyzePosition(replay, 4);
+        const ownPerspectiveEval = evaluations[0].evaluation;
+        const expectedNormalized = mover === PieceColor.LIGHT ? ownPerspectiveEval : -ownPerspectiveEval;
+        expect(mr.evaluation).toBe(expectedNormalized);
+      }
+      replay.makeMove(moves[i]);
+    }
+  });
+
   it('computes a lower accuracy for the side that played the deliberate mistake than for the side that never deviated from best', async () => {
     const { savedGame, SUBOPTIMAL_PLY } = await playGameWithOneDeliberateMistake();
     await service.analyzeCompletedGame(savedGame.id);
