@@ -1,12 +1,25 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
 import { MoveClassification } from './move-classification';
-import { PieceColor } from '../engine/engine.service';
+import { PieceColor, Move } from '../engine/engine.service';
 
 export interface MoveReview {
   moveIndex: number;
   mover: PieceColor;
   classification: MoveClassification;
   evalDelta: number; // >= 0, in AiService.evaluateBoard()'s units (WEIGHT_MAN = 10)
+  // The position's evaluation immediately AFTER this move, normalized to LIGHT's
+  // perspective (positive = good for Light, negative = good for Dark) regardless of
+  // who actually moved — AiService.analyzePosition() reports evaluations from the
+  // MOVER's own perspective, which flips sign every ply; a chess.com-style eval bar
+  // needs one consistent axis across the whole game, not one that flips direction
+  // every other entry. Same units as evalDelta (WEIGHT_MAN = 10).
+  evaluation: number;
+  // The engine's own top-rated move at this position (before `move` was played) —
+  // lets the frontend show "here's what you should have played" directly on the
+  // board without a separate on-demand analysis request, same data source evalDelta
+  // already comes from. Null only if the engine found no legal moves at all (should
+  // never happen for a position with a move actually played there).
+  bestMove: Move | null;
 }
 
 // One row per analyzed game — "don't recompute on every view" (Phase 11 brief) means

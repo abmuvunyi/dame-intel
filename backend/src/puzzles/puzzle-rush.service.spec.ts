@@ -3,9 +3,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { PuzzleRushService } from './puzzle-rush.service';
 import { PuzzlesService } from './puzzles.service';
+import { PuzzleGeneratorService } from './puzzle-generator.service';
+import { AiService } from '../game/ai/ai/ai.service';
 import { Puzzle } from './puzzle.entity';
 import { PlayerPuzzleRating } from './player-puzzle-rating.entity';
 import { PuzzleRushSession } from './puzzle-rush-session.entity';
+import { GameHistory } from '../history/history.entity';
+import { User } from '../users/user.entity';
 import { PieceColor, PieceType, BoardState, Move } from '../game/engine/engine.service';
 
 function emptyBoard(size: number): BoardState {
@@ -33,12 +37,12 @@ describe('PuzzleRushService', () => {
       imports: [
         TypeOrmModule.forRoot({
           type: 'sqlite', database: ':memory:',
-          entities: [Puzzle, PlayerPuzzleRating, PuzzleRushSession],
+          entities: [Puzzle, PlayerPuzzleRating, PuzzleRushSession, GameHistory, User],
           synchronize: true,
         }),
-        TypeOrmModule.forFeature([Puzzle, PlayerPuzzleRating, PuzzleRushSession]),
+        TypeOrmModule.forFeature([Puzzle, PlayerPuzzleRating, PuzzleRushSession, GameHistory]),
       ],
-      providers: [PuzzleRushService, PuzzlesService],
+      providers: [PuzzleRushService, PuzzlesService, PuzzleGeneratorService, AiService],
     }).compile();
 
     rushService = module.get<PuzzleRushService>(PuzzleRushService);

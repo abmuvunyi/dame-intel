@@ -29,7 +29,7 @@ phase specifically.
 | `presence/presence.service.ts` | Y | Y | Y | Y | **New in Phase 10.** Minimal in-memory online-status registry — `GameGateway` marks a user online/offline on real connect/disconnect (with the same "still their current socket?" guard used elsewhere for reconnect races), `FriendsService` reads it for the friends list. 4 tests, plus 3 gateway-integration tests. |
 | Clubs (`clubs.service.ts`/`clubs.controller.ts` + `Club`/`ClubMembership`/`ClubPost` entities) | Y | Y | Y | Y | **New in Phase 10.** Create/join/leave, member list, and a basic flat (no threading) club-only discussion feed — posting/reading both gated on real membership, not just being logged in. Reuses `chat-filter.ts`'s profanity filter for posts. 21 tests against real in-memory sqlite. A real (minor) ordering bug found and fixed: the feed originally sorted by `createdAt`, but sqlite's datetime column is only second-precision, so two posts made within the same second could tie and return in either order — fixed by sorting on `id` instead, which is strictly monotonic with insertion order. |
 | Game engine (`game/engine/engine.service.ts`) | Y | Y | Y | Y | **Rebuilt in Phase 2 (2026-08-10).** 27 tests, all passing, covering every category the plan doc requires: forced capture, maximum-capture-sequence (3 scenarios grounded in FMJD Annex 1 articles 4.13/4.14, plus a 4th covering the king "corner-turn" rule at 4.6), multi-jump chains, king promotion mid-chain (4.15), flying vs. non-flying kings, and draw detection (6.1 threefold repetition, 6.2 no-progress rule) for both variants. Two real bugs fixed: kings always flew regardless of board size (should be non-flying for 8x8 American), and men always allowed backward captures regardless of variant (American men should be forward-only). Still framework-independent (no NestJS imports). |
-| Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. |
+| Game AI (`game/ai/ai/ai.service.ts`) | Y | Y | Y | Y | **Reconnected in Phase 3.** Needed no source changes at all — it already went through `engine.getRules()`/`getLegalMoves()`/`makeMove()`, all of which kept their signatures. Verified for real, not just by reading: added a full AI-vs-AI self-play test for each variant (see "Phase 3" below) asserting every single move the AI plays is accepted by the engine's own validation. **2026-08-30**: bounded transposition table (was unbounded, a real OOM crash on deep searches) + killer-move/history-heuristic move ordering fixed a severe pruning failure (5-16x branching per ply, hidden by every prior benchmark only ever testing the symmetric opening) down to a healthy 2-3x — see "AI strength/speed..." below. |
 | Game gateway (WebSocket, matchmaking/spectate/chat) | Y | Y | Y | Y | **Reconnected in Phase 3; matchmaking/clocks/reconnect built in Phase 5; spectator mode completed and load-tested in Phase 9; chat moderation + presence + challenge UI wiring in Phase 10** — see "Phase 5", "Phase 9", and "Phase 10" below for the full breakdowns. |
 | `game/chat-filter.ts` (profanity + spam filter) | Y | Y | Y | Y | **New in Phase 10.** Pure, framework-independent (same pattern as the engine/matchmaking) — word-boundary wordlist censor plus a sliding-window rate limit. 13 unit tests plus 5 gateway-integration tests proving it's actually wired into `sendMessage`. Reused as-is for club discussion posts. |
 | Direct challenges (`challengePlayer`/`respondToChallenge`) | Y | N (pre-existing) | — | Y | **Backend built in Phase 5, frontend UI built in Phase 10.** No new backend tests added this phase (mechanism itself untouched) — live-verified instead, including the full real two-browser accept flow. See "Phase 10" below. |
@@ -41,7 +41,7 @@ phase specifically.
 | Moderator review queue (`GET/POST /anticheat/admin/*`) | Y | Y | Y | Y | **New in Phase 12.** No admin-role system exists in this codebase (same documented simplification as Phase 7's puzzle admin routes and Phase 8b's tournament lifecycle routes) — lists flags, and applies a moderator's decision. Explicitly the *only* code path that can ever write `User.moderationStatus` — the detection methods themselves never do. |
 | Graduated response (`User.moderationStatus`/`tempBanUntil`) | Y | Y | Y | Y | **New in Phase 12.** WARNED/RATING_RESET_FLAGGED/TEMP_BANNED/PERMA_BANNED states, settable only via the moderator endpoint above. Real enforcement wired at both `AuthService.signIn` (login rejected) and `GameGateway.handleConnection` (WebSocket authentication rejected) — live-verified end-to-end, not just scaffolding that sits unused. |
 | `game/review/move-classification.ts` | Y | Y | Y | Y | **New in Phase 11.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter) — explicit, documented eval-delta thresholds classify each move as BEST/GOOD/INACCURACY/MISTAKE/BLUNDER, plus a simple credit-weighted accuracy-percentage formula. 14 tests covering every threshold boundary on both sides and the accuracy formula's edge cases. See "Phase 11" below for the exact thresholds and their reasoning. |
-| `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. |
+| `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. **2026-08-30**: `MoveReview` gained `evaluation` (LIGHT-normalized, for a chess.com-style eval bar) and `bestMove` — see "Eval bar" in "AI strength/speed..." below. |
 | `GET /game-review/:gameId` | Y | Y (via service tests) | Y | Y | **New in Phase 11.** Returns the stored review instantly, or an explicit `NOT_STARTED`/`PENDING` status while the async pass hasn't finished — never recomputes on a GET. |
 | Tournaments (Arena — pre-existing) | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. Untouched by Phase 8; its exact original code paths (`updateTournamentScore` inline in `game.gateway.ts`, the `@Cron` auto-start logic) remain as-is. |
 | Tournaments — Swiss (`tournaments.service.ts` lifecycle/pairing methods) | Y | Y | Y | Y | **New in Phase 8 (2026-08-11).** Full SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED lifecycle, automatic round generation/advancement, Buchholz tiebreak standings. See "Phase 8" below. |
@@ -53,7 +53,7 @@ phase specifically.
 | `rating/glicko2.ts` | Y | Y | Y | Y | **New in Phase 6.** Pure Glicko-2 implementation, verified against the algorithm's own published worked example (exact match) plus 7 property tests. Reused as-is for puzzle ratings in Phase 7. See "Phase 6" below. |
 | `rating/rating.service.ts` + entities (`PlayerRating`, `RatingHistoryEntry`) | Y | Y | Y | Y | **New in Phase 6.** Per-(variant, time control) rating pools, provisional status, rating history. 7 tests against a real in-memory sqlite DB. |
 | `GET /rating/:userId`, `GET /rating/:userId/history` | Y | Y | Y | Y | **New in Phase 6.** Live-verified against a real completed PvP game — see "Phase 6" below for the actual before/after numbers. |
-| `puzzles/puzzle-generator.service.ts` | Y | Y | Y | Y | **New in Phase 7.** Scans completed games for a missed 2+-piece capture; flags `pending` candidates for review. See "Phase 7" below for the worked example. |
+| `puzzles/puzzle-generator.service.ts` | Y | Y | Y | Y | **New in Phase 7.** Scans completed games for a missed 2+-piece capture; flags `pending` candidates for review. See "Phase 7" below for the worked example. **Rewritten 2026-08-30**: eval-gap detection (any real MISTAKE/BLUNDER-tier move, not just a missed capture) + multi-ply solutions + `classifyGamePhase` tagging + self-play seeding (replacing 4 hand-authored 2-3-piece toy positions) — see "AI strength/speed, real puzzle content..." below. |
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
 
@@ -1561,6 +1561,92 @@ still green (381 tests, 39 suites) since this phase is frontend-only.
 `/moderation`, `/membership`, `/analysis/[id]`, and the tournament detail page all still use the original
 light styling and lack the sidebar shell — `NotificationBell`'s light-variant default keeps them looking
 correct on their own, just visually inconsistent with the newly-converted pages until they're redesigned too.
+
+## AI strength/speed, real puzzle content, and a chess.com-style eval bar (2026-08-30)
+
+Direct feedback after playing the app: the AI was "easy to beat, even the 3500 elo" (difficulty 7) for a
+self-described non-expert, and needed to be faster too; puzzles needed real middlegame/endgame content
+instead of "1-3 pawns only"; and game review needed a win/loss bar correlated with best-move/mistake
+indicators, "as it is on chess.com". Three real, separately-diagnosed problems, not one fix.
+
+**AI strength — the opening-only benchmark from the earlier AI rewrite was hiding a severe pruning failure.**
+Benchmarking `analyzePosition` depth-by-depth on a REAL midgame position (reached via self-play, not the
+symmetric opening every prior benchmark used) showed 5x-16x branching per ply instead of a healthy 2-3x, and
+a `MAX_TRANSPOSITION_ENTRIES`-less transposition table that grew unboundedly, crashing the Node process with
+a real `FATAL ERROR: JavaScript heap out of memory` on a deliberately deep diagnostic probe. Two real fixes:
+- **Bounded the transposition table** (`MAX_TRANSPOSITION_ENTRIES = 400_000`, FIFO eviction on insertion
+  order) — the actual root cause of the crash.
+- **Killer-move + history heuristics** added to `orderMoves` (TT/preferred move → captures by size → killer
+  moves → history score) — move ordering previously had nothing at all for quiet (non-capture) moves, which
+  is what was actually driving the pruning failure. Re-benchmarked on the exact same midgame position after
+  the fix: depth 6 2912ms→435ms, depth 7 14840ms→1009ms (5.1x branching→2.3x), depth 8 244625ms→3277ms (16.5x
+  →3.2x). Real-world effect: `getBestMove` at difficulty 7's existing 4.5s budget only used to complete depth
+  6; the same budget now reliably completes depth 7, so the budget itself was raised to 6s to let it reach
+  depth 8. New regression tests: a bounded-TT-size assertion after a demanding depth-8 search, and a real
+  strength test (`playGame`) proving difficulty 4 beats difficulty 1 in a full self-played game regardless of
+  which color it plays — strength validation, not just legality.
+
+**Puzzles — the generator only ever looked for missed 2+-piece captures, and the seed content was 4
+hand-authored toy positions.** Root cause of "1-3 pawns only" was two separate things, both fixed:
+- `puzzle-generator.service.ts` rewritten around eval-gap detection (`analyzePosition` at depth 6, comparing
+  the move actually played against the engine's own best — the same lichess/chess.com-style "how much worse
+  was this than best" approach), reusing `move-classification.ts`'s own calibrated thresholds as the single
+  shared "this was a real mistake" bar app-wide, and extending a puzzle's solution past one ply whenever the
+  opponent's reply is forced enough (up to `MAX_SOLVER_PLIES`), tagged with a new `classifyGamePhase`
+  (opening/middlegame/endgame, by piece-count fraction).
+- `PuzzlesService.onModuleInit`'s old ~30-line hand-authored 2-3-piece seed replaced with
+  `seedFromSelfPlay` — self-plays real games across both board sizes/variants at varied difficulties, saves
+  each as a real `GameHistory` row, and scans them with the same detector real player games get, auto-
+  published since it's the app's own verified content.
+- **A live yield check after the first version found only 1 puzzle from 4 full self-played games** — the
+  post-strength-fix AI plays soundly enough that requiring outright BLUNDER-tier errors (delta > 25) almost
+  never fires in AI-vs-AI play. Fixed by lowering the bar to MISTAKE-tier (delta > 10, still a genuine "gave
+  up more than half a man" swing, not a trivial one) and widening `DEFAULT_SEED_MATCHUPS` to include lopsided
+  pairings (e.g. difficulty 1 vs 4) alongside closely-matched ones, since a wide skill gap is what actually
+  produces real mistakes to detect. **A second live check found zero endgame puzzles** — self-played games
+  routinely didn't reach real endgame material (piece fraction ≤ 0.35) until ply 46-79 depending on matchup,
+  well past the old 50-ply seeding cap; raised to 100. Final live yield from 8 self-played games: **23
+  puzzles — 7 opening, 10 middlegame, 6 endgame**, both board sizes, 7 with genuine multi-ply (3-move)
+  solutions, difficulties 2-3. Solved end-to-end through the real running `/puzzles/:id/attempt` endpoint.
+  (A real correctness bug was also caught and fixed during this rewrite, before it shipped: the multi-ply
+  solution builder initially only pushed the solver's own moves, never the opponent's forced reply, which
+  would have desynced solving from `moveIndex` onward for any multi-ply puzzle — `puzzles.service.ts`'s
+  `attemptMove` requires the flat `solution` array to alternate solver/opponent at even/odd indices.)
+
+**Eval bar — `GameReview.moveReviews` had a per-move eval DELTA (how much worse than best) but no absolute
+position evaluation, and no fixed perspective axis to plot one on.** `AiService.analyzePosition` reports
+every evaluation from the CURRENT MOVER's own perspective, which flips sign every ply — unusable directly for
+a continuous bar. `MoveReview` gained two fields: `evaluation` (the position's value after this move,
+normalized onto a fixed LIGHT-positive axis — negated for DARK-moved plies, direct for LIGHT-moved ones) and
+`bestMove` (the engine's own top pick at that position, already computed for the existing evalDelta
+calculation, just not previously kept). New frontend components `EvalBar.tsx` (vertical, chess.com-style,
+Light's share filling from the bottom via a documented logistic mapping pivoted on `WEIGHT_KING`, "+M"/"−M"
+shown instead of a five-digit number once the eval is clearly a forced win/loss rather than a material
+reading) and `EvalGraph.tsx` (the same curve plotted across the whole game, MISTAKE/BLUNDER markers at the
+exact ply they happened, click-to-jump) on `/analysis/[id]`, replacing the old plain classification-dot
+strip. The board's existing best-move highlight now also auto-shows the moment a review is available and the
+upcoming move from the currently-displayed position wasn't best — no "Run Engine" click required.
+**A real alignment bug was found and fixed via live screenshot verification, not just reading the code**: the
+first version keyed the best-move overlay off the PREVIOUS move's review (moveIndex = currentMoveIndex - 1,
+i.e. "what should have been played to reach this position"), overlaying a move computed for the position
+BEFORE it was played onto the board AFTER it was played — visually, the highlighted squares landed on
+unrelated pieces. Fixed by keying off the UPCOMING move's review instead (moveIndex = currentMoveIndex, "what
+should be played from here"), confirmed correct via a second screenshot at the exact position of a real
+BLUNDER found in live-generated content.
+
+**Verification**: 391 backend tests (up from 390), all green — 1 new perspective-normalization test in
+`game-review.service.spec.ts`, 2 new AI-strength/memory-bound tests, puzzle-generator tests rebuilt against
+freshly re-verified fixtures (the threshold change moved which real self-play positions count as
+puzzle-worthy, breaking 3 existing "does not flag" tests whose fixtures happened to contain an in-range
+mistake the old, stricter bar had been hiding — rebuilt with scratch-script-verified clean prefixes, same
+rigor as every other hardcoded position in this codebase). `tsc --noEmit` and `next build` both clean. Full
+live verification against the actually-running app: backend restarted against a cleared puzzle table to
+force real self-play seeding (confirmed via direct sqlite queries and the live `/puzzles/random`/`/puzzles/daily`
+endpoints), a real puzzle solved end-to-end through `/puzzles/:id/attempt`, and a real Playwright run against
+`/analysis/[id]` for a live-generated game with a real BLUNDER — eval bar tracked correctly across the whole
+game, mistake/blunder markers landed on the graph at the right plies, best-move overlay confirmed correctly
+positioned both before and after the fix above, "+M" formatting confirmed on a forced-win position. Zero
+console errors.
 
 ## Repo cleanup notes (Phase 0)
 

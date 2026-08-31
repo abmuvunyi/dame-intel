@@ -20,11 +20,35 @@ const WIN_SCORE = 100_000;
 // safety cap, not a target.
 const MAX_QUIESCENCE_PLIES = 6;
 
+// A real, severe bug found while diagnosing why the AI still felt weak/slow after the
+// earlier quiescence/terminal-scoring rewrite: the transposition table had NO size
+// cap at all. On the opening position (the only thing benchmarked at the time) the
+// reachable node count within the time budget happened to stay small, masking this
+// entirely. On a genuinely busy 10x10 middlegame — more legal moves, longer capture
+// chains — a single deep search's table grew into the tens of millions of entries,
+// consuming multiple GB and crashing the process outright in testing (a real
+// `FATAL ERROR: JavaScript heap out of memory`, not a hypothetical). Even short of an
+// actual crash, that scale of Map growth mid-search causes severe GC pressure well
+// before the wall-clock deadline check fires — which would have silently collapsed
+// real effective search depth in exactly the kind of busy position a human opponent
+// actually creates, explaining both "still slow" and "still beatable" at once. Capped
+// here with simple FIFO eviction (Map preserves insertion order, so both operations
+// are O(1)) — not a perfect LRU, but sufficient to keep memory bounded regardless of
+// how many nodes a deep search on a complex position visits.
+export const MAX_TRANSPOSITION_ENTRIES = 400_000;
+
 // Per-difficulty wall-clock budget for getBestMove()'s iterative deepening (see
 // below). This is now the primary limiter on how long the AI takes to move — bounds
 // worst-case latency to a fixed, difficulty-scaled budget instead of always paying
 // the full cost of a hardcoded search depth, which is what made the hardest
 // difficulty noticeably slow before.
+// Difficulty 7's budget nudged from 4.5s to 6s after the killer-move/history-
+// heuristic fix (see those fields' comment): on the same real midgame benchmark, the
+// SAME 4.5s already went from reaching depth 6 to a full depth 7 purely from the
+// ordering fix — no budget change needed for that gain. The extra 1.5s here is a
+// separate, deliberate top-up specifically to make depth 8 reliably reachable too
+// (measured at ~3.3s alone on that benchmark, ~4.9s cumulative with depth 1-7) rather
+// than sitting just out of reach.
 const DIFFICULTY_TIME_BUDGET_MS: Record<number, number> = {
   1: 200,
   2: 400,
@@ -32,7 +56,7 @@ const DIFFICULTY_TIME_BUDGET_MS: Record<number, number> = {
   4: 1200,
   5: 2000,
   6: 3000,
-  7: 4500,
+  7: 6000,
 };
 
 // Depth ceilings, roughly the same shape as before this rewrite (still scaling from
@@ -98,6 +122,59 @@ export class AiService {
   // per top-level search, incremented once per minimax call.
   private nodesSinceDeadlineCheck = 0;
 
+  // Killer moves and history heuristic — real move-ordering fixes added after
+  // diagnosing why the earlier quiescence/TT/terminal-scoring rewrite still didn't
+  // translate into real strength: a live benchmark on an actual 28-piece middlegame
+  // (not the opening, which happened to be the only thing benchmarked before) showed
+  // the effective branching factor blowing up 5x-16x per additional ply — depth 6
+  // took 2.9s, depth 7 took 14.8s, depth 8 took 244s — where healthy alpha-beta with
+  // decent ordering stays in the 2-4x range. TT-hint + capture-size ordering alone
+  // was nowhere near enough; killer moves and history heuristic are the standard fix
+  // for exactly this failure mode, and only apply to the QUIET (non-capture) branch
+  // of move ordering, since the forced-capture rule already means a node's move list
+  // is captures-only whenever any capture exists at all.
+  //
+  // Killer moves: up to 2 quiet moves per remaining-depth level that have caused a
+  // beta cutoff in a sibling node at that same depth — tried early, since a move that
+  // just refuted one sibling is disproportionately likely to refute another. Indexed
+  // by the `depth` parameter itself (which is shared across sibling nodes at the same
+  // recursion level), not by absolute ply from the root.
+  private killerMoves = new Map<number, [Move | null, Move | null]>();
+  // History heuristic: a running score per (from,to) quiet move, incremented by
+  // depth^2 every time it causes a cutoff anywhere in the tree — weighted toward
+  // cutoffs found deeper (more search work saved), used as the ordering tiebreak
+  // among quiet moves that aren't this node's own killers.
+  private historyTable = new Map<string, number>();
+
+  private moveKey(move: Move): string {
+    return `${move.from.row},${move.from.col}-${move.to.row},${move.to.col}`;
+  }
+
+  private isSameMove(a: Move, b: Move): boolean {
+    return a.from.row === b.from.row && a.from.col === b.from.col && a.to.row === b.to.row && a.to.col === b.to.col;
+  }
+
+  // Called wherever a move causes a beta cutoff (see minimax's pruning loop) — only
+  // meaningful for quiet (non-capture) moves; captures are already prioritized by the
+  // forced-capture rule and by size in orderMoves, so recording them here would just
+  // waste a killer slot on a move that was already going to be tried early anyway.
+  private recordCutoff(move: Move, depth: number): void {
+    if (move.captured?.length) return;
+
+    const existing = this.killerMoves.get(depth) ?? [null, null];
+    if (!existing[0] || !this.isSameMove(existing[0], move)) {
+      existing[1] = existing[0];
+      existing[0] = move;
+      this.killerMoves.set(depth, existing);
+    }
+
+    const key = this.moveKey(move);
+    // Weighted by depth^2 — the standard history-heuristic weighting, favoring
+    // cutoffs found deeper in the tree (which save proportionally more search work)
+    // over shallow ones.
+    this.historyTable.set(key, (this.historyTable.get(key) ?? 0) + depth * depth);
+  }
+
   // Fixed-depth analysis of every legal move at the current position — used both as
   // the human-facing "engine evaluation" feature (analysis.controller.ts, with a
   // caller-specified depth) and as the building block getBestMove's iterative
@@ -107,6 +184,8 @@ export class AiService {
   // time-boxed; see below).
   public analyzePosition(engine: DraughtsEngine, depth: number): { move: Move, evaluation: number }[] {
     this.transpositionTable = new Map();
+    this.killerMoves = new Map();
+    this.historyTable = new Map();
     return this.searchRoot(engine, depth, null);
   }
 
@@ -130,11 +209,20 @@ export class AiService {
     const deadline = Date.now() + timeBudgetMs;
 
     this.transpositionTable = new Map();
+    // Killer moves are indexed by remaining-depth, which is a different scale at
+    // every iterative-deepening pass (depth 3's "remaining depth 2" isn't the same
+    // node context as depth 7's) — cleared per pass. The history table, by contrast,
+    // is a global move-quality signal independent of search depth, so — like the
+    // transposition table — it's deliberately kept across passes within one
+    // getBestMove call to let deeper iterations benefit from what shallower ones
+    // already learned.
+    this.historyTable = new Map();
 
     let bestMove: Move | null = null;
 
     for (let depth = 1; depth <= maxDepth; depth++) {
       this.nodesSinceDeadlineCheck = 0;
+      this.killerMoves = new Map();
       let evaluations: { move: Move, evaluation: number }[];
       try {
         evaluations = this.searchRoot(engine, depth, deadline);
@@ -175,7 +263,7 @@ export class AiService {
     if (legalMoves.length === 0) return [];
 
     const rootSig = this.boardSignature(simEngine.getBoard(), aiColor);
-    this.orderMoves(legalMoves, this.transpositionTable.get(rootSig)?.bestMove ?? null);
+    this.orderMoves(legalMoves, this.transpositionTable.get(rootSig)?.bestMove ?? null, this.killerMoves.get(depth));
 
     const evaluations: { move: Move, evaluation: number }[] = [];
 
@@ -246,7 +334,7 @@ export class AiService {
     // sequence that started in view but finishes just past the nominal depth would
     // otherwise be scored as if it simply never happened.
 
-    this.orderMoves(legalMoves, cached?.bestMove ?? null);
+    this.orderMoves(legalMoves, cached?.bestMove ?? null, this.killerMoves.get(depth));
 
     const nextDepth = depth > 0 ? depth - 1 : 0;
     // Known simplification: quiescence-extended nodes are always stored/looked-up at
@@ -276,7 +364,10 @@ export class AiService {
         if (ev < value) { value = ev; bestForNode = move; }
         beta = Math.min(beta, value);
       }
-      if (beta <= alpha) break; // Prune
+      if (beta <= alpha) {
+        this.recordCutoff(move, depth); // feeds killer moves + history heuristic (see their own comment)
+        break;
+      }
     }
 
     let flag: TranspositionEntry['flag'] = 'EXACT';
@@ -288,31 +379,55 @@ export class AiService {
     // deeper result already sitting in the table.
     const existing = this.transpositionTable.get(sig);
     if (!existing || existing.depth <= depth) {
+      if (this.transpositionTable.size >= MAX_TRANSPOSITION_ENTRIES && !existing) {
+        const oldestKey = this.transpositionTable.keys().next().value;
+        if (oldestKey !== undefined) this.transpositionTable.delete(oldestKey);
+      }
       this.transpositionTable.set(sig, { depth, value, flag, bestMove: bestForNode });
     }
 
     return value;
   }
 
-  // A cached best-move (from this node's own transposition entry, or the previous
-  // iterative-deepening pass at the root) goes first — the single highest-leverage
-  // move-ordering signal for alpha-beta pruning, since searching the likely-best move
-  // first maximizes how often every sibling after it gets pruned outright. Captures
-  // are still ordered by size after that (forced-capture rule already means this only
-  // matters *within* an all-captures move list, but the order among those still
-  // affects pruning efficiency).
-  private orderMoves(moves: Move[], preferredMove: Move | null | undefined): void {
-    const isSameMove = (a: Move, b: Move) =>
-      a.from.row === b.from.row && a.from.col === b.from.col && a.to.row === b.to.row && a.to.col === b.to.col;
-
+  // Move ordering, highest-priority signal first — this is the single biggest lever
+  // for alpha-beta pruning efficiency, and the earlier version of this file only had
+  // the first two of these four (see the killerMoves/historyTable fields' own
+  // comment for the real benchmark that exposed how insufficient that was):
+  //   1. A cached best-move (from this node's own transposition entry, or the
+  //      previous iterative-deepening pass at the root) — the move most likely to
+  //      actually be best, searched first so every sibling after it gets pruned
+  //      outright as often as possible.
+  //   2. Captures, biggest first (forced-capture rule means this only matters
+  //      *within* an all-captures move list, but the order among those still
+  //      affects pruning).
+  //   3. Killer moves — quiet moves that caused a beta cutoff in a sibling node at
+  //      this same remaining-depth, tried early since a move that just refuted one
+  //      sibling is disproportionately likely to refute another.
+  //   4. History heuristic score — a running tiebreak among the remaining quiet
+  //      moves, favoring moves that have caused cutoffs anywhere in the tree so far.
+  private orderMoves(moves: Move[], preferredMove: Move | null | undefined, killers?: [Move | null, Move | null]): void {
     moves.sort((a, b) => {
       if (preferredMove) {
-        const aPreferred = isSameMove(a, preferredMove);
-        const bPreferred = isSameMove(b, preferredMove);
+        const aPreferred = this.isSameMove(a, preferredMove);
+        const bPreferred = this.isSameMove(b, preferredMove);
         if (aPreferred && !bPreferred) return -1;
         if (bPreferred && !aPreferred) return 1;
       }
-      return (b.captured?.length || 0) - (a.captured?.length || 0);
+
+      const aCap = a.captured?.length || 0;
+      const bCap = b.captured?.length || 0;
+      if (aCap !== bCap) return bCap - aCap;
+
+      if (killers) {
+        const aKiller = (killers[0] && this.isSameMove(a, killers[0])) || (killers[1] && this.isSameMove(a, killers[1]));
+        const bKiller = (killers[0] && this.isSameMove(b, killers[0])) || (killers[1] && this.isSameMove(b, killers[1]));
+        if (aKiller && !bKiller) return -1;
+        if (bKiller && !aKiller) return 1;
+      }
+
+      const aHistory = this.historyTable.get(this.moveKey(a)) ?? 0;
+      const bHistory = this.historyTable.get(this.moveKey(b)) ?? 0;
+      return bHistory - aHistory;
     });
   }
 

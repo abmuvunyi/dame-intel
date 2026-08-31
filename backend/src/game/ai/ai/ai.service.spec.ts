@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AiService } from './ai.service';
+import { AiService, MAX_TRANSPOSITION_ENTRIES } from './ai.service';
 import { DraughtsEngine, PieceColor, PieceType, BoardState } from '../../engine/engine.service';
 
 // Plays a complete AI-vs-AI game, asserting at every single half-move that the move the
@@ -220,10 +220,10 @@ describe('AiService', () => {
       const elapsedMs = Date.now() - start;
 
       expect(move).not.toBeNull();
-      // The difficulty-7 time budget is 4.5s; a generous ceiling above that catches a
+      // The difficulty-7 time budget is 6s; a generous ceiling above that catches a
       // genuine regression (e.g. a reintroduced unbounded search) without being flaky
       // over normal per-node overhead.
-      expect(elapsedMs).toBeLessThan(7000);
+      expect(elapsedMs).toBeLessThan(8500);
     });
 
     it('a lower difficulty returns meaningfully faster than the hardest one, reflecting its smaller time budget', () => {
@@ -239,5 +239,52 @@ describe('AiService', () => {
 
       expect(easyElapsedMs).toBeLessThan(hardElapsedMs);
     });
+  });
+
+  // Regression guard for a real, severe bug found while diagnosing why the AI still
+  // felt weak/slow after the earlier rewrite: the transposition table had no size cap
+  // at all, and grew into the tens of millions of entries on a genuinely busy 10x10
+  // middlegame — enough to crash the process with a real
+  // "JavaScript heap out of memory" error in testing, not a hypothetical. See
+  // MAX_TRANSPOSITION_ENTRIES's own comment in ai.service.ts.
+  describe('transposition table stays bounded on a demanding search', () => {
+    it('never exceeds MAX_TRANSPOSITION_ENTRIES regardless of how many nodes a deep search visits', () => {
+      const engine = DraughtsEngine.createInternational();
+      service.analyzePosition(engine, 8); // deep enough to have blown well past the cap before the fix
+      const tableSize = (service as any).transpositionTable.size;
+      expect(tableSize).toBeLessThanOrEqual(MAX_TRANSPOSITION_ENTRIES);
+    }, 30000);
+  });
+
+  // Real playing-strength validation, not just "the search completes/is legal" — the
+  // self-play tests above already cover legality; this specifically proves a harder
+  // difficulty setting actually outplays an easier one, the concrete claim behind
+  // "AI Lvl N" in the first place. Uses lower difficulties than the hardest (not
+  // difficulty 7, whose 6s-per-move budget would make this test far too slow to run
+  // routinely) — the same move-ordering/search-quality machinery applies at every
+  // difficulty, so a demonstrated advantage here is real evidence for the engine
+  // overall, not just these two specific levels.
+  describe('a harder difficulty setting demonstrably outplays an easier one', () => {
+    function playGame(hardDifficulty: number, easyDifficulty: number, hardPlaysLight: boolean, maxHalfMoves = 200) {
+      const engine = DraughtsEngine.createAmerican(); // 8x8 — fast enough to actually finish in a test
+      let halfMoves = 0;
+      while (!engine.isGameOver() && halfMoves < maxHalfMoves) {
+        const lightToMove = engine.getCurrentTurn() === PieceColor.LIGHT;
+        const isHardsTurn = lightToMove === hardPlaysLight;
+        const move = service.getBestMove(engine, isHardsTurn ? hardDifficulty : easyDifficulty);
+        if (!move) break;
+        engine.makeMove(move);
+        halfMoves++;
+      }
+      return { winner: engine.getWinner(), isDraw: engine.isDraw(), halfMoves };
+    }
+
+    it('difficulty 4 beats difficulty 1 regardless of which color it plays', () => {
+      const gameA = playGame(4, 1, true); // hard = LIGHT
+      expect(gameA.winner).toBe(PieceColor.LIGHT); // hard (LIGHT) should win, not draw or lose
+
+      const gameB = playGame(4, 1, false); // hard = DARK
+      expect(gameB.winner).toBe(PieceColor.DARK); // hard (DARK) should win here too
+    }, 60000);
   });
 });

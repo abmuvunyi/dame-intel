@@ -32,6 +32,12 @@ export class Puzzle {
   @Column({ nullable: true })
   sourceGameId: number; // set for puzzles created by the generation pipeline
 
+  // What point in the game this position came from — see game-phase.ts. Nullable
+  // because the original hand-authored seed puzzles predate this column; every
+  // puzzle the generation pipeline creates now sets it.
+  @Column({ type: 'text', nullable: true })
+  gamePhase: string | null; // 'opening' | 'middlegame' | 'endgame'
+
   // The puzzle's own Glicko-2 rating — see rating/glicko2.ts. Treating every solve
   // attempt as a one-off "game" between the player and the puzzle (chess.com/lichess
   // style) is what makes both "difficulty" and "player skill" adjust from the same
