@@ -86,6 +86,10 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
+  // Not an official FMJD rule (4.13 gives a king no priority over a man when capture
+  // counts tie) — an opt-in house rule some players/traditions use instead. Only has
+  // any effect while Force Majority Capture is also on; see engine.service.ts.
+  const [kingMustCaptureWhenTied, setKingMustCaptureWhenTied] = useState(false);
   const [timeControl, setTimeControl] = useState<'bullet' | 'blitz' | 'rapid' | 'correspondence'>('blitz');
 
   // Real bug found verifying Phase 9, not introduced by it: this used to parse
@@ -286,11 +290,11 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   }, []);
 
   const handleFindMatch = () => {
-    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
   };
 
   const handlePlayAI = (difficulty: number) => {
-    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
   };
 
   const handleWatchGame = (roomIdToWatch: string) => {
@@ -300,7 +304,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   // Reuses the exact Phase 5 challenge mechanism (challengePlayer / challengeReceived
   // / respondToChallenge) — this just adds the UI that never existed for it before.
   const handleChallengeFriend = (targetUserId: number) => {
-    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture }, timeControl });
+    socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
     setChallengeNotice('Challenge sent — waiting for a response...');
   };
 
@@ -423,6 +427,20 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
               />
               Force Majority Capture
             </label>
+            {forceMajorityCapture && (
+              <label
+                className="text-sm flex items-center gap-2 text-gray-600 cursor-pointer pl-1"
+                title="Not an official FMJD rule — international draughts gives a king no priority over a man when two captures tie for the maximum. Some house/local rule sets require the king's capture in that case instead; this makes that a per-game choice rather than picking one for everyone."
+              >
+                <input
+                  type="checkbox"
+                  checked={kingMustCaptureWhenTied}
+                  onChange={e => setKingMustCaptureWhenTied(e.target.checked)}
+                  className="rounded"
+                />
+                King must capture when tied (house rule)
+              </label>
+            )}
             <label className="text-sm flex justify-between items-center text-gray-600">
               Time Control:
               <select
@@ -525,8 +543,16 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
       {challengeBanner}
       {challengeNoticeBanner}
-      {/* Board Column */}
-      <div className="flex flex-col items-center space-y-4">
+      {/* Board Column. min-w-0 matters now that Board.tsx sizes itself off its own
+          measured width (see Board.tsx's ResizeObserver): a flex item's default
+          min-width is `auto` (its content's own intrinsic width), which would stop
+          this column from ever shrinking below whatever width the board's LAST
+          measurement asked for — exactly the runaway-growth/overflow bug a live
+          screenshot caught (the board demanding more room than this column's actual
+          share of a narrower page layout, like the home dashboard's 2-column grid,
+          pushing the Moves/Chat column out from beside it instead of the board
+          shrinking to fit). */}
+      <div className="flex flex-col items-center space-y-4 min-w-0">
         <div className="w-full flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
           <ConnectionStatus connected={connected} />

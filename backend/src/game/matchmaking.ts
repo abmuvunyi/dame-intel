@@ -8,7 +8,7 @@ export interface SeekEntry {
   id: string; // opaque identifier (a socket id, in practice)
   rating: number;
   joinedAt: number; // ms epoch
-  variant: { boardSize: number; forceMajorityCapture: boolean };
+  variant: { boardSize: number; forceMajorityCapture: boolean; kingMustCaptureWhenTied: boolean };
   timeControl: TimeControlName;
   tournamentId?: number;
 }
@@ -26,7 +26,9 @@ export function ratingBandFor(entry: SeekEntry, now: number): number {
 }
 
 function sameVariant(a: SeekEntry, b: SeekEntry): boolean {
-  return a.variant.boardSize === b.variant.boardSize && a.variant.forceMajorityCapture === b.variant.forceMajorityCapture;
+  return a.variant.boardSize === b.variant.boardSize
+    && a.variant.forceMajorityCapture === b.variant.forceMajorityCapture
+    && a.variant.kingMustCaptureWhenTied === b.variant.kingMustCaptureWhenTied;
 }
 
 function compatible(a: SeekEntry, b: SeekEntry): boolean {

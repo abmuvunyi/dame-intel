@@ -26,16 +26,47 @@ interface BoardProps {
 // since the fade-out removal timer below has to match the CSS duration exactly.
 const TRANSITION_MS = 260;
 
+// Board size, take 2: cell size used to be a flat constant (48/64px) regardless of
+// how much room was actually available, which is why the board read as small even on
+// a wide screen — increasing that constant outright would just as easily overflow a
+// narrower one. Instead, the outer wrapper's OWN measured width (via ResizeObserver,
+// not the window's) drives the cell size, clamped between a floor (still legible on a
+// phone) and a new, meaningfully larger ceiling (up from 64/48 to 88/68) — the board
+// now genuinely fills whatever column it's placed in, up to a sensible cap, rather
+// than always rendering at the same size regardless of context.
+const MAX_CELL_PX = { 8: 88, 10: 68 } as const;
+const MIN_CELL_PX = { 8: 40, 10: 32 } as const;
+
 export default function Board({ board, myColor, currentTurn, legalMoves, lastMove, flipped, onMove }: BoardProps) {
   const size = board.length;
   const canMove = myColor !== null && currentTurn === myColor;
+  const boardSizeKey = size === 10 ? 10 : 8;
 
   const [selectedPos, setSelectedPos] = useState<Position | null>(null);
   const [pieces, setPieces] = useState<TrackedPiece[]>([]);
   const [drag, setDrag] = useState<{ id: number; from: Position; x: number; y: number } | null>(null);
   const nextId = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const removeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [cellPx, setCellPx] = useState<number>(MAX_CELL_PX[boardSizeKey]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const recompute = () => {
+      const available = container.clientWidth;
+      const fitted = Math.floor((available - 8) / size);
+      const clamped = Math.max(MIN_CELL_PX[boardSizeKey], Math.min(MAX_CELL_PX[boardSizeKey], fitted));
+      setCellPx(clamped);
+    };
+
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [size, boardSizeKey]);
 
   // Keep a stable-identity piece list so CSS transitions can animate a piece moving
   // from one square to another, instead of a square's content just changing instantly.
@@ -161,19 +192,31 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drag?.id]);
 
-  const is10x10 = size === 10;
-  const cellPx = is10x10 ? 48 : 64;
-  const pieceClass = is10x10 ? 'w-8 h-8 sm:w-10 sm:h-10 border-2' : 'w-10 h-10 sm:w-12 sm:h-12 border-4';
-  const stackClass = is10x10
-    ? 'w-8 h-8 sm:w-10 sm:h-10 border-2 absolute -top-1 -left-1'
-    : 'w-10 h-10 sm:w-12 sm:h-12 border-4 absolute -top-1.5 -left-1.5';
-  const kingOffset = is10x10 ? 'absolute bottom-1 right-1' : 'absolute bottom-1 right-1 sm:bottom-2 sm:right-2';
+  // Piece diameter is a fraction of the (now dynamic, see cellPx above) cell size
+  // rather than a fixed Tailwind class — cellPx varies continuously with the
+  // container's measured width now, not just two fixed breakpoints, so a static class
+  // like `w-10 h-10` can no longer track it.
+  const pieceDiameter = Math.round(cellPx * 0.8);
+  const pieceBorder = Math.max(2, Math.round(cellPx * 0.05));
 
-  const pieceStyle = (color: PieceColor) => ({
-    className: `${pieceClass} rounded-full shadow-md ${color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'}`,
+  const pieceStyle = (color: PieceColor, isKing: boolean): { className: string; style: React.CSSProperties } => ({
+    // Kings get a gold ring + glow on top of their own color — deliberately NOT just
+    // a bigger/second circle of the same color (the old "stacked disc" look), which
+    // reads as a normal piece at a glance and was the actual complaint. The crown
+    // glyph rendered on top (below) is the primary tell; the ring/glow makes it
+    // readable even at a distance or in peripheral vision, before the glyph itself
+    // resolves.
+    className: `rounded-full shadow-md flex items-center justify-center ${
+      color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-300' : 'bg-slate-800 border-slate-900'
+    } ${isKing ? 'ring-4 ring-amber-400 shadow-amber-400/70 shadow-lg' : ''}`,
+    style: { width: pieceDiameter, height: pieceDiameter, borderWidth: pieceBorder, borderStyle: 'solid' },
   });
 
   return (
+    <div
+      ref={containerRef}
+      className="w-full flex justify-center"
+    >
     <div
       ref={boardRef}
       className="relative border-[6px] border-slate-800 bg-slate-200 shadow-2xl rounded-sm select-none touch-none"
@@ -230,6 +273,9 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               transform: p.removing ? 'scale(0.4)' : 'scale(1)',
             };
 
+        const isKing = p.type === PieceType.KING;
+        const piece = pieceStyle(p.color, isKing);
+
         return (
           <div
             key={p.id}
@@ -242,13 +288,26 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               // it's rendered centered on the pointer, so without this it would be
               // the element elementFromPoint() finds at drop time — hiding the
               // square underneath it that the drop actually needs to land on.
-              className={`${pieceStyle(p.color).className} flex items-center justify-center ${isDragging ? 'pointer-events-none' : 'pointer-events-auto'} ${p.color === myColor && canMove ? 'cursor-grab active:cursor-grabbing' : ''} ${p.type === PieceType.KING ? kingOffset : ''}`}
+              className={`${piece.className} ${isDragging ? 'pointer-events-none' : 'pointer-events-auto'} ${p.color === myColor && canMove ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              style={piece.style}
             >
-              {p.type === PieceType.KING && <div className={`${stackClass} ${pieceStyle(p.color).className}`} />}
+              {/* A crown glyph, not a second stacked disc of the same color (the old
+                  look, which read as just another man at a glance) — this is the
+                  actual "very visible, really different from a man" king treatment,
+                  backed by the gold ring/glow set in pieceStyle above. */}
+              {isKing && (
+                <span
+                  className="pointer-events-none select-none leading-none"
+                  style={{ fontSize: Math.round(pieceDiameter * 0.52) }}
+                >
+                  👑
+                </span>
+              )}
             </div>
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

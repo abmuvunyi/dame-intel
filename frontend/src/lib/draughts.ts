@@ -36,6 +36,11 @@ export interface Move {
 export interface GameRules {
   boardSize: number;
   forceMajorityCapture: boolean;
+  // Not an official FMJD rule (a king has no priority over a man there) — an opt-in
+  // house rule some players/traditions use instead. See backend GameRules' own doc
+  // comment in engine.service.ts for the full explanation. Only meaningful alongside
+  // forceMajorityCapture.
+  kingMustCaptureWhenTied?: boolean;
 }
 
 /**

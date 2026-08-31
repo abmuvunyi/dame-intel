@@ -46,6 +46,14 @@ export interface GameRules {
   forceMajorityCapture: boolean; // FMJD 4.13: capture of the largest number of pieces is obligatory
   flyingKings: boolean; // FMJD 3.9: international kings slide any distance; American kings move one square
   manCaptureBackward: boolean; // FMJD 4.1: international men may capture backward; American men may not
+  // NOT part of official FMJD rules — 4.13 is explicit that "a king has no priority
+  // or special weighting over a man" when multiple sequences tie for the maximum
+  // capture count, and that's this engine's default (false). Some historical/local
+  // rule traditions (and some players' house rules) require playing a king's capture
+  // over a man's whenever both tie for the maximum, though — configurable per game
+  // rather than picking one interpretation for everyone. Only has any effect when
+  // forceMajorityCapture is also on; without it there's no "maximum" to tie for.
+  kingMustCaptureWhenTied: boolean;
   resetOnManMove: boolean; // FMJD 6.2: the no-progress draw counter resets on a man move OR a capture
   drawNoProgressHalfMoves: number; // FMJD 6.2 specifies 25 moves per player (50 half-moves) for International.
   // American Checkers' official move-count draw threshold was not sourced for this
@@ -72,6 +80,9 @@ function resolveRules(rules: Partial<GameRules>): GameRules {
     forceMajorityCapture: rules.forceMajorityCapture ?? isInternational,
     flyingKings: rules.flyingKings ?? isInternational,
     manCaptureBackward: rules.manCaptureBackward ?? isInternational,
+    // Defaults to official FMJD behavior (no king priority) for every variant —
+    // opt-in only, never inferred from board size/variant the way the flags above are.
+    kingMustCaptureWhenTied: rules.kingMustCaptureWhenTied ?? false,
     resetOnManMove: rules.resetOnManMove ?? isInternational,
     drawNoProgressHalfMoves: rules.drawNoProgressHalfMoves ?? (isInternational ? 50 : 80),
   };
@@ -205,7 +216,18 @@ export class DraughtsEngine {
           if (numCaps > maxCaptures) maxCaptures = numCaps;
         }
         // FMJD 4.14: if multiple sequences tie for the maximum, any of them is legal.
-        return jumps.filter(j => j.captured && j.captured.length === maxCaptures);
+        let tied = jumps.filter(j => j.captured && j.captured.length === maxCaptures);
+
+        // Optional house rule (see GameRules.kingMustCaptureWhenTied) — narrows the
+        // tied set down to king-only jumps whenever at least one exists among them.
+        // If none of the tied jumps happen to be a king's, there's nothing to prefer
+        // and every tied jump stays legal, same as the default.
+        if (this.rules.kingMustCaptureWhenTied) {
+          const kingTied = tied.filter(j => this.board[j.from.row][j.from.col]?.type === PieceType.KING);
+          if (kingTied.length > 0) tied = kingTied;
+        }
+
+        return tied;
       }
       return jumps;
     }

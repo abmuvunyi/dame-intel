@@ -577,7 +577,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       id: client.id,
       rating,
       joinedAt: Date.now(),
-      variant: { boardSize: fullRules.boardSize, forceMajorityCapture: fullRules.forceMajorityCapture },
+      variant: {
+        boardSize: fullRules.boardSize,
+        forceMajorityCapture: fullRules.forceMajorityCapture,
+        kingMustCaptureWhenTied: fullRules.kingMustCaptureWhenTied,
+      },
       timeControl: timeControl.name,
       tournamentId: data?.tournamentId,
       fullRules,

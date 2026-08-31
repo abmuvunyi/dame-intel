@@ -125,9 +125,17 @@ export default function Home() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
-            <div className="p-8">
+        {/* A fixed-width sidebar column + a fluid board column (instead of the old
+            fractional 1-of-3/2-of-3 grid split) — the board now gets essentially all
+            of whatever room is left after the sidebar, rather than being capped at
+            two-thirds of the page regardless of how wide the sidebar's own content
+            actually needs. `min-w-0` on the board card matters here for the same
+            reason it does inside GameBoard.tsx itself: a grid/flex item's default
+            min-width is its content's own intrinsic size, which would otherwise stop
+            this column from ever shrinking down to what's actually available. */}
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
+          <div className="min-w-0 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
+            <div className="p-4 sm:p-6">
               <GameBoard autoChallengeUserId={autoChallengeUserId} onAutoChallengeSent={() => setAutoChallengeUserId(null)} />
             </div>
           </div>
