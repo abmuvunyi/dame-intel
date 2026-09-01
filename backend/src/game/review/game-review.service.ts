@@ -15,6 +15,12 @@ import { DraughtsEngine, PieceColor, Move } from '../engine/engine.service';
 // simplification for this phase).
 const ANALYSIS_DEPTH = 4;
 
+// How many total plies a preview line runs (the triggering move itself plus this
+// many more) — long enough to show a real trend (a piece actually being won back, an
+// advantage actually growing), short enough to stay cheap across every flagged move
+// in a full game and to stay genuinely "a couple of moves", not a full continuation.
+const PREVIEW_LINE_ADDITIONAL_PLIES = 2;
+
 @Injectable()
 export class GameReviewService {
   constructor(
@@ -26,6 +32,31 @@ export class GameReviewService {
 
   async getReview(gameId: number): Promise<GameReview | null> {
     return this.reviewRepository.findOne({ where: { gameId } });
+  }
+
+  // Builds a short engine-vs-engine continuation: `firstMove` played from
+  // `startEngine`'s CURRENT position, then up to `additionalPlies` more moves of
+  // each side's own best play in turn. Works on a clone (same pattern
+  // puzzle-generator.service.ts's buildCandidate already uses) so the caller's own
+  // engine/traversal is never disturbed. Stops early if the game ends mid-line or the
+  // engine reports no legal moves — a real short forced sequence is a perfectly valid,
+  // shorter-than-requested line, not an error.
+  private buildPreviewLine(startEngine: DraughtsEngine, firstMove: Move, additionalPlies: number): Move[] {
+    const walker = new DraughtsEngine(startEngine.getRules());
+    walker.loadBoard(JSON.parse(JSON.stringify(startEngine.getBoard())), startEngine.getCurrentTurn());
+    walker.makeMove(firstMove);
+    const line: Move[] = [firstMove];
+
+    for (let i = 0; i < additionalPlies; i++) {
+      if (walker.isGameOver()) break;
+      const evals = this.aiService.analyzePosition(walker, ANALYSIS_DEPTH);
+      if (evals.length === 0) break;
+      const next = evals[0].move;
+      line.push(next);
+      walker.makeMove(next);
+    }
+
+    return line;
   }
 
   // The actual "automated post-game review" pass (Phase 11). Called fire-and-forget
@@ -97,13 +128,44 @@ export class GameReviewService {
             // axis so the eval bar has one consistent direction across the whole
             // game instead of alternating meaning every ply.
             const evaluation = mover === PieceColor.LIGHT ? playedEntry.evaluation : -playedEntry.evaluation;
+            const classification = classifyMove(evalDelta);
+
+            // "Why was this the best move" preview — a real, engine-followed
+            // continuation starting with the move actually recommended, not just the
+            // bare move itself. Nothing to show when the played move already WAS the
+            // recommendation.
+            const recommendedLine = classification !== 'BEST'
+              ? this.buildPreviewLine(engine, evaluations[0].move, PREVIEW_LINE_ADDITIONAL_PLIES)
+              : null;
+
+            // "How does this get punished" preview — only for a real mistake/blunder,
+            // starting from the position the ACTUAL (bad) move produced, showing the
+            // opponent's own best-play response. Built on a fresh clone at that
+            // resulting position, since buildPreviewLine's own clone starts from
+            // BEFORE its first move, and here the "first move" to preview is the
+            // opponent's reply, not the mistake itself (which already happened).
+            let punishmentLine: Move[] | null = null;
+            if (classification === 'MISTAKE' || classification === 'BLUNDER') {
+              const afterMistake = new DraughtsEngine(engine.getRules());
+              afterMistake.loadBoard(JSON.parse(JSON.stringify(engine.getBoard())), engine.getCurrentTurn());
+              afterMistake.makeMove(recordedMove);
+              if (!afterMistake.isGameOver()) {
+                const opponentEvals = this.aiService.analyzePosition(afterMistake, ANALYSIS_DEPTH);
+                if (opponentEvals.length > 0) {
+                  punishmentLine = this.buildPreviewLine(afterMistake, opponentEvals[0].move, PREVIEW_LINE_ADDITIONAL_PLIES);
+                }
+              }
+            }
+
             moveReviews.push({
               moveIndex: i,
               mover,
-              classification: classifyMove(evalDelta),
+              classification,
               evalDelta,
               evaluation,
               bestMove: evaluations[0].move,
+              recommendedLine,
+              punishmentLine,
             });
           }
           // If the recorded move isn't found among the engine's own legal moves at

@@ -81,6 +81,16 @@ export default function AnalysisPage() {
   // `evaluations` above, which is this page's own pre-existing on-demand "Run Engine"
   // query for whatever position is currently showing.
   const [review, setReview] = useState<any>(null);
+  // A short engine-vs-engine continuation being previewed on the board — either
+  // "why the recommended move is best" (GameReview.MoveReview.recommendedLine) or
+  // "how a mistake gets punished" (...punishmentLine), both computed server-side by
+  // GameReviewService so this page never has to run its own extra searches. Distinct
+  // from `currentMoveIndex`/boardStates (the REAL game) — this is a hypothetical
+  // overlay, stepped through independently and clearly labeled as such.
+  const [previewLine, setPreviewLine] = useState<{ moves: any[]; label: string } | null>(null);
+  const [previewPly, setPreviewPly] = useState(0);
+
+  const exitPreview = () => { setPreviewLine(null); setPreviewPly(0); };
 
   useEffect(() => {
     const fetchGame = async () => {
@@ -174,6 +184,7 @@ export default function AnalysisPage() {
           setCurrentMoveIndex(currentMoveIndex + 1);
           setEvaluations([]); // Clear evals when moving
           setDepthInfo(null);
+          exitPreview();
       }
   };
 
@@ -182,6 +193,7 @@ export default function AnalysisPage() {
           setCurrentMoveIndex(currentMoveIndex - 1);
           setEvaluations([]);
           setDepthInfo(null);
+          exitPreview();
       }
   };
 
@@ -226,6 +238,34 @@ export default function AnalysisPage() {
   const reviewBestMove = upcomingMoveReview && upcomingMoveReview.classification !== 'BEST'
     ? upcomingMoveReview.bestMove
     : null;
+
+  // Both preview lines start from the SAME position: recommendedLine is "the move
+  // that should be played FROM here" (upcomingMoveReview, keyed like reviewBestMove
+  // above), and punishmentLine is "what follows the move that just produced this
+  // position" (currentMoveReview, keyed like the classification badge below) — the
+  // position right after a mistake is exactly the position currently on screen.
+  const canShowBestContinuation = !!upcomingMoveReview?.recommendedLine?.length;
+  const canShowPunishment = !!currentMoveReview?.punishmentLine?.length
+    && (currentMoveReview.classification === 'MISTAKE' || currentMoveReview.classification === 'BLUNDER');
+
+  const startPreview = (moves: any[], label: string) => {
+    setPreviewLine({ moves, label });
+    setPreviewPly(0);
+  };
+
+  // Applies the first `previewPly` moves of the active preview line on top of the
+  // CURRENT position (not the real game state) — a hypothetical overlay, computed
+  // fresh on every render rather than stored, since it only ever depends on what's
+  // already in memory.
+  const previewBoard = (() => {
+    if (!previewLine) return null;
+    const rules = typeof game.rules === 'string' ? JSON.parse(game.rules) : (game.rules || {});
+    const engine = new ReplayEngine(rules);
+    engine.board = JSON.parse(JSON.stringify(boardStates[currentMoveIndex].board));
+    engine.currentTurn = boardStates[currentMoveIndex].turn;
+    for (let i = 0; i < previewPly; i++) engine.makeMove(previewLine.moves[i]);
+    return engine.board;
+  })();
 
   // Matches the board's own rendered size (see cellClass below: 80px cells for 8x8,
   // 64px cells for 10x10, plus the board's own 4px border + 4px padding per side) so
@@ -288,23 +328,27 @@ export default function AnalysisPage() {
           <div className="flex items-start gap-3">
             <EvalBar evaluation={currentEvaluation} heightPx={boardHeightPx} />
             <div>
-            <div className="border-4 border-gray-800 p-1 bg-gray-200 shadow-xl mb-4">
-              {currentBoard.map((row: any[], r: number) => (
+            <div className={`border-4 p-1 shadow-xl mb-4 ${previewLine ? 'border-purple-600 bg-purple-100' : 'border-gray-800 bg-gray-200'}`}>
+              {(previewBoard ?? currentBoard).map((row: any[], r: number) => (
                 <div key={r} className="flex">
                   {row.map((cell: any, c: number) => {
                     const isDarkSquare = (r + c) % 2 !== 0;
                     let squareBg = isDarkSquare ? 'bg-amber-900' : 'bg-amber-200';
 
-                    // Highlight the best move: prefer the stored review's own best
-                    // move (available immediately, no click needed — see
-                    // reviewBestMove above) and fall back to the on-demand "Run
-                    // Engine" panel's top pick.
-                    const bestMove = reviewBestMove || (evaluations.length > 0 ? evaluations[0].move : null);
+                    // While previewing a hypothetical line, highlight whichever ply
+                    // is ABOUT to be played next in it (so stepping through reads the
+                    // same way the real best-move highlight does); otherwise prefer
+                    // the stored review's own best move (available immediately, no
+                    // click needed — see reviewBestMove above), falling back to the
+                    // on-demand "Run Engine" panel's own top pick.
+                    const bestMove = previewLine
+                      ? (previewPly < previewLine.moves.length ? previewLine.moves[previewPly] : null)
+                      : (reviewBestMove || (evaluations.length > 0 ? evaluations[0].move : null));
                     const isBestMoveFrom = bestMove && bestMove.from.row === r && bestMove.from.col === c;
                     const isBestMoveTo = bestMove && bestMove.to.row === r && bestMove.to.col === c;
 
-                    if (isBestMoveFrom) squareBg = 'bg-blue-400';
-                    if (isBestMoveTo) squareBg = 'bg-green-400 opacity-90';
+                    if (isBestMoveFrom) squareBg = previewLine ? 'bg-purple-400' : 'bg-blue-400';
+                    if (isBestMoveTo) squareBg = previewLine ? 'bg-purple-300 opacity-90' : 'bg-green-400 opacity-90';
 
                     // Board/king visual pass (matches Board.tsx's own treatment):
                     // a bigger board (12/16 -> 16/20) and a king shown as a gold
@@ -353,6 +397,64 @@ export default function AnalysisPage() {
               )}
             </div>
 
+            {/* "Best move" / "how this gets punished" previews — a real, engine-
+                followed continuation (computed once, server-side, by
+                GameReviewService), not a generated explanation: this codebase has no
+                honest way to produce natural-language tactical reasoning, so showing
+                the actual line the engine expects, move by move, is the concrete
+                stand-in for "why". */}
+            {!previewLine && (canShowBestContinuation || canShowPunishment) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {canShowBestContinuation && (
+                  <button
+                    onClick={() => startPreview(upcomingMoveReview.recommendedLine, 'Engine’s suggested continuation')}
+                    className="px-3 py-1.5 text-xs font-semibold bg-purple-100 text-purple-800 rounded hover:bg-purple-200 transition"
+                  >
+                    Show Best Continuation
+                  </button>
+                )}
+                {canShowPunishment && (
+                  <button
+                    onClick={() => startPreview(currentMoveReview.punishmentLine, 'How this could be punished')}
+                    className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-800 rounded hover:bg-red-200 transition"
+                  >
+                    See How This Gets Punished
+                  </button>
+                )}
+              </div>
+            )}
+
+            {previewLine && (
+              <div className="mt-2 w-full max-w-md bg-purple-50 border border-purple-200 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-purple-800">{previewLine.label}</p>
+                  <button onClick={exitPreview} className="text-xs text-purple-600 hover:underline font-medium">
+                    Exit preview
+                  </button>
+                </div>
+                <p className="text-[11px] text-purple-500 mb-2">
+                  A hypothetical engine-vs-engine line from here — not necessarily what actually happened next in the game.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPreviewPly(p => Math.max(0, p - 1))}
+                    disabled={previewPly === 0}
+                    className="px-3 py-1 text-xs bg-purple-700 text-white rounded disabled:opacity-40"
+                  >
+                    ← Back
+                  </button>
+                  <span className="text-xs text-purple-700 font-mono">{previewPly} / {previewLine.moves.length}</span>
+                  <button
+                    onClick={() => setPreviewPly(p => Math.min(previewLine.moves.length, p + 1))}
+                    disabled={previewPly === previewLine.moves.length}
+                    className="px-3 py-1 text-xs bg-purple-700 text-white rounded disabled:opacity-40"
+                  >
+                    Forward →
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Full-game evaluation graph — the eval bar's reading plotted across
                 every ply, with mistake/blunder markers landing right where the swing
                 actually happened. Click anywhere to jump straight to that position;
@@ -365,7 +467,7 @@ export default function AnalysisPage() {
                   moveReviews={review.moveReviews}
                   totalMoves={boardStates.length - 1}
                   currentMoveIndex={currentMoveIndex}
-                  onSelectMove={(idx: number) => { setCurrentMoveIndex(idx); setEvaluations([]); setDepthInfo(null); }}
+                  onSelectMove={(idx: number) => { setCurrentMoveIndex(idx); setEvaluations([]); setDepthInfo(null); exitPreview(); }}
                 />
                 <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-400 justify-center">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Mistake</span>

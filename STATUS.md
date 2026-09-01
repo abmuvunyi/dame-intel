@@ -41,7 +41,7 @@ phase specifically.
 | Moderator review queue (`GET/POST /anticheat/admin/*`) | Y | Y | Y | Y | **New in Phase 12.** No admin-role system exists in this codebase (same documented simplification as Phase 7's puzzle admin routes and Phase 8b's tournament lifecycle routes) — lists flags, and applies a moderator's decision. Explicitly the *only* code path that can ever write `User.moderationStatus` — the detection methods themselves never do. |
 | Graduated response (`User.moderationStatus`/`tempBanUntil`) | Y | Y | Y | Y | **New in Phase 12.** WARNED/RATING_RESET_FLAGGED/TEMP_BANNED/PERMA_BANNED states, settable only via the moderator endpoint above. Real enforcement wired at both `AuthService.signIn` (login rejected) and `GameGateway.handleConnection` (WebSocket authentication rejected) — live-verified end-to-end, not just scaffolding that sits unused. |
 | `game/review/move-classification.ts` | Y | Y | Y | Y | **New in Phase 11.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter) — explicit, documented eval-delta thresholds classify each move as BEST/GOOD/INACCURACY/MISTAKE/BLUNDER, plus a simple credit-weighted accuracy-percentage formula. 14 tests covering every threshold boundary on both sides and the accuracy formula's edge cases. See "Phase 11" below for the exact thresholds and their reasoning. |
-| `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. **2026-08-30**: `MoveReview` gained `evaluation` (LIGHT-normalized, for a chess.com-style eval bar) and `bestMove` — see "Eval bar" in "AI strength/speed..." below. |
+| `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. **2026-08-30**: `MoveReview` gained `evaluation` (LIGHT-normalized, for a chess.com-style eval bar) and `bestMove` — see "Eval bar" in "AI strength/speed..." below. **2026-09-02**: `MoveReview` gained `recommendedLine`/`punishmentLine` — real, engine-followed multi-ply continuations, not generated text — see "Review-page 'best continuation'..." below. |
 | `GET /game-review/:gameId` | Y | Y (via service tests) | Y | Y | **New in Phase 11.** Returns the stored review instantly, or an explicit `NOT_STARTED`/`PENDING` status while the async pass hasn't finished — never recomputes on a GET. |
 | Tournaments (Arena — pre-existing) | Y | Y | Y | Y | Live-verified: `/tournaments` page rendered real seeded data ("Weekly Beginner Arena", format, status) — not a placeholder. Untouched by Phase 8; its exact original code paths (`updateTournamentScore` inline in `game.gateway.ts`, the `@Cron` auto-start logic) remain as-is. |
 | Tournaments — Swiss (`tournaments.service.ts` lifecycle/pairing methods) | Y | Y | Y | Y | **New in Phase 8 (2026-08-11).** Full SCHEDULED → REGISTRATION_OPEN → IN_PROGRESS → COMPLETED lifecycle, automatic round generation/advancement, Buchholz tiebreak standings. See "Phase 8" below. |
@@ -1799,6 +1799,59 @@ the correct result, the "Analyzing..." state, the completed stats panel (real ac
 classification counts) once the review landed, a real material-advantage badge confirmed correct after real
 captures (and the "0" bug caught and fixed along the way), and Rematch confirmed to actually start a fresh AI
 game and close the modal. Zero console errors.
+
+## Review-page "best continuation" and "how this gets punished" previews (2026-09-02)
+
+Second and final part of the same batch: "best move buttons like on chess.com and there should also be a
+followup for a couple of moves showing the reason why that was the best move...also if there is a mistake we
+can show how it gets punished for a couple of moves."
+
+**Scoping decision, stated directly rather than silently substituted**: chess.com's own real "why" explanations
+are LLM-generated prose; this codebase has no LLM integration, and generating confident-sounding tactical
+narrative without one would mean fabricating reasoning this app can't actually verify — precisely the kind of
+"faking it" this project's own standing rule is against. The honest, buildable equivalent built instead: a
+real, engine-followed continuation (the actual moves, not invented text) for both "why this move" and "how a
+mistake gets punished" — which is also the concrete part of what chess.com itself shows, just without the
+prose layer.
+
+**Backend.** `MoveReview` gained two fields, both computed once during `GameReviewService.analyzeCompletedGame`
+(no new endpoint — served through the existing `GET /game-review/:gameId`):
+- `recommendedLine`: for any move that wasn't already BEST, a short (the move itself plus 2 more plies)
+  engine-vs-engine continuation starting with the move the engine actually recommended — built by
+  `buildPreviewLine()`, a small helper that plays the given move on a cloned engine (same clone-and-walk
+  pattern `puzzle-generator.service.ts`'s `buildCandidate` already established) then lets each side's own best
+  move follow in turn.
+- `punishmentLine`: for a MISTAKE/BLUNDER-tier move specifically, the same kind of continuation but starting
+  from the position the ACTUAL (bad) move produced, with the opponent's own best reply first — the engine's
+  own predicted best play for them, not necessarily what really happened in the rest of the game (both the
+  code's own comments and the frontend UI say so explicitly, rather than letting a hypothetical line read as
+  "what happened").
+- Real-scale verification, not just unit tests: re-ran the full pass on a genuine, already-completed 114-move
+  game. Every one of the 44 non-BEST moves got a real `recommendedLine`; every one of its 4 MISTAKE-tier moves
+  got a real `punishmentLine`; the whole pass (114 plies, all the extra continuation searches included) took
+  ~6.5s — comfortably fine for a fire-and-forget background pass that already ran this way before. 4 new
+  service tests (recommendedLine only for non-BEST moves and starts with the real `bestMove`; punishmentLine
+  only for MISTAKE/BLUNDER, independently re-verified against this exact fixture's real 20-point delta rather
+  than assumed, and confirmed to actually replay against the real engine). 413 backend tests total (up from
+  411).
+
+**Frontend (`/analysis/[id]`).** Two new buttons appear next to the existing classification badge — "Show Best
+Continuation" (keyed off the UPCOMING move's review, same position `reviewBestMove`'s auto-highlight already
+uses) and "See How This Gets Punished" (keyed off the move that produced the CURRENT position, shown only for
+MISTAKE/BLUNDER). Clicking either opens a small purple-bordered preview overlay: the board switches to a
+hypothetical position (computed by replaying the line's moves on top of the real current position, entirely
+client-side, no extra requests), with Back/Forward step controls and an explicit "hypothetical...not
+necessarily what actually happened" disclaimer. Stepping through highlights whichever move comes next in the
+line, the same visual language the real best-move highlight already uses elsewhere on the page. Exits
+automatically whenever the viewer navigates to a different real move (Previous/Next/clicking the eval graph),
+so a stale hypothetical overlay never lingers onto an unrelated position.
+
+**Verification**: `tsc --noEmit` and `next build` both clean. Full live verification against the actually-
+running app, on the same real 114-move game the backend performance check used: both buttons confirmed to
+appear only where they should, the punishment preview stepped through and visually confirmed to apply the
+exact right moves ply by ply (cross-checked against the exact coordinates the backend computed), the best-
+continuation preview confirmed working the same way, and Exit Preview confirmed to actually close the overlay.
+Zero console errors throughout.
 
 ## Repo cleanup notes (Phase 0)
 
