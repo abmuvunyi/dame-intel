@@ -160,6 +160,50 @@ describe('GameReviewService: real end-to-end analysis', () => {
     expect(cleanAccuracy).toBe(100); // never deviated from the engine's own top move
   });
 
+  it('builds a "why this was best" preview line only for the non-best move, starting with the move it actually recommends', async () => {
+    const { savedGame, SUBOPTIMAL_PLY } = await playGameWithOneDeliberateMistake();
+    await service.analyzeCompletedGame(savedGame.id);
+    const review = await service.getReview(savedGame.id);
+
+    for (const mr of review!.moveReviews!) {
+      if (mr.moveIndex === SUBOPTIMAL_PLY) {
+        expect(mr.recommendedLine).not.toBeNull();
+        expect(mr.recommendedLine!.length).toBeGreaterThan(0);
+        expect(mr.recommendedLine![0]).toEqual(mr.bestMove);
+      } else {
+        // Every other move already WAS best — nothing to recommend instead.
+        expect(mr.recommendedLine).toBeNull();
+      }
+    }
+  });
+
+  it('builds a "how this gets punished" preview line only for the MISTAKE/BLUNDER-tier move, starting from the position the actual move produced', async () => {
+    const { savedGame, moves, SUBOPTIMAL_PLY } = await playGameWithOneDeliberateMistake();
+    await service.analyzeCompletedGame(savedGame.id);
+    const review = await service.getReview(savedGame.id);
+
+    const suboptimalReview = review!.moveReviews!.find(m => m.moveIndex === SUBOPTIMAL_PLY)!;
+    // Independently re-verified (not assumed): this exact fixture's deliberate move
+    // has a 20-point delta, which move-classification.ts's own thresholds place at
+    // MISTAKE (10 < delta <= 25) — the tier buildPunishmentLine actually requires.
+    expect(suboptimalReview.classification).toBe('MISTAKE');
+    expect(suboptimalReview.punishmentLine).not.toBeNull();
+    expect(suboptimalReview.punishmentLine!.length).toBeGreaterThan(0);
+
+    // The punishment line has to actually replay against the real engine from the
+    // position the mistake produced — not just "some array of moves got returned".
+    const rules = { boardSize: 8, variant: 'american' as const };
+    const replay = new DraughtsEngine(rules);
+    for (let i = 0; i <= SUBOPTIMAL_PLY; i++) replay.makeMove(moves[i]);
+    for (const move of suboptimalReview.punishmentLine!) {
+      expect(replay.makeMove(move)).toBe(true);
+    }
+
+    for (const mr of review!.moveReviews!) {
+      if (mr.moveIndex !== SUBOPTIMAL_PLY) expect(mr.punishmentLine).toBeNull();
+    }
+  });
+
   it('is idempotent — calling it again on an already-completed review does not recompute', async () => {
     const { savedGame } = await playGameWithOneDeliberateMistake();
     await service.analyzeCompletedGame(savedGame.id);

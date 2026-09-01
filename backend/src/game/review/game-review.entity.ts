@@ -20,6 +20,20 @@ export interface MoveReview {
   // already comes from. Null only if the engine found no legal moves at all (should
   // never happen for a position with a move actually played there).
   bestMove: Move | null;
+  // A short (a few plies) engine-vs-engine continuation starting with `bestMove`,
+  // for the frontend's "why was this the best move" preview — set only when
+  // classification isn't BEST (nothing to demonstrate otherwise). Deliberately just
+  // the concrete move sequence plus whatever eval swing a viewer can already read off
+  // it, not a generated natural-language explanation — this codebase has no way to
+  // honestly generate "why" prose beyond what the search itself can show.
+  recommendedLine: Move[] | null;
+  // A short engine-vs-engine continuation starting from the position AFTER the
+  // actual (bad) move was played, showing the opponent's own best reply and a couple
+  // of follow-ups — "how does this get punished". Set only for MISTAKE/BLUNDER
+  // moves. This is the engine's own predicted best play for the opponent from that
+  // point on, not necessarily what actually happened in the rest of the real game —
+  // labeled as such wherever it's shown.
+  punishmentLine: Move[] | null;
 }
 
 // One row per analyzed game — "don't recompute on every view" (Phase 11 brief) means
