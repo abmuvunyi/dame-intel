@@ -217,6 +217,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     client.emit('gameResync', {
       roomId,
       color,
+      opponent: this.opponentInfoFor(room, color),
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
       legalMoves: room.engine.getCurrentTurn() === color ? room.engine.getLegalMoves() : [],
@@ -320,6 +321,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       const t = room.disconnectTimers[color];
       if (t) clearTimeout(t);
     }
+  }
+
+  // Real opponent identity for whoever's asking (from `forColor`'s point of view) —
+  // needed client-side for the post-game "Rematch" button (re-challenging the exact
+  // same opponent, or restarting against the same AI difficulty) added alongside the
+  // end-of-game modal. Returns null for a spectator (forColor === null) or if the
+  // opponent seat genuinely has no identity yet (e.g. still waiting to be filled).
+  private opponentInfoFor(room: GameRoom, forColor: PieceColor | null): { type: 'ai', difficulty: number } | { type: 'human', userId: number, username: string } | null {
+    if (forColor === null) return null;
+    if (room.aiColor) return { type: 'ai', difficulty: room.aiDifficulty ?? 2 };
+    const opponentColor = forColor === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+    const opponentProfile = room.playerProfiles[opponentColor];
+    if (!opponentProfile) return null; // anonymous opponent — no id to rematch against
+    return { type: 'human', userId: opponentProfile.id, username: opponentProfile.username };
   }
 
   // --- Server-authoritative clocks ---
@@ -551,6 +566,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.server.to(client.id).emit('gameStart', {
       roomId,
       color: PieceColor.LIGHT,
+      opponent: this.opponentInfoFor(room, PieceColor.LIGHT),
       board: room.engine.getBoard(),
       turn: room.engine.getCurrentTurn(),
       legalMoves: room.engine.getLegalMoves(),
@@ -774,8 +790,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       timeControl: timeControl.name,
     };
 
-    this.server.to(player1Id).emit('gameStart', { ...basePayload, color: PieceColor.LIGHT, legalMoves: room.engine.getLegalMoves() });
-    this.server.to(player2Id).emit('gameStart', { ...basePayload, color: PieceColor.DARK, legalMoves: [] });
+    this.server.to(player1Id).emit('gameStart', {
+      ...basePayload, color: PieceColor.LIGHT, legalMoves: room.engine.getLegalMoves(),
+      opponent: this.opponentInfoFor(room, PieceColor.LIGHT),
+    });
+    this.server.to(player2Id).emit('gameStart', {
+      ...basePayload, color: PieceColor.DARK, legalMoves: [],
+      opponent: this.opponentInfoFor(room, PieceColor.DARK),
+    });
 
     return room;
   }
