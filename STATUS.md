@@ -1756,6 +1756,50 @@ screenshotted, `/rules` and `/glossary` screenshotted, the "Other" menu's real b
 screenshot, and the anonymous home dashboard confirmed showing the same card layout as the signed-in one with
 real sign-in prompts in place of real data. Zero console errors throughout.
 
+## End-of-game modal, live material advantage indicator (2026-09-02)
+
+First part of a new batch: "add an end of game window that pops up with you won/lost/drew, the stats like on
+chess.com...a few [moves], not all of them...Game Review, Rematch, and New(10+5)"; and "during games if a player
+has more [pieces] we should give the player +1, +2... so they know." (Review-page continuation/explanation
+work — the second, larger part of the same request — follows in a separate PR.)
+
+**Material advantage indicator.** `CapturedTray.tsx` gained a `materialValue()` helper (man=1, king=3 — a
+common approximation, roughly matching `AiService`'s own 10:25 weight ratio rounded to a friendlier whole
+number) and an `advantage` prop, computed in `GameBoard.tsx` from the two `captured` arrays already tracked
+live (what each side has taken minus what they've lost) and rendered as a chess.com-style "+N" badge next to
+whichever side is actually ahead. **A real bug caught via live screenshot**: the first version computed the
+badge as `advantage && advantage > 0 && (...)`, which evaluates to the literal number `0` (not `false`) whenever
+material is exactly tied — and React renders a bare `0`, unlike `false`/`null`/`undefined`. A fresh game showed
+a stray "0" next to "none captured" until fixed to an explicit ternary.
+
+**End-of-game modal (`GameOverModal.tsx`).** Pops up the instant `gameOver` fires — the result itself ("You
+Won!" / "You Lost" / "It's a Draw" from the viewer's own perspective, or "{Light/Dark} Won" for a spectator) is
+known immediately, and the modal fills in accuracy + a compact move-quality breakdown (counts per
+classification, not the full per-move list the analysis page already shows) once the async post-game review
+lands, via the same polling pattern the analysis page uses. **A second real gap found live**: a game resigned
+before any moves were played never gets a review row at all (`GameReviewService.analyzeCompletedGame` returns
+early for zero moves, before ever creating one), so the original version polled "Analyzing the game..."
+forever for that case — fixed with a capped poll count (~30s) that falls back to a plain "no stats available"
+message instead of spinning indefinitely.
+
+Three buttons: **Game Review** (links straight to `/analysis/:gameId`), **Rematch**, and **New (10+5)**.
+Rematch and New Game needed no new backend mechanism — they reuse the exact existing `playVsAi`/
+`challengePlayer`/`joinMatchmaking` socket calls this app already had, just triggered from the modal with
+remembered settings, once the gateway's `gameStart`/`gameResync` payloads were extended with a new `opponent`
+field (`opponentInfoFor()`, a real, tested new method on `GameGateway`) telling the client who's on the other
+side — either `{type:'ai', difficulty}` or `{type:'human', userId, username}`, `null` for an anonymous opponent
+or a spectator. Rematch re-challenges that exact opponent at the same settings; New Game starts a fresh
+matchmaking search at Rapid (10+5) specifically, regardless of what time control the finished game used. 3 new
+gateway tests (real opponent identity for both PvP sides, AI difficulty reported correctly, `null` for an
+anonymous opponent). 411 backend tests total (up from 408).
+
+**Verification**: `tsc --noEmit` and `next build` both clean. Full live verification against the actually-
+running app: a real AI game resigned via the real "Resign" confirm flow, the modal appearing instantly with
+the correct result, the "Analyzing..." state, the completed stats panel (real accuracy numbers, real
+classification counts) once the review landed, a real material-advantage badge confirmed correct after real
+captures (and the "0" bug caught and fixed along the way), and Rematch confirmed to actually start a fresh AI
+game and close the modal. Zero console errors.
+
 ## Repo cleanup notes (Phase 0)
 
 - Original state: 96 branches, 95 open PRs, no `main` — default branch was the auto-named

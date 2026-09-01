@@ -78,6 +78,7 @@ describe('GameGateway', () => {
       expect(gameStart).toBeDefined();
       expect(gameStart!.payload.board).toHaveLength(10);
       expect(gameStart!.payload.legalMoves.length).toBeGreaterThan(0);
+      expect(gameStart!.payload.opponent).toEqual({ type: 'ai', difficulty: 1 });
 
       // Internal room state should reflect the fully-resolved (not raw partial) rules.
       const room = (gateway as any).activeGames.get(gameStart!.payload.roomId);
@@ -450,6 +451,37 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
     expect(roomId).toBeDefined();
     return roomId as string;
   }
+
+  describe('opponent identity on gameStart (needed for the post-game Rematch button)', () => {
+    it('tells each player who the other one is, by real username and user id', async () => {
+      await matchTwoPlayers({ boardSize: 10, variant: 'international' }, 'rapid');
+
+      const p1Start = mockServer.emitted.find((e: any) => e.room === 'p1' && e.event === 'gameStart')?.payload;
+      const p2Start = mockServer.emitted.find((e: any) => e.room === 'p2' && e.event === 'gameStart')?.payload;
+
+      expect(p1Start.opponent).toEqual({ type: 'human', userId: 2, username: 'bob' });
+      expect(p2Start.opponent).toEqual({ type: 'human', userId: 1, username: 'alice' });
+    });
+
+    it('reports the AI difficulty as the opponent for a vs-AI game', () => {
+      const mock = createMockServer();
+      (gw as any).server = mock;
+      gw.handlePlayVsAi(mockSocket('ai-p1', '1') as any, { difficulty: 5, rules: { boardSize: 8 } });
+
+      const start = mock.emitted.find((e: any) => e.room === 'ai-p1' && e.event === 'gameStart')?.payload;
+      expect(start.opponent).toEqual({ type: 'ai', difficulty: 5 });
+    });
+
+    it('reports no opponent identity when the other seat is anonymous (nothing to rematch against)', () => {
+      // Direct unit test of opponentInfoFor rather than a full matchmaking round trip
+      // — an anonymous opponent defaults to the platform's 1200 rating band for
+      // pairing purposes, which would need real wait-time band-widening to match
+      // against alice/bob's fixture ratings here; this is a simpler, more direct way
+      // to exercise the "no profile on that seat" branch specifically.
+      const room = { aiColor: undefined, playerProfiles: { L: { id: 1, username: 'alice' }, D: undefined } };
+      expect((gw as any).opponentInfoFor(room, 'L')).toBeNull();
+    });
+  });
 
   describe('live games dashboard (getActiveGames)', () => {
     it('lists an active game with both players\' usernames, ratings, variant, board size, and time control', async () => {

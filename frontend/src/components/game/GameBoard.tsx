@@ -7,7 +7,8 @@ import axios from 'axios';
 import { BoardState, Move, Piece, PieceColor } from '@/lib/draughts';
 import Board from './Board';
 import MoveList from './MoveList';
-import CapturedTray from './CapturedTray';
+import CapturedTray, { materialValue } from './CapturedTray';
+import GameOverModal from './GameOverModal';
 import ConnectionStatus from './ConnectionStatus';
 import Timer from './Timer';
 
@@ -69,6 +70,18 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   // if the game somehow failed to save server-side, so the review button below only
   // ever renders once there's a real game to link to.
   const [finishedGameId, setFinishedGameId] = useState<number | null>(null);
+  // Winner/reason from the same gameOver payload, plus a dismissable flag — feeds
+  // GameOverModal, which pops up automatically the instant a game ends (result is
+  // known immediately even though the accuracy/move-quality stats it also shows take
+  // a few seconds longer, via its own polling of the async post-game review).
+  const [gameOverResult, setGameOverResult] = useState<{ winner: PieceColor | 'DRAW'; reason?: string } | null>(null);
+  const [showGameOverModal, setShowGameOverModal] = useState(false);
+  // Who's on the other side of the board — set from gameStart/gameResync's own
+  // `opponent` field (see game.gateway.ts's opponentInfoFor) — null for a spectator,
+  // an anonymous opponent, or before a game has actually started. Exists purely to
+  // drive the post-game modal's "Rematch" button: it needs to know who (or which AI
+  // difficulty) to challenge again.
+  const [opponent, setOpponent] = useState<{ type: 'ai'; difficulty: number } | { type: 'human'; userId: number; username: string } | null>(null);
   const router = useRouter();
   const [manualFlip, setManualFlip] = useState(false);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -166,6 +179,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     const applyGameStart = (data: {
       roomId: string, color: PieceColor | null, board: BoardState, turn: PieceColor,
       legalMoves: Move[], clocks: Clocks, turnStartedAt: number,
+      opponent?: { type: 'ai'; difficulty: number } | { type: 'human'; userId: number; username: string } | null,
     }, spectating: string) => {
       setRoomId(data.roomId);
       setMyColor(data.color);
@@ -178,6 +192,9 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
       setCaptured({ [PieceColor.LIGHT]: [], [PieceColor.DARK]: [] });
       setGameOver(false);
       setFinishedGameId(null);
+      setGameOverResult(null);
+      setShowGameOverModal(false);
+      setOpponent(data.opponent ?? null);
       setManualFlip(false);
       setOpponentDisconnected(false);
       setStatus(data.color
@@ -234,6 +251,8 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
       setGameOver(true);
       setOpponentDisconnected(false);
       setFinishedGameId(data.gameId ?? null);
+      setGameOverResult({ winner: data.winner, reason: data.reason });
+      setShowGameOverModal(true);
       const reasonTxt = data.reason ? ` (${data.reason.replace('-', ' ')})` : '';
       setStatus(
         data.winner === 'DRAW'
@@ -306,6 +325,27 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   const handleChallengeFriend = (targetUserId: number) => {
     socket?.emit('challengePlayer', { targetUserId, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
     setChallengeNotice('Challenge sent — waiting for a response...');
+  };
+
+  // GameOverModal's "Rematch" — deliberately reuses the exact same mechanisms above
+  // (playVsAi / challengePlayer) rather than a new backend concept: a rematch is just
+  // "play this same opponent again", and both of those already do exactly that given
+  // the right target. Same board/rules/time control the just-finished game used.
+  const handleRematch = (rematchOpponent: typeof opponent) => {
+    if (!rematchOpponent) return;
+    setShowGameOverModal(false);
+    if (rematchOpponent.type === 'ai') handlePlayAI(rematchOpponent.difficulty);
+    else handleChallengeFriend(rematchOpponent.userId);
+  };
+
+  // GameOverModal's "New (10+5)" — a fresh matchmaking search (not necessarily the
+  // same opponent, unlike Rematch) at Rapid specifically, regardless of whatever time
+  // control the just-finished game used — a quick "get me into a new game now"
+  // shortcut rather than requiring a trip back through the settings panel.
+  const handleNewGame = () => {
+    setShowGameOverModal(false);
+    socket?.emit('joinMatchmaking', { rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl: 'rapid' });
+    setStatus('Waiting in matchmaking queue...');
   };
 
   // Fires the moment both the socket is connected and a target was actually
@@ -630,8 +670,21 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
         />
 
         <div className="w-full flex flex-col gap-1">
-          <CapturedTray captured={captured[PieceColor.DARK]} label="Light captured" />
-          <CapturedTray captured={captured[PieceColor.LIGHT]} label="Dark captured" />
+          {/* captured[DARK] is what LIGHT has taken, and vice versa (see the
+              CapturedTray call sites' own labels) — material lead is simply the
+              value of what you've taken minus the value of what you've lost. Only
+              the side actually ahead gets a "+N" badge; CapturedTray itself hides it
+              when the value isn't positive. */}
+          <CapturedTray
+            captured={captured[PieceColor.DARK]}
+            label="Light captured"
+            advantage={materialValue(captured[PieceColor.DARK]) - materialValue(captured[PieceColor.LIGHT])}
+          />
+          <CapturedTray
+            captured={captured[PieceColor.LIGHT]}
+            label="Dark captured"
+            advantage={materialValue(captured[PieceColor.LIGHT]) - materialValue(captured[PieceColor.DARK])}
+          />
         </div>
       </div>
 
@@ -675,6 +728,19 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
           </div>
         </div>
       </div>
+
+      {showGameOverModal && gameOverResult && (
+        <GameOverModal
+          winner={gameOverResult.winner}
+          reason={gameOverResult.reason}
+          gameId={finishedGameId}
+          myColor={myColor}
+          opponent={opponent}
+          onClose={() => setShowGameOverModal(false)}
+          onRematch={handleRematch}
+          onNewGame={handleNewGame}
+        />
+      )}
     </div>
   );
 }
