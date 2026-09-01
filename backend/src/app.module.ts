@@ -17,6 +17,7 @@ import { ClubsModule } from './clubs/clubs.module';
 import { PresenceModule } from './presence/presence.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { LessonsModule } from './lessons/lessons.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     PresenceModule,
     SubscriptionsModule,
     NotificationsModule,
+    LessonsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
