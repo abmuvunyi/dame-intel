@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import NotificationBell from './NotificationBell';
 
 // chess.com-style persistent left icon sidebar, shared across every authenticated
@@ -12,10 +12,20 @@ import NotificationBell from './NotificationBell';
 const NAV_ITEMS = [
   { href: '/', label: 'Play', icon: '♟️' },
   { href: '/puzzles', label: 'Puzzles', icon: '🧩' },
+  { href: '/learn', label: 'Learn', icon: '📚' },
   { href: '/tournaments', label: 'Tournaments', icon: '🏆' },
   { href: '/watch', label: 'Watch', icon: '👁️' },
   { href: '/clubs', label: 'Clubs', icon: '👥' },
   { href: '/rankings', label: 'Rankings', icon: '📊' },
+];
+
+// chess.com's own "Other" nav item is a flyout of reference/utility pages that don't
+// deserve their own top-level icon (Rules, Chess Terms, etc.) — same idea here, sized
+// to what this app actually has real content for rather than copying chess.com's
+// full list (Collections/Vote Chess/ChessKid/etc. have no equivalent here).
+const OTHER_LINKS = [
+  { href: '/rules', label: 'Rules', icon: '📖' },
+  { href: '/glossary', label: 'Glossary', icon: '🔤' },
 ];
 
 interface DashboardShellProps {
@@ -30,10 +40,24 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const otherRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIsAuthenticated(!!localStorage.getItem('token'));
   }, []);
+
+  // Close the "Other" flyout on an outside click — same pattern NotificationBell
+  // already uses for its own dropdown.
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (otherRef.current && !otherRef.current.contains(e.target as Node)) setOtherOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const otherActive = OTHER_LINKS.some(l => pathname === l.href);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -67,6 +91,44 @@ export default function DashboardShell({ children }: DashboardShellProps) {
               <span className="hidden lg:inline">{item.label}</span>
             </Link>
           ))}
+
+          {/* Expands inline, directly below the button, rather than as an
+              absolutely-positioned flyout escaping to the right — the sidebar's own
+              `overflow-y-auto` (needed so a tall page doesn't push the bottom
+              Profile/Log Out section off-screen, see the aside's own comment above)
+              clips anything positioned outside its bounds on the X axis too (setting
+              only overflow-y forces overflow-x to the same non-visible behavior per
+              the CSS spec), which a live screenshot caught turning a `left-full`
+              flyout completely invisible despite Playwright reporting it as "visible"
+              (that check doesn't account for ancestor clipping). Staying inline
+              avoids the whole class of bug. */}
+          <div ref={otherRef}>
+            <button
+              onClick={() => setOtherOpen(o => !o)}
+              className={`${linkClass(otherActive)} w-full`}
+              title="Other"
+            >
+              <span className="text-lg mx-auto lg:mx-0">⋯</span>
+              <span className="hidden lg:inline">Other</span>
+              <span className="hidden lg:inline ml-auto text-xs text-slate-500">{otherOpen ? '▲' : '▼'}</span>
+            </button>
+            {otherOpen && (
+              <div className="flex flex-col gap-1 mt-1 pl-2 lg:pl-6">
+                {OTHER_LINKS.map(link => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setOtherOpen(false)}
+                    className={linkClass(pathname === link.href)}
+                    title={link.label}
+                  >
+                    <span className="text-lg mx-auto lg:mx-0">{link.icon}</span>
+                    <span className="hidden lg:inline">{link.label}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         {isAuthenticated && (

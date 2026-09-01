@@ -56,6 +56,7 @@ phase specifically.
 | `puzzles/puzzle-generator.service.ts` | Y | Y | Y | Y | **New in Phase 7.** Scans completed games for a missed 2+-piece capture; flags `pending` candidates for review. See "Phase 7" below for the worked example. **Rewritten 2026-08-30**: eval-gap detection (any real MISTAKE/BLUNDER-tier move, not just a missed capture) + multi-ply solutions + `classifyGamePhase` tagging + self-play seeding (replacing 4 hand-authored 2-3-piece toy positions) — see "AI strength/speed, real puzzle content..." below. |
 | `GET/POST /puzzles/admin/*` (pending/approve/reject/generate) | Y | Y | Y | Y | **New in Phase 7.** No admin-role system exists in this codebase (no `isAdmin` flag) — these just require being logged in, same bar as the rest of the app; documented as a known simplification, not invented as a side effect of this phase. |
 | `puzzles/puzzle-rush.service.ts` (Puzzle Storm) | Y | Y | Y | Y | **New in Phase 7.** Server-authoritative timing (same principle as Phase 5's game clocks), streak, score. |
+| `lessons/lessons.service.ts` + `Lesson` entity | Y | Y | Y | Y | **New 2026-09-01.** Real curated instructional content (opening/middlegame/endgame/tactics), seeded once at boot the same "only seed an empty table" pattern `PuzzlesService` uses. 11 tests. `GET /lessons`, `GET /lessons/:slug` — see "Learn section, an Other menu..." below. |
 
 **Test run:** `npx jest` from `backend/` → 33 suites, 283 tests, all passing, ~1s (up from 237 as of
 Phase 11 — the +46 are Phase 12's `move-timing-stats.spec.ts` (10 new), `anticheat-review.service.spec.ts`
@@ -71,7 +72,9 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 
 | Page/Component | Exists (Y/N) | Wired to real backend (Y/N) | Verified (Y/N) | Notes |
 |---|---|---|---|---|
-| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. Also handles spectating via `?watch=<roomId>` as of Phase 9, and (Phase 10) shows a live "Friends Online" list with a Challenge button, plus a challenge-received banner. |
+| `/` (home — hosts `GameBoard`) | Y | Y | Y | **Board rebuilt in Phase 4 (2026-08-10).** Live-verified end-to-end for both variants and both interaction modes — see "Phase 4" below for the full breakdown. Also handles spectating via `?watch=<roomId>` as of Phase 9, and (Phase 10) shows a live "Friends Online" list with a Challenge button, plus a challenge-received banner. **2026-09-01**: the signed-in-only dashboard sidebar now renders for every visitor, real "Sign In" prompts in place of real data for a signed-out one — see "Learn section, an Other menu..." below. |
+| `/learn` + `/learn/[slug]` | Y | Y | Y | **New 2026-09-01.** Real, curated lessons across opening/middlegame/endgame/tactics, backed by a new `LessonsService`/`LessonsModule` — see "Learn section, an Other menu..." below. |
+| `/rules`, `/glossary` | Y | N (static content) | Y | **New 2026-09-01.** Reference pages describing exactly this app's own rule engine and standard draughts terminology, reachable via `DashboardShell`'s new "Other" menu. |
 | `GameBoard.tsx` | Y | Y | Y | **Rebuilt in Phase 4** as a thinner orchestrator (socket/game-state logic only) composing 4 new sub-components. **Phase 9** fixed a real pre-existing bug: it read `window.location.search` by hand instead of Next's reactive `useSearchParams()`, which could permanently lock in a stale (empty) query-param value when arriving via a client-side route transition rather than a full page load — affected both the new `?watch=` spectate flow and the pre-existing Phase 5 `?tournamentId=` flow identically. Now wrapped in `Suspense` and uses `useSearchParams()`, which doesn't have this problem. **Phase 10** adds the first real UI for Phase 5's direct-challenge mechanism, deliberately placed here (not a separate page) because `respondToChallenge` creates the game room from the exact socket connection present when the challenge is issued/accepted — it has to be the same long-lived socket that then plays the game. |
 | `/watch` (live games dashboard) | Y | Y | Y | **New in Phase 9 (2026-08-13).** Lists every active game with both players' usernames, ratings, variant, board size, time control, and current spectator count; "Watch" navigates to `/?watch=<roomId>`. |
 | `/clubs` + `/clubs/[id]` | Y | Y | Y | **New in Phase 10.** List/create/join on the index page; detail page shows member list, join/leave, and the club-only discussion feed (only rendered/postable once membership is confirmed against the real `GET /clubs/:id/posts` — a 400 there is treated as "not a member yet", not an error). |
@@ -1699,6 +1702,59 @@ running app: the new rule checkbox confirmed present/functional in the pre-game 
 started and the board's new size/fit confirmed correct (and the overflow bug caught and fixed) at two
 different viewport widths, and a real promoted king's new crown/ring treatment confirmed on the analysis
 page. Zero console errors throughout.
+
+## Learn section, an Other menu (Rules/Glossary), and homepage parity (2026-09-01)
+
+Second and final part of the same redesign batch as the board/king/rules PR above: a real Learn section
+("lessons for opening, endgame, and some possible lessons that can be added"), an "Other" nav menu with
+sublinks "to things like terms, rules" (chess.com's own Chess Terms/Rules pattern), and making the home
+dashboard look the same whether signed in or not.
+
+**Learn — a new backend module, not a frontend-only page.** `lessons/lesson.entity.ts` + `lessons.service.ts`
++ `lessons.controller.ts` (`GET /lessons?category=`, `GET /lessons/:slug`, both unauthenticated — free content,
+same principle as the daily puzzle). Seeded once at boot the same "only seed an empty table" way
+`PuzzlesService` already seeds puzzles, except with real, hand-authored content instead of self-play output —
+a lesson is claiming to teach something correct, so unlike puzzles it isn't something you can safely mine.
+**11 real lessons across all 4 categories** (opening/middlegame/endgame/tactics), each with genuine
+instructional content, not placeholder text. Deliberately scoped to general, safely-accurate principles
+(control the center, forced-capture tactics, the double-corner advantage, etc.) rather than citing precise
+"textbook" positions/move sequences this codebase has no way to independently verify — the one lesson with an
+example diagram ("Two Kings vs One King") uses a real position loaded and confirmed legal through the actual
+engine, not an unverified illustration. `/learn` (index, grouped by category) and `/learn/[slug]` (detail,
+reusing `Board.tsx` in its existing spectator/read-only mode for the diagram rather than building a second
+board renderer) on the frontend. 11 new backend tests. A real `tsc` build error (not caught by `jest`, only by
+actually starting the dev server) was caught and fixed along the way: `lessons.controller.ts` imported
+`LessonCategory` as a normal import for a decorated method parameter, which this project's
+`isolatedModules`/`emitDecoratorMetadata` tsconfig requires to be a type-only import — a reminder that a green
+`jest` run alone doesn't guarantee the app actually boots.
+
+**Other menu — real reference content, not stubs.** `/rules` describes exactly what this app's own engine
+implements for each variant (forced capture, maximum capture, the new king-must-capture-when-tied house rule,
+backward captures, flying kings, win/draw conditions) rather than generic checkers trivia that might not match
+what a game here actually does. `/glossary` is a searchable list of standard, widely-used draughts terminology.
+Added as an "Other" item in `DashboardShell`'s sidebar. **A real bug was caught via live screenshot, not just
+Playwright's own `isVisible()` check (which passed despite the bug)**: the first version rendered the flyout as
+an absolutely-positioned panel escaping the sidebar to the right (`left-full`) — but the sidebar has
+`overflow-y-auto` (needed so a tall page doesn't push the bottom Profile/Log Out section off-screen, see the
+dark-theme phase above), and setting only `overflow-y` forces the browser to treat `overflow-x` as non-visible
+too per the CSS spec, silently clipping anything positioned outside the sidebar's own bounds. Fixed by
+expanding the "Other" list inline, directly below the button, instead of escaping the sidebar at all.
+
+**Homepage parity.** The signed-in-only dashboard sidebar (Recommended Match/Recent Games/Friends cards) used
+to disappear entirely for a signed-out visitor, leaving just the board — the literal ask ("make the homepage
+where signed in or not similar"). Every card now always renders; each falls back to a real "Sign In to unlock
+this" prompt (a new shared `SignInPrompt` component) instead of vanishing, and a new Learn card was added
+alongside them (real, not a placeholder — links straight to the new `/learn` index). Doing this also surfaced
+that the home page's own grid was giving the board too little room in the first place (a flat 2-of-3-column
+split) — same root issue the board-size work above fixed, tightened further here to a fluid board column
+against a fixed 360px sidebar column.
+
+**Verification**: 408 backend tests (up from 397, +11 for lessons). `tsc --noEmit` and `next build` both clean
+across both apps (including the real dev-server-only build error caught above). Full live verification against
+the actually-running app: `/learn` index and a lesson detail page (with its real, engine-verified diagram)
+screenshotted, `/rules` and `/glossary` screenshotted, the "Other" menu's real bug caught and fixed via
+screenshot, and the anonymous home dashboard confirmed showing the same card layout as the signed-in one with
+real sign-in prompts in place of real data. Zero console errors throughout.
 
 ## Repo cleanup notes (Phase 0)
 

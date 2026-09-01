@@ -51,6 +51,25 @@ function authHeaders(token: string) {
   return { headers: { Authorization: `Bearer ${token}` } };
 }
 
+// The shared "sign in to unlock this" state every per-user dashboard card falls back
+// to for a signed-out visitor — one small component instead of four near-identical
+// inline blocks, and it's what makes the anonymous and signed-in dashboards actually
+// look like the same page rather than the signed-in one just having extra cards
+// bolted on.
+function SignInPrompt({ router, text }: { router: ReturnType<typeof useRouter>; text: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm text-slate-500">{text}</p>
+      <button
+        onClick={() => router.push('/login')}
+        className="shrink-0 px-4 py-1.5 bg-slate-700 text-slate-100 rounded text-sm font-semibold hover:bg-slate-600 transition"
+      >
+        Sign In
+      </button>
+    </div>
+  );
+}
+
 // Home-dashboard redesign: every widget below is backed by a real endpoint — no
 // placeholder numbers. Chess.com-inspired features with no real backing data yet
 // (weekly league/division standings, lesson content) were deliberately left out
@@ -140,91 +159,115 @@ export default function Home() {
             </div>
           </div>
 
-          {isAuthenticated && (
-            <div className="flex flex-col gap-5">
-              <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recommended Match</h2>
-                {recommendedMatch ? (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-100">{recommendedMatch.username}</p>
-                      <p className="text-xs text-slate-400">Rating {Math.round(recommendedMatch.rating)} · Similar skill · Online now</p>
-                    </div>
-                    <button
-                      onClick={handleChallengeRecommended}
-                      disabled={autoChallengeUserId !== null}
-                      className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
-                    >
-                      {autoChallengeUserId === recommendedMatch.id ? 'Sending...' : 'Challenge'}
-                    </button>
+          {/* Same widget grid whether signed in or not — a signed-out visitor sees
+              exactly the same cards, each with a real sign-in prompt in place of
+              real data, instead of the whole sidebar disappearing. The Daily Puzzle
+              card is the one exception that was already identical either way (it's
+              free/unauthenticated by design, see the fetch above); every other card
+              below now follows the same "always show the card, vary its content"
+              rule that one already modeled. */}
+          <div className="flex flex-col gap-5">
+            <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recommended Match</h2>
+              {!isAuthenticated ? (
+                <SignInPrompt router={router} text="Sign in to get matched with a similarly-rated opponent." />
+              ) : recommendedMatch ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-100">{recommendedMatch.username}</p>
+                    <p className="text-xs text-slate-400">Rating {Math.round(recommendedMatch.rating)} · Similar skill · Online now</p>
                   </div>
-                ) : (
-                  <p className="text-sm text-slate-500">No similarly-rated players online right now.</p>
-                )}
-              </div>
-
-              <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Daily Puzzle</h2>
-                {dailyPuzzle ? (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-100">Puzzle #{dailyPuzzle.id}</p>
-                      <p className="text-xs text-slate-400">Rating {Math.round(dailyPuzzle.rating)} · Same for everyone today</p>
-                    </div>
-                    <button
-                      onClick={() => router.push('/puzzles?daily=1')}
-                      className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition"
-                    >
-                      Solve
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">No puzzle available yet.</p>
-                )}
-              </div>
-
-              <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recent Games</h2>
-                {recentGames.length > 0 ? (
-                  <ul className="divide-y divide-slate-700">
-                    {recentGames.map((game) => {
-                      const result = resultFor(game);
-                      return (
-                        <li key={game.id} className="py-2 flex items-center justify-between text-sm">
-                          <div>
-                            <span className={`font-bold uppercase ${result.className}`}>{result.label}</span>
-                            <span className="text-slate-400 ml-2">vs {opponentFor(game)}</span>
-                          </div>
-                          <button onClick={() => router.push(`/analysis/${game.id}`)} className="text-green-400 hover:underline font-medium">
-                            Review
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-slate-500">No games played yet — start one on the left!</p>
-                )}
-              </div>
-
-              <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Friends</h2>
-                {friends.filter((f) => f.status === 'ACCEPTED').length > 0 ? (
-                  <ul className="divide-y divide-slate-700">
-                    {friends.filter((f) => f.status === 'ACCEPTED').map((f) => (
-                      <li key={f.id} className="py-2 flex items-center gap-2 text-sm">
-                        <span className={`w-2 h-2 rounded-full ${f.online ? 'bg-green-500' : 'bg-slate-600'}`} />
-                        <span className="text-slate-300">{f.username}</span>
-                        <span className="text-xs text-slate-500 ml-auto">{f.online ? 'Online' : 'Offline'}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-slate-500">Add friends from your profile to see them here.</p>
-                )}
-              </div>
+                  <button
+                    onClick={handleChallengeRecommended}
+                    disabled={autoChallengeUserId !== null}
+                    className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
+                  >
+                    {autoChallengeUserId === recommendedMatch.id ? 'Sending...' : 'Challenge'}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No similarly-rated players online right now.</p>
+              )}
             </div>
-          )}
+
+            <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Daily Puzzle</h2>
+              {dailyPuzzle ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-100">Puzzle #{dailyPuzzle.id}</p>
+                    <p className="text-xs text-slate-400">Rating {Math.round(dailyPuzzle.rating)} · Same for everyone today</p>
+                  </div>
+                  <button
+                    onClick={() => router.push('/puzzles?daily=1')}
+                    className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition"
+                  >
+                    Solve
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No puzzle available yet.</p>
+              )}
+            </div>
+
+            <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Learn</h2>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-400">Opening principles, endgame technique, and tactics — real lessons, free for everyone.</p>
+              </div>
+              <button
+                onClick={() => router.push('/learn')}
+                className="mt-3 px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition"
+              >
+                Browse Lessons
+              </button>
+            </div>
+
+            <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recent Games</h2>
+              {!isAuthenticated ? (
+                <SignInPrompt router={router} text="Sign in to track your games and review them later." />
+              ) : recentGames.length > 0 ? (
+                <ul className="divide-y divide-slate-700">
+                  {recentGames.map((game) => {
+                    const result = resultFor(game);
+                    return (
+                      <li key={game.id} className="py-2 flex items-center justify-between text-sm">
+                        <div>
+                          <span className={`font-bold uppercase ${result.className}`}>{result.label}</span>
+                          <span className="text-slate-400 ml-2">vs {opponentFor(game)}</span>
+                        </div>
+                        <button onClick={() => router.push(`/analysis/${game.id}`)} className="text-green-400 hover:underline font-medium">
+                          Review
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">No games played yet — start one on the left!</p>
+              )}
+            </div>
+
+            <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Friends</h2>
+              {!isAuthenticated ? (
+                <SignInPrompt router={router} text="Sign in to add friends and see who's online." />
+              ) : friends.filter((f) => f.status === 'ACCEPTED').length > 0 ? (
+                <ul className="divide-y divide-slate-700">
+                  {friends.filter((f) => f.status === 'ACCEPTED').map((f) => (
+                    <li key={f.id} className="py-2 flex items-center gap-2 text-sm">
+                      <span className={`w-2 h-2 rounded-full ${f.online ? 'bg-green-500' : 'bg-slate-600'}`} />
+                      <span className="text-slate-300">{f.username}</span>
+                      <span className="text-xs text-slate-500 ml-auto">{f.online ? 'Online' : 'Offline'}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">Add friends from your profile to see them here.</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </DashboardShell>
