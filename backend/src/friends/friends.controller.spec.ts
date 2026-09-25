@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { FriendsController } from './friends.controller';
 import { FriendsService } from './friends.service';
 import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 
 describe('FriendsController', () => {
   let controller: FriendsController;
@@ -19,7 +20,8 @@ describe('FriendsController', () => {
       controllers: [FriendsController],
       providers: [
         { provide: FriendsService, useValue: service },
-        { provide: JwtService, useValue: {} }
+        { provide: JwtService, useValue: {} },
+        { provide: UsersService, useValue: {} },
       ]
     }).compile();
 

@@ -222,7 +222,10 @@ describe('GameReviewService: real end-to-end analysis', () => {
 // the real AiService, since the point here is to force an exception mid-analysis.
 describe('GameReviewService: analysis failure is recorded, not swallowed', () => {
   it('marks the review FAILED with the error message, and still rejects for the caller\'s own .catch()', async () => {
-    const failingAi = { analyzePosition: () => { throw new Error('simulated engine failure'); } };
+    const failingAi = {
+      analyzePosition: () => { throw new Error('simulated engine failure'); },
+      analyzePositionAsync: async () => { throw new Error('simulated engine failure'); },
+    };
     const fakeGame = { id: 1, moves: [{ from: { row: 2, col: 1 }, to: { row: 3, col: 0 } }], rules: { boardSize: 8 } };
     const savedReviews: any[] = [];
     const fakeRepo = {

@@ -67,6 +67,55 @@ describe('GameGateway', () => {
     expect(gateway).toBeDefined();
   });
 
+  // Phase 14: the AI now thinks asynchronously (engine worker thread in production),
+  // so the room can change while it's thinking.
+  describe('async AI moves (Phase 14)', () => {
+    function startAiGame() {
+      const mockServer = createMockServer();
+      (gateway as any).server = mockServer;
+      gateway.handlePlayVsAi({ id: 'client-1' } as any, { difficulty: 1, rules: { boardSize: 8 } });
+      const roomId = (gateway as any).socketToRoom.get('client-1');
+      const room = (gateway as any).activeGames.get(roomId);
+      // Human (LIGHT) plays any legal move so it's the AI's turn.
+      const move = room.engine.getLegalMoves()[0];
+      room.engine.makeMove(move);
+      return { mockServer, roomId, room };
+    }
+
+    it('applies the AI move and broadcasts it when the position is unchanged', async () => {
+      const { mockServer, roomId, room } = startAiGame();
+      const before = mockServer.emitted.length;
+      await (gateway as any).playAiMove(roomId, room);
+      const states = mockServer.emitted.slice(before).filter((e) => e.event === 'gameState');
+      expect(states).toHaveLength(1);
+      expect(room.moves).toHaveLength(1); // the AI's own move (the human move above bypassed the gateway)
+    });
+
+    it('discards the AI move if the game ended while the AI was thinking', async () => {
+      const { mockServer, roomId, room } = startAiGame();
+      const ai = (gateway as any).aiService;
+      let release!: () => void;
+      jest.spyOn(ai, 'getBestMoveAsync').mockImplementation(async (engine: any) => {
+        await new Promise<void>((r) => { release = r; });
+        return engine.getLegalMoves()[0];
+      });
+      const before = mockServer.emitted.length;
+      const thinking = (gateway as any).playAiMove(roomId, room);
+      (gateway as any).activeGames.delete(roomId); // e.g. human resigned mid-think
+      release();
+      await thinking;
+      expect(mockServer.emitted.slice(before).filter((e) => e.event === 'gameState')).toHaveLength(0);
+      expect(room.moves).toHaveLength(0);
+      if (room.flagTimer) clearTimeout(room.flagTimer); // room was removed from activeGames, so afterEach can't see it
+    });
+
+    it('logs and survives an engine failure instead of crashing the gateway', async () => {
+      const { roomId, room } = startAiGame();
+      jest.spyOn((gateway as any).aiService, 'getBestMoveAsync').mockRejectedValue(new Error('worker died'));
+      await expect((gateway as any).playAiMove(roomId, room)).resolves.toBeUndefined();
+    });
+  });
+
   describe('vs-AI game creation resolves the requested variant correctly (Phase 3)', () => {
     it('creates a working 10x10 International game when requested', () => {
       const mockServer = createMockServer();
@@ -660,7 +709,8 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
       gw.handleJoinMatchmaking(mockSocket('p1') as any, { rules: { boardSize: 8 } });
       gw.handleJoinMatchmaking(mockSocket('p2') as any, { rules: { boardSize: 8 } });
       const roomId = (gw as any).socketToRoom.get('p1');
-      (gw as any).activeGames.get(roomId)?.flagTimer && clearTimeout((gw as any).activeGames.get(roomId).flagTimer);
+      const flagTimer = (gw as any).activeGames.get(roomId)?.flagTimer;
+      if (flagTimer) clearTimeout(flagTimer);
       return roomId as string;
     }
 

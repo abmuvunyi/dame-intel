@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { EmailService } from './email.service';
 
 describe('EmailService', () => {
@@ -30,7 +31,7 @@ describe('EmailService', () => {
   it('falls back to a console log and never calls fetch when unconfigured', async () => {
     delete process.env.RESEND_API_KEY;
     const service = new EmailService();
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 
     await service.send({ to: 'player@example.com', subject: 'Hello', text: 'Body text' });
 
@@ -61,7 +62,7 @@ describe('EmailService', () => {
     process.env.RESEND_API_KEY = 're_test_key';
     fetchMock.mockResolvedValue({ ok: false, status: 422, text: async () => 'invalid recipient' });
     const service = new EmailService();
-    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
     await expect(service.send({ to: 'bad', subject: 'x', text: 'y' })).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('422'));
@@ -71,7 +72,7 @@ describe('EmailService', () => {
     process.env.RESEND_API_KEY = 're_test_key';
     fetchMock.mockRejectedValue(new Error('network down'));
     const service = new EmailService();
-    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
     await expect(service.send({ to: 'player@example.com', subject: 'x', text: 'y' })).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalled();

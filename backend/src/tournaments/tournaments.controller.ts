@@ -1,10 +1,35 @@
-import { Body, Controller, Get, Post, Param, ParseIntPipe, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, NotFoundException, Optional, Post, Param, ParseIntPipe, UseGuards, Request } from '@nestjs/common';
 import { TournamentsService } from './tournaments.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { PERMISSIONS } from '../access/roles';
+import { UsersService } from '../users/users.service';
+import { AuditService } from '../audit/audit.service';
+import { CreateTournamentDto } from './create-tournament.dto';
 
 @Controller('tournaments')
 export class TournamentsController {
-  constructor(private readonly tournamentsService: TournamentsService) {}
+  constructor(
+    private readonly tournamentsService: TournamentsService,
+    private readonly usersService: UsersService,
+    @Optional() private readonly audit?: AuditService,
+  ) {}
+
+  // Phase 15: staff organizers (tournaments.manage) can manage any tournament; Pro
+  // players (hostTournaments entitlement) can create tournaments and manage their own.
+  private canHost(user: any): boolean {
+    return this.usersService.hasPermission(user, PERMISSIONS.TOURNAMENTS_MANAGE)
+      || this.usersService.accessFor(user).entitlements.hostTournaments;
+  }
+
+  private async assertCanManage(req: any, tournamentId: number): Promise<void> {
+    const user = req.authUser;
+    if (this.usersService.hasPermission(user, PERMISSIONS.TOURNAMENTS_MANAGE)) return;
+    const t = await this.tournamentsService.getTournament(tournamentId);
+    if (!t) throw new NotFoundException('Tournament not found');
+    if (t.createdByUserId !== user?.id || !this.usersService.accessFor(user).entitlements.hostTournaments) {
+      throw new ForbiddenException('Only tournament organizers, or the Pro member who created it, can manage this tournament.');
+    }
+  }
 
   @Get()
   async getUpcoming() {
@@ -28,26 +53,14 @@ export class TournamentsController {
   }
 
   // --- Swiss lifecycle (SCHEDULED -> REGISTRATION_OPEN -> IN_PROGRESS -> COMPLETED) ---
-  // No admin-role system exists in this codebase (same simplification as Phase 7's
-  // puzzle admin routes) — these just require being logged in.
-
   @UseGuards(AuthGuard)
   @Post()
-  async createTournament(@Body() body: {
-    name: string,
-    format: string,
-    totalRounds?: number,
-    // Organizer settings (Swiss only for now — Phase 8b). All optional; omitting any
-    // of them falls back to the same defaults Phase 8 always used.
-    maxParticipants?: number,
-    timeControl?: string,
-    boardSize?: number,
-    variant?: string,
-    pointsWin?: number,
-    pointsDraw?: number,
-    pointsLoss?: number,
-  }) {
-    return this.tournamentsService.createTournament(body.name, body.format, {
+  async createTournament(@Request() req: any, @Body() body: CreateTournamentDto) {
+    if (!this.canHost(req.authUser)) {
+      throw new ForbiddenException('Creating tournaments requires the Organizer role or a Pro membership.');
+    }
+    const created = await this.tournamentsService.createTournament(body.name, body.format, {
+      createdByUserId: req.user.sub,
       totalRounds: body.totalRounds,
       maxParticipants: body.maxParticipants,
       timeControl: body.timeControl,
@@ -57,18 +70,29 @@ export class TournamentsController {
       pointsDraw: body.pointsDraw,
       pointsLoss: body.pointsLoss,
     });
+    await this.audit?.record({
+      action: 'tournament.created', actorUserId: req.user.sub, targetType: 'tournament', targetId: created.id,
+      details: { name: created.name, format: created.format }, req,
+    });
+    return created;
   }
 
   @UseGuards(AuthGuard)
   @Post(':id/open-registration')
-  async openRegistration(@Param('id', ParseIntPipe) id: number) {
-    return this.tournamentsService.openRegistration(id);
+  async openRegistration(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    await this.assertCanManage(req, id);
+    const t = await this.tournamentsService.openRegistration(id);
+    await this.audit?.record({ action: 'tournament.registration_opened', actorUserId: req.user.sub, targetType: 'tournament', targetId: id, req });
+    return t;
   }
 
   @UseGuards(AuthGuard)
   @Post(':id/start')
-  async startTournament(@Param('id', ParseIntPipe) id: number) {
-    return this.tournamentsService.startTournament(id);
+  async startTournament(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    await this.assertCanManage(req, id);
+    const t = await this.tournamentsService.startTournament(id);
+    await this.audit?.record({ action: 'tournament.started', actorUserId: req.user.sub, targetType: 'tournament', targetId: id, req });
+    return t;
   }
 
   @Get(':id/rounds/:roundNumber')

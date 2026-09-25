@@ -40,7 +40,7 @@ export default function GlossaryPage() {
         <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400 tracking-tight mb-2">
           Glossary
         </h1>
-        <p className="text-slate-400 mb-6">Common draughts/checkers terms you'll see across this app and elsewhere.</p>
+        <p className="text-slate-400 mb-6">Common draughts/checkers terms you&apos;ll see across this app and elsewhere.</p>
 
         <input
           type="text"

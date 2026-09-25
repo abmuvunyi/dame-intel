@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { PieceColor } from '@/lib/draughts';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 type Opponent = { type: 'ai'; difficulty: number } | { type: 'human'; userId: number; username: string } | null;
 
@@ -62,12 +62,11 @@ export default function GameOverModal({ winner, reason, gameId, myColor, opponen
     if (!gameId) return;
     let cancelled = false;
     let attempts = 0;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     const fetchReview = async () => {
       attempts += 1;
       try {
-        const res = await axios.get(`${API_URL}/game-review/${gameId}`);
+        const res = await axios.get(`${API_BASE}/game-review/${gameId}`);
         if (cancelled) return;
         setReview(res.data);
         if (res.data.status === 'COMPLETED' || res.data.status === 'FAILED') {
@@ -82,9 +81,11 @@ export default function GameOverModal({ winner, reason, gameId, myColor, opponen
       }
     };
 
-    fetchReview();
-    interval = setInterval(fetchReview, 3000);
-    return () => { cancelled = true; if (interval) clearInterval(interval); };
+    // fetchReview only touches `interval` after its first await, by which point
+    // this const is initialised.
+    const interval = setInterval(fetchReview, 3000);
+    void fetchReview();
+    return () => { cancelled = true; clearInterval(interval); };
   }, [gameId]);
 
   const resultHeadline = (() => {

@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { errorDetail } from '../common/error-detail';
+
+const logger = new Logger('EmailService');
 
 export interface EmailMessage {
   to: string;
@@ -24,7 +27,7 @@ export class EmailService {
 
   async send(message: EmailMessage): Promise<void> {
     if (!this.apiKey) {
-      console.log(`[Email:console-fallback] To: ${message.to} | Subject: ${message.subject}\n${message.text}`);
+      logger.log(`[Email:console-fallback] To: ${message.to} | Subject: ${message.subject}\n${message.text}`);
       return;
     }
 
@@ -43,13 +46,13 @@ export class EmailService {
         }),
       });
       if (!res.ok) {
-        console.error(`[Email] Resend API returned ${res.status}: ${await res.text()}`);
+        logger.error(`[Email] Resend API returned ${res.status}: ${await res.text()}`);
       }
     } catch (err) {
       // A failed email send should never take down whatever triggered it (a friend
       // request, a challenge, etc.) — log and move on, same principle as the
       // gateway's existing fire-and-forget async analysis passes.
-      console.error('[Email] Failed to send:', err);
+      logger.error(`[Email] Failed to send: ${errorDetail(err)}`);
     }
   }
 }

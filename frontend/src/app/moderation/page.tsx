@@ -2,18 +2,18 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { API_BASE as API } from '@/lib/api';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Phase 12's moderator review queue. No admin-role system exists anywhere in this
-// codebase — reaching this page just requires being logged in (same as every other
-// "admin" surface already built: Phase 7's puzzle admin, Phase 8b's tournament
-// lifecycle). It isn't linked from any nav; a real deployment would gate this behind
-// an actual role before ever surfacing it in navigation.
+// Phase 12's moderator review queue. Phase 14: every backend route this page calls
+// requires an ADMIN-role user (AdminGuard); non-admins get a 403 and see an
+// "access required" message instead of an empty queue. Linked from the sidebar for
+// admins only.
 export default function ModerationQueue() {
   const [flags, setFlags] = useState<any[]>([]);
   const [showReviewed, setShowReviewed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [tempBanDays, setTempBanDays] = useState(7);
@@ -31,7 +31,10 @@ export default function ModerationQueue() {
         params: showReviewed ? {} : { reviewed: 'false' },
       });
       setFlags(res.data);
-    } catch (err) {
+      setForbidden(false);
+    } catch (err: any) {
+      if (err.response?.status === 401) { router.push('/login'); return; }
+      if (err.response?.status === 403) { setForbidden(true); return; }
       console.error(err);
     } finally {
       setLoading(false);
@@ -76,7 +79,9 @@ export default function ModerationQueue() {
       </div>
 
       <div className="w-full max-w-5xl bg-white rounded-lg shadow-xl p-8">
-        {loading ? (
+        {forbidden ? (
+          <p className="text-gray-600">Administrator access required. Ask an existing admin to grant your account the ADMIN role.</p>
+        ) : loading ? (
           <p>Loading...</p>
         ) : flags.length === 0 ? (
           <p className="text-gray-500">No flags to review right now.</p>

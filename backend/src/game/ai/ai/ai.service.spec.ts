@@ -80,7 +80,7 @@ describe('AiService', () => {
     it('plays a full 8x8 American game to completion', () => {
       const american = DraughtsEngine.createAmerican();
       const result = playSelfPlayGame(service, american);
-      // eslint-disable-next-line no-console
+       
       console.log(
         `\n--- 8x8 American self-play: ${result.halfMoves} half-moves, ` +
         `winner=${result.winner ?? (result.isDraw ? `DRAW (${result.drawReason})` : 'none')} ---\n` +
@@ -92,7 +92,7 @@ describe('AiService', () => {
     it('plays a full 10x10 International game to completion', () => {
       const international = DraughtsEngine.createInternational();
       const result = playSelfPlayGame(service, international);
-      // eslint-disable-next-line no-console
+       
       console.log(
         `\n--- 10x10 International self-play: ${result.halfMoves} half-moves, ` +
         `winner=${result.winner ?? (result.isDraw ? `DRAW (${result.drawReason})` : 'none')} ---\n` +

@@ -202,10 +202,13 @@ describe('PuzzleGeneratorService', () => {
       // A small override (real code path, same as production's DEFAULT_SEED_MATCHUPS,
       // just fewer/shorter games) — keeps this genuinely real integration test fast
       // enough for the routine test suite rather than production's own ~45s cost.
+      // Phase 14: capped at 30 plies — at the full 100 this single test took 60s+
+      // on a CI-class machine and blocked the event loop long enough to also time out
+      // the NEXT test's setup hook. The code path exercised is identical.
       const result = await service.seedFromSelfPlay([
-        { light: 3, dark: 2, boardSize: 10 },
-        { light: 3, dark: 3, boardSize: 8 },
-      ]);
+        { light: 2, dark: 1, boardSize: 10 },
+        { light: 2, dark: 2, boardSize: 8 },
+      ], { maxPliesPerGame: 30 });
 
       expect(result.gamesPlayed).toBe(2);
       expect(result.puzzlesCreated).toBeGreaterThanOrEqual(0);
@@ -233,7 +236,7 @@ describe('PuzzleGeneratorService', () => {
           expect(savedGames.some((g: any) => g.id === puzzle.sourceGameId)).toBe(true);
         }
       }
-    }, 60000);
+    }, 120000);
   });
 
   describe('scanRecentGames', () => {

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Param, ParseIntPipe, UseGuards, Request } from '@nestjs/common';
 import { ClubsService } from './clubs.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { CreateClubDto } from './create-club.dto';
 
 @Controller('clubs')
 export class ClubsController {
@@ -30,7 +31,7 @@ export class ClubsController {
 
   @UseGuards(AuthGuard)
   @Post()
-  async createClub(@Request() req: any, @Body() body: { name: string, description?: string }) {
+  async createClub(@Request() req: any, @Body() body: CreateClubDto) {
     return this.clubsService.createClub(req.user.sub, body.name, body.description);
   }
 

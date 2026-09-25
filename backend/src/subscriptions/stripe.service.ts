@@ -1,5 +1,7 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
+
+const logger = new Logger('StripeService');
 
 // Thin wrapper around the real Stripe SDK — every call in this file is Stripe's own
 // hosted flow (Checkout Session, Billing Portal Session, webhook signature
@@ -22,7 +24,7 @@ export class StripeService {
     if (secretKey) {
       this.stripe = new Stripe(secretKey);
     } else {
-      console.warn('[Stripe] STRIPE_SECRET_KEY not set — subscriptions endpoints will return 503 rather than crash the app.');
+      logger.warn('[Stripe] STRIPE_SECRET_KEY not set — subscriptions endpoints will return 503 rather than crash the app.');
     }
   }
 

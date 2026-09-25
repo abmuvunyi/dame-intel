@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import DashboardShell from '@/components/DashboardShell';
+import { API_BASE } from '@/lib/api';
+import Link from 'next/link';
 
 export default function Profile() {
   const [profile, setProfile] = useState<any>(null);
@@ -26,13 +28,13 @@ export default function Profile() {
 
       try {
         const [profileRes, historyRes, friendsRes] = await Promise.all([
-           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/profile`, {
+           axios.get(`${API_BASE}/auth/profile`, {
              headers: { Authorization: `Bearer ${token}` }
            }),
-           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/history/my-games`, {
+           axios.get(`${API_BASE}/history/my-games`, {
              headers: { Authorization: `Bearer ${token}` }
            }),
-           axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends`, {
+           axios.get(`${API_BASE}/friends`, {
              headers: { Authorization: `Bearer ${token}` }
            })
         ]);
@@ -51,7 +53,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (history.length === 0) return;
-    const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const API = API_BASE;
     Promise.all(history.map(g => axios.get(`${API}/game-review/${g.id}`).then(r => [g.id, r.data] as const).catch(() => [g.id, null] as const)))
       .then(entries => {
         const map: Record<number, any> = {};
@@ -64,7 +66,7 @@ export default function Profile() {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/add`, { username: newFriendName }, {
+      await axios.post(`${API_BASE}/friends/add`, { username: newFriendName }, {
          headers: { Authorization: `Bearer ${token}` }
       });
       setNewFriendName('');
@@ -77,7 +79,7 @@ export default function Profile() {
   const handleAcceptFriend = async (id: number) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/accept/${id}`, {}, {
+      await axios.post(`${API_BASE}/friends/accept/${id}`, {}, {
          headers: { Authorization: `Bearer ${token}` }
       });
       // Update local state
@@ -90,7 +92,7 @@ export default function Profile() {
   const handleDeclineFriend = async (id: number) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends/decline/${id}`, {}, {
+      await axios.post(`${API_BASE}/friends/decline/${id}`, {}, {
          headers: { Authorization: `Bearer ${token}` }
       });
       setFriends(friends.filter(f => f.id !== id));
@@ -251,7 +253,7 @@ export default function Profile() {
               </ul>
 
               <div className="mt-6 pt-4 border-t border-slate-700">
-                <a href="/clubs" className="text-sm text-green-400 hover:underline">Browse Clubs →</a>
+                <Link href="/clubs" className="text-sm text-green-400 hover:underline">Browse Clubs →</Link>
               </div>
             </>
           )}

@@ -59,7 +59,7 @@ export class CheatFlag {
   @Column({ type: 'text', nullable: true })
   moderatorAction: string | null;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: Date, nullable: true }) // `Date` (not 'datetime') maps to datetime on sqlite AND timestamp on Postgres
   reviewedAt: Date | null;
 
   @CreateDateColumn()

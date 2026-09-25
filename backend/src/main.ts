@@ -1,6 +1,13 @@
+import { initSentry, flushSentry } from './common/sentry';
+// Initialise error tracking before anything else is loaded (no-op without SENTRY_DSN).
+initSentry();
+
 import { NestFactory } from '@nestjs/core';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './redis.adapter';
+import { allowedOrigins } from './config/cors';
+import { configureApp } from './app.setup';
 
 async function bootstrap() {
   // rawBody: true attaches the untouched request body (req.rawBody) alongside Nest's
@@ -8,21 +15,37 @@ async function bootstrap() {
   // webhook route (Phase 13) — Stripe's signature verification is computed over the
   // exact raw bytes, so a JSON.parse()-then-reserialize round trip would break it
   // even if the parsed content is byte-for-byte "the same" data.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
 
-  // Enable CORS so Next.js frontend can connect
-  app.enableCors();
+  // Phase 14: structured JSON logs (pino) for every Nest log line and HTTP request.
+  const logger = app.get(Logger);
+  app.useLogger(logger);
 
-  // Try connecting to Redis for WebSocket scaling
+  configureApp(app); // helmet, CORS allowlist, validation, error reporting (app.setup.ts)
+
+  // Redis-backed Socket.IO adapter when REDIS_URL is reachable; otherwise the
+  // in-memory adapter (fine for a single backend instance).
   const redisIoAdapter = new RedisIoAdapter(app);
-  await redisIoAdapter.connectToRedis().catch(err => {
-    console.warn('Could not connect to Redis, falling back to in-memory adapter.');
-  });
+  await redisIoAdapter.connectToRedis();
   if (redisIoAdapter.isReady()) {
-     app.useWebSocketAdapter(redisIoAdapter);
+    app.useWebSocketAdapter(redisIoAdapter);
+  } else {
+    logger.warn('Redis unavailable — using the in-memory Socket.IO adapter.', 'Bootstrap');
   }
 
-  // Ensure the backend listens on port 3001
-  await app.listen(process.env.PORT ?? 3001);
+  const port = Number(process.env.PORT ?? 3001);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`Listening on port ${port}; CORS origins: ${allowedOrigins().join(', ') || '(none)'}`, 'Bootstrap');
 }
-bootstrap();
+
+process.on('unhandledRejection', (reason) => {
+   
+  console.error('Unhandled promise rejection:', reason);
+});
+
+bootstrap().catch(async (err) => {
+   
+  console.error('Fatal error during startup:', err);
+  await flushSentry();
+  process.exit(1);
+});

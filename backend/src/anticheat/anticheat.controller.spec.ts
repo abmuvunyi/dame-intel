@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AnticheatController } from './anticheat.controller';
 import { AnticheatService } from './anticheat.service';
 import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 
 describe('AnticheatController', () => {
   let controller: AnticheatController;
@@ -20,6 +21,7 @@ describe('AnticheatController', () => {
       providers: [
         { provide: AnticheatService, useValue: service },
         { provide: JwtService, useValue: {} },
+        { provide: UsersService, useValue: {} },
       ],
     }).compile();
 

@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function RankingsPage() {
   const [rankings, setRankings] = useState<any[]>([]);
@@ -14,8 +14,8 @@ export default function RankingsPage() {
     const fetchData = async () => {
       try {
         const [rankRes, statsRes] = await Promise.all([
-          axios.get(`${API_URL}/users/rankings`),
-          axios.get(`${API_URL}/users/stats`)
+          axios.get(`${API_BASE}/users/rankings`),
+          axios.get(`${API_BASE}/users/stats`)
         ]);
         setRankings(rankRes.data);
         setStats(statsRes.data);

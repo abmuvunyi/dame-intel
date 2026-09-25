@@ -4,8 +4,8 @@ import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import { BoardState, Move, PieceColor } from '@/lib/draughts';
 import Board from '@/components/game/Board';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const DURATION_SECONDS = 180;
 
 interface RushPuzzle {
@@ -30,7 +30,9 @@ export default function PuzzleRushPage() {
   const [displaySeconds, setDisplaySeconds] = useState(DURATION_SECONDS);
   const [ended, setEnded] = useState(false);
   const [flash, setFlash] = useState<'correct' | 'wrong' | null>(null);
-  const snapshotAt = useRef(Date.now());
+  // Set on mount / on each server snapshot — never read the clock during render.
+  const snapshotAt = useRef(0);
+  useEffect(() => { snapshotAt.current = Date.now(); }, []);
   const router = useRouter();
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function PuzzleRushPage() {
   }, [timeLeftSeconds]);
 
   const loadLegalMoves = useCallback(async (puzzleId: number, atMoveIndex: number) => {
-    const res = await axios.get(`${API_URL}/puzzles/${puzzleId}/legal-moves`, { params: { moveIndex: atMoveIndex } });
+    const res = await axios.get(`${API_BASE}/puzzles/${puzzleId}/legal-moves`, { params: { moveIndex: atMoveIndex } });
     setBoard(res.data.board);
     setTurn(res.data.turn);
     setLegalMoves(res.data.legalMoves);
@@ -57,7 +59,7 @@ export default function PuzzleRushPage() {
     setLastMove(null);
     const token = localStorage.getItem('token');
     const res = await axios.post(
-      `${API_URL}/puzzles/rush/start`,
+      `${API_BASE}/puzzles/rush/start`,
       { durationSeconds: DURATION_SECONDS },
       token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
     );
@@ -69,13 +71,15 @@ export default function PuzzleRushPage() {
   }, [loadLegalMoves]);
 
   useEffect(() => {
-    start();
+    // Starting the timed session on mount is intentional (it resets state, then fetches).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void start();
   }, [start]);
 
   const handleMove = async (move: Move) => {
     if (!sessionId || !puzzle || ended) return;
 
-    const res = await axios.post(`${API_URL}/puzzles/rush/${sessionId}/attempt`, { moveIndex, move });
+    const res = await axios.post(`${API_BASE}/puzzles/rush/${sessionId}/attempt`, { moveIndex, move });
     const result = res.data;
 
     setScore(result.score);
@@ -111,7 +115,7 @@ export default function PuzzleRushPage() {
   if (ended) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-        <h1 className="text-4xl font-bold">⏱️ Time's up!</h1>
+        <h1 className="text-4xl font-bold">⏱️ Time&apos;s up!</h1>
         <p className="text-2xl">Score: <span className="font-bold">{score}</span></p>
         <p className="text-lg text-gray-600">Best streak: {bestStreak}</p>
         <div className="flex gap-4 mt-4">

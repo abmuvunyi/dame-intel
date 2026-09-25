@@ -7,7 +7,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { DraughtsEngine, PieceColor } from './engine/engine.service';
 import type { Move } from './engine/engine.service';
@@ -21,12 +21,16 @@ import { AnticheatService } from '../anticheat/anticheat.service';
 
 import { GameRules } from './engine/engine.service';
 import { SeekEntry, sweepMatches } from './matchmaking';
-import { TimeControl, TimeControlName, TIME_CONTROLS, resolveTimeControl } from './time-control';
+import { TimeControl, TIME_CONTROLS, resolveTimeControl } from './time-control';
 import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
 import { filterMessage, pruneAndRecordTimestamp, isRateLimited } from './chat-filter';
 import { GameReviewService } from './review/game-review.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { errorDetail } from '../common/error-detail';
+import { corsOptions } from '../config/cors';
+
+const logger = new Logger('GameGateway');
 
 // How long a disconnected player has to reconnect before their opponent is awarded the
 // win by abandonment (PvP), or the room is quietly cleaned up (vs-AI).
@@ -94,7 +98,8 @@ interface GameRoom {
   correspondenceReminderSentFor?: number;
 }
 
-@WebSocketGateway({ cors: true })
+// Phase 14: same explicit origin allowlist as HTTP (config/cors.ts), not `cors: true`.
+@WebSocketGateway({ cors: corsOptions })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly aiService: AiService,
@@ -151,12 +156,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       room.correspondenceReminderSentFor = room.turnStartedAt;
       this.notificationsService
         .notify(mover.id, 'CORRESPONDENCE_TURN_REMINDER', "It's your move in your correspondence game", { roomId: room.roomId })
-        .catch((err) => console.error(`[Notifications] Failed to send correspondence reminder for room ${room.roomId}:`, err));
+        .catch((err) => logger.error(`[Notifications] Failed to send correspondence reminder for room ${room.roomId}: ${errorDetail(err)}`));
     }
   }
 
   async handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    logger.debug(`Client connected: ${client.id}`);
 
     // Optional Auth via query or auth payload (socket.io v4 feature)
     const token = client.handshake.auth.token || client.handshake.query.token;
@@ -172,16 +177,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           // dropped (an anonymous spectator-style connection is still harmless), just
           // never gets attached to their identity.
           client.emit('error', { message: 'This account is banned and cannot authenticate.' });
+        } else if (user && (payload.tv ?? 0) !== (user.tokenVersion ?? 0)) {
+          // Phase 15: sessions revoked (role change, ban, "log out everywhere").
+          client.emit('error', { message: 'Session expired. Please sign in again.' });
         } else if (user) {
-          const { passwordHash, ...profile } = user;
+          const { passwordHash: _passwordHash, ...profile } = user;
           this.socketToUser.set(client.id, profile);
           this.userIdToSocket.set(profile.id, client.id);
           this.presenceService.markOnline(profile.id); // Phase 10: friends list "online" indicator
-          console.log(`Authenticated user connected: ${profile.username}`);
+          logger.debug(`Authenticated user connected: ${profile.username}`);
           this.attemptRejoin(client, profile.id);
         }
       } catch (err) {
-        console.warn('Invalid token on websocket connection');
+        logger.warn('Invalid token on websocket connection');
       }
     }
   }
@@ -212,7 +220,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     room.players[color] = client.id;
     this.socketToRoom.set(client.id, roomId);
-    client.join(roomId);
+    void client.join(roomId);
 
     client.emit('gameResync', {
       roomId,
@@ -237,7 +245,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
+    logger.debug(`Client disconnected: ${client.id}`);
 
     this.waitingPlayers = this.waitingPlayers.filter(p => p.id !== client.id);
     this.chatTimestamps.delete(client.id);
@@ -311,7 +319,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     room.disconnectTimers[color] = setTimeout(() => {
       delete room.disconnectTimers[color];
       const stillActive = this.activeGames.get(roomId);
-      if (stillActive) this.handleGameOver(roomId, stillActive, opponentColor, 'abandonment');
+      if (stillActive) this.handleGameOver(roomId, stillActive, opponentColor, 'abandonment').catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
     }, DISCONNECT_GRACE_MS);
   }
 
@@ -353,7 +361,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     const flaggedColor = room.engine.getCurrentTurn();
     const winner = flaggedColor === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
-    this.handleGameOver(roomId, room, winner, 'flag-fall');
+    this.handleGameOver(roomId, room, winner, 'flag-fall').catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
   }
 
   // Deducts the time the mover actually spent thinking from their own clock and applies
@@ -395,7 +403,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     room.spectators.push(client.id);
     this.socketToRoom.set(client.id, room.roomId);
-    client.join(room.roomId);
+    void client.join(room.roomId);
 
     // Send current state
     client.emit('gameStart', {
@@ -457,9 +465,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!room) return;
 
     if (room.players[PieceColor.LIGHT] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.DARK, 'resignation');
+       this.handleGameOver(roomId, room, PieceColor.DARK, 'resignation').catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
     } else if (room.players[PieceColor.DARK] === client.id) {
-       this.handleGameOver(roomId, room, PieceColor.LIGHT, 'resignation');
+       this.handleGameOver(roomId, room, PieceColor.LIGHT, 'resignation').catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
     }
   }
 
@@ -494,7 +502,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Validate client is actually a player
     if (room.players[PieceColor.LIGHT] === client.id || room.players[PieceColor.DARK] === client.id) {
-       this.handleGameOver(roomId, room, 'DRAW', 'agreement');
+       this.handleGameOver(roomId, room, 'DRAW', 'agreement').catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
     }
   }
 
@@ -559,7 +567,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (p1Profile) this.userIdToRoom.set(p1Profile.id, roomId);
 
     // Join socket.io room
-    this.server.sockets.sockets.get(client.id)?.join(roomId);
+    void this.server.sockets.sockets.get(client.id)?.join(roomId);
     this.scheduleFlagFall(roomId, room);
 
     // Notify player
@@ -713,7 +721,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     // must never block the challenge itself, which has already been delivered.
     this.notificationsService
       .notify(data.targetUserId, 'CHALLENGE_RECEIVED', `${fromProfile.username} has challenged you to a game`, { challengeId })
-      .catch((err) => console.error('[Notifications] Failed to record challenge notification:', err));
+      .catch((err) => logger.error(`[Notifications] Failed to record challenge notification: ${errorDetail(err)}`));
   }
 
   @SubscribeMessage('respondToChallenge')
@@ -776,8 +784,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (p2Profile) this.userIdToRoom.set(p2Profile.id, roomId);
 
     // Join socket.io rooms
-    this.server.sockets.sockets.get(player1Id)?.join(roomId);
-    this.server.sockets.sockets.get(player2Id)?.join(roomId);
+    void this.server.sockets.sockets.get(player1Id)?.join(roomId);
+    void this.server.sockets.sockets.get(player2Id)?.join(roomId);
 
     this.scheduleFlagFall(roomId, room);
 
@@ -863,9 +871,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
       const winner = room.engine.getWinner();
       if (winner) {
-        this.handleGameOver(roomId, room, winner);
+        this.handleGameOver(roomId, room, winner).catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
       } else if (room.engine.isDraw()) {
-        this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined);
+        this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined).catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
       } else {
         this.scheduleFlagFall(roomId, room);
         // If playing against AI and it's AI's turn
@@ -883,52 +891,72 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     // Small delay so the AI doesn't feel instant/robotic
     setTimeout(() => {
-      // Double check it's still AI's turn
-      if (room.engine.getCurrentTurn() !== room.aiColor) return;
+      void this.playAiMove(roomId, room);
+    }, 500); // 500ms delay
+  }
 
-      const bestMove = this.aiService.getBestMove(room.engine, room.aiDifficulty!);
+  // Phase 14: the search itself now runs on an engine worker thread
+  // (AiService.getBestMoveAsync), so a difficulty-7 think (up to ~6s) no longer
+  // freezes every other game on the server. Because the room can change while the AI
+  // is thinking (resignation, flag fall, disconnect-forfeit), everything is re-checked
+  // after the await before the move is applied.
+  private async playAiMove(roomId: string, room: GameRoom): Promise<void> {
+    // Double check it's still AI's turn
+    if (room.engine.getCurrentTurn() !== room.aiColor) return;
+    const positionBefore = room.engine.getBoardString();
 
-      if (bestMove) {
-        const success = room.engine.makeMove(bestMove);
-        if (success) {
-          room.moves.push(bestMove);
-          room.moveTimings.push(Date.now() - room.turnStartedAt); // keeps the two arrays parallel — see GameRoom.moveTimings
-          this.applyClockForMove(room, room.aiColor!);
-          const newTurn = room.engine.getCurrentTurn();
+    let bestMove: Move | null;
+    try {
+      bestMove = await this.aiService.getBestMoveAsync(room.engine, room.aiDifficulty!);
+    } catch (err) {
+      logger.error(`AI move failed for room ${roomId}: ${errorDetail(err)}`);
+      return;
+    }
+    if (this.activeGames.get(roomId) !== room || room.engine.getCurrentTurn() !== room.aiColor
+        || room.engine.getBoardString() !== positionBefore) {
+      return; // game ended or position changed while the AI was thinking
+    }
 
-          this.server.to(roomId).emit('gameState', {
-            board: room.engine.getBoard(),
-            turn: newTurn,
-            move: bestMove,
-            clocks: room.clocks,
-            turnStartedAt: room.turnStartedAt,
-          });
+    if (bestMove) {
+      const success = room.engine.makeMove(bestMove);
+      if (success) {
+        room.moves.push(bestMove);
+        room.moveTimings.push(Date.now() - room.turnStartedAt); // keeps the two arrays parallel — see GameRoom.moveTimings
+        this.applyClockForMove(room, room.aiColor);
+        const newTurn = room.engine.getCurrentTurn();
 
-          // Send legal moves back to human player
-          if (room.players[PieceColor.LIGHT] && newTurn === PieceColor.LIGHT) {
-             this.server.to(room.players[PieceColor.LIGHT]).emit('legalMoves', room.engine.getLegalMoves());
-          }
+        this.server.to(roomId).emit('gameState', {
+          board: room.engine.getBoard(),
+          turn: newTurn,
+          move: bestMove,
+          clocks: room.clocks,
+          turnStartedAt: room.turnStartedAt,
+        });
 
-          const winner = room.engine.getWinner();
-          if (winner) {
-            this.handleGameOver(roomId, room, winner);
-          } else if (room.engine.isDraw()) {
-            this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined);
-          } else if (newTurn === room.aiColor) {
-            // Multi-jump scenarios: If the engine didn't switch turns, AI goes again
-            this.triggerAiTurn(roomId, room);
-          } else {
-            this.scheduleFlagFall(roomId, room);
-          }
+        // Send legal moves back to human player
+        if (room.players[PieceColor.LIGHT] && newTurn === PieceColor.LIGHT) {
+           this.server.to(room.players[PieceColor.LIGHT]).emit('legalMoves', room.engine.getLegalMoves());
         }
-      } else {
-        // AI has no moves
+
         const winner = room.engine.getWinner();
         if (winner) {
-           this.handleGameOver(roomId, room, winner);
+          this.handleGameOver(roomId, room, winner).catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
+        } else if (room.engine.isDraw()) {
+          this.handleGameOver(roomId, room, 'DRAW', room.engine.getDrawReason() ?? undefined).catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
+        } else if (newTurn === room.aiColor) {
+          // Multi-jump scenarios: If the engine didn't switch turns, AI goes again
+          this.triggerAiTurn(roomId, room);
+        } else {
+          this.scheduleFlagFall(roomId, room);
         }
       }
-    }, 500); // 500ms delay
+    } else {
+      // AI has no moves
+      const winner = room.engine.getWinner();
+      if (winner) {
+         this.handleGameOver(roomId, room, winner).catch((err) => logger.error(`handleGameOver failed for room ${roomId}: ${errorDetail(err)}`));
+      }
+    }
   }
 
   private async handleGameOver(roomId: string, room: GameRoom, winner: PieceColor | 'DRAW', reason?: string) {
@@ -944,13 +972,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        savedGame = await this.historyService.saveGame(
           room.playerProfiles[PieceColor.LIGHT] || null,
           room.playerProfiles[PieceColor.DARK] || null,
-          winner as 'L'|'D'|'DRAW',
+          winner,
           room.moves,
           room.rules,
           room.moveTimings
        );
     } catch (err) {
-       console.error('Failed to save game history:', err);
+       logger.error(`Failed to save game history: ${errorDetail(err)}`);
     }
 
     this.server.to(roomId).emit('gameOver', { winner, reason, gameId: savedGame?.id ?? null });
@@ -970,7 +998,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        // human players). Same "don't await, it's CPU intensive" reasoning as
        // anti-cheat; see GameReviewService.analyzeCompletedGame's own comment for why
        // this is a background PASS rather than a background PROCESS.
-       this.gameReviewService.analyzeCompletedGame(gameId).catch(err => console.error('Game Review Error:', err));
+       this.gameReviewService.analyzeCompletedGame(gameId).catch(err => logger.error(`Game Review Error: ${errorDetail(err)}`));
 
        // Trigger async anti-cheat analysis
        // We don't await this because it's CPU intensive and we don't want to block the gateway
@@ -982,7 +1010,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
               room.rules, // fixes a real bug — see the comment on analyzeGameForCheating's rules param
               room.moveTimings, // Phase 12: move-time anomaly detection
               gameId, // Phase 12: supporting game reference for engine-correlation flags
-           ).catch(err => console.error('Anticheat Error:', err));
+           ).catch(err => logger.error(`Anticheat Error: ${errorDetail(err)}`));
        }
 
        if (p1 && p2 && !room.aiDifficulty) {
@@ -1052,7 +1080,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
        }
        } // end if (savedGame)
     } catch(err) {
-       console.error('Failed to process post-game updates:', err);
+       logger.error(`Failed to process post-game updates: ${errorDetail(err)}`);
     }
 
     const p1id = room.playerProfiles[PieceColor.LIGHT]?.id;

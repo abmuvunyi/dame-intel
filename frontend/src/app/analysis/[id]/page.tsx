@@ -1,10 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { PieceColor, PieceType } from '@/lib/draughts';
 import EvalBar from '@/components/game/EvalBar';
 import EvalGraph from '@/components/game/EvalGraph';
+import { API_BASE } from '@/lib/api';
 
 // Simplified local engine state just for replaying moves
 class ReplayEngine {
@@ -95,7 +97,7 @@ export default function AnalysisPage() {
   useEffect(() => {
     const fetchGame = async () => {
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/history/game/${id}`);
+        const res = await axios.get(`${API_BASE}/history/game/${id}`);
         setGame(res.data);
 
         // Pre-compute all states
@@ -134,11 +136,13 @@ export default function AnalysisPage() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     const fetchReview = async () => {
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/game-review/${id}`);
+        // Signed-in players send their token: the engine's continuation lines are
+        // included only for plans with full game review (Premium / Pro / trial).
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API_BASE}/game-review/${id}`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
         if (cancelled) return;
         setReview(res.data);
         if (res.data.status === 'COMPLETED' || res.data.status === 'FAILED') {
@@ -150,9 +154,11 @@ export default function AnalysisPage() {
       }
     };
 
-    fetchReview();
-    interval = setInterval(fetchReview, 3000);
-    return () => { cancelled = true; if (interval) clearInterval(interval); };
+    // fetchReview only touches `interval` after its first await, by which point
+    // this const is initialised.
+    const interval = setInterval(fetchReview, 3000);
+    void fetchReview();
+    return () => { cancelled = true; clearInterval(interval); };
   }, [id]);
 
   const handleAnalyze = async () => {
@@ -166,7 +172,7 @@ export default function AnalysisPage() {
       // back what it really used, so there's no benefit to under-requesting here.
       const token = localStorage.getItem('token');
       const res = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/analysis`,
+        `${API_BASE}/analysis`,
         { board: state.board, turn: state.turn, depth: 8 },
         token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
       );
@@ -424,6 +430,13 @@ export default function AnalysisPage() {
               </div>
             )}
 
+            {!previewLine && review?.linesIncluded === false && review?.status === 'COMPLETED' && (
+              <p className="mt-2 text-xs text-slate-500">
+                Want to see the engine&apos;s best continuation and how mistakes get punished?{' '}
+                <Link href="/membership" className="text-purple-700 hover:underline">Premium and Pro include full game review</Link>.
+              </p>
+            )}
+
             {previewLine && (
               <div className="mt-2 w-full max-w-md bg-purple-50 border border-purple-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -517,7 +530,7 @@ export default function AnalysisPage() {
                    ))}
                </div>
            ) : (
-               <p className="text-gray-500 italic mt-10 text-center">Click 'Run Engine' to see evaluations for this position.</p>
+               <p className="text-gray-500 italic mt-10 text-center">Click &apos;Run Engine&apos; to see evaluations for this position.</p>
            )}
         </div>
 

@@ -1,9 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GameHistory } from './history.entity';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
+import { errorDetail } from '../common/error-detail';
+
+const logger = new Logger('HistoryService');
 
 @Injectable()
 export class HistoryService {
@@ -42,7 +45,7 @@ export class HistoryService {
       if (lightPlayer) await this.usersService.recordDailyPlay(lightPlayer.id);
       if (darkPlayer) await this.usersService.recordDailyPlay(darkPlayer.id);
     } catch (err) {
-      console.error('Failed to record daily play streak:', err);
+      logger.error(`Failed to record daily play streak: ${errorDetail(err)}`);
     }
 
     return saved;

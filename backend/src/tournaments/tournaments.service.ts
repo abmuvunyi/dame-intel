@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Tournament } from './tournament.entity';
@@ -9,6 +9,9 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { pairSwissRound, SwissPlayer, BYE } from './swiss-pairing';
+import { errorDetail } from '../common/error-detail';
+
+const logger = new Logger('TournamentsService');
 
 // "Or a time limit is hit" (per the brief): a round that's been open this long gets
 // force-advanced, scoring any still-unresolved pairing as a draw for both sides —
@@ -26,6 +29,7 @@ export interface CreateTournamentOptions {
   pointsWin?: number;
   pointsDraw?: number;
   pointsLoss?: number;
+  createdByUserId?: number | null;
 }
 
 @Injectable()
@@ -51,7 +55,7 @@ export class TournamentsService implements OnModuleInit {
     await Promise.all(userIds.map((userId) =>
       this.notificationsService
         .notify(userId, 'TOURNAMENT_STARTING', `${tournamentName} has started`, { tournamentId })
-        .catch((err) => console.error(`[Notifications] Failed to notify user ${userId} of tournament ${tournamentId} starting:`, err)),
+        .catch((err) => logger.error(`[Notifications] Failed to notify user ${userId} of tournament ${tournamentId} starting: ${errorDetail(err)}`)),
     ));
   }
 
@@ -166,7 +170,7 @@ export class TournamentsService implements OnModuleInit {
        if (timeDiff > 60000 && t.players.length >= 2) { // Start after 1 min with 2+ players
           t.status = 'IN_PROGRESS';
           await this.tournamentRepository.save(t);
-          console.log(`Tournament ${t.id} started!`);
+          logger.log(`Tournament ${t.id} started!`);
           await this.notifyTournamentStarting(t.id, t.name, t.players.map(p => p.user.id));
        }
     }
@@ -181,7 +185,7 @@ export class TournamentsService implements OnModuleInit {
        if (timeDiff > 600000) { // 10 mins
           t.status = 'COMPLETED';
           await this.tournamentRepository.save(t);
-          console.log(`Tournament ${t.id} completed!`);
+          logger.log(`Tournament ${t.id} completed!`);
        }
     }
 
@@ -250,6 +254,7 @@ export class TournamentsService implements OnModuleInit {
       pointsWin: options.pointsWin ?? 1,
       pointsDraw: options.pointsDraw ?? 0.5,
       pointsLoss: options.pointsLoss ?? 0,
+      createdByUserId: options.createdByUserId ?? null,
     });
     return this.tournamentRepository.save(t);
   }

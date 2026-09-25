@@ -10,6 +10,9 @@ const EMAIL_SUBJECTS: Record<string, string> = {
   CHALLENGE_RECEIVED: 'You have been challenged to a game',
   TOURNAMENT_STARTING: 'Your tournament is starting',
   CORRESPONDENCE_TURN_REMINDER: "It's your move",
+  TRIAL_STARTED: 'Your free trial has started',
+  TRIAL_ENDING: 'Your free trial ends tomorrow',
+  TRIAL_ENDED: 'Your free trial has ended',
 };
 
 // The single entry point every trigger point (friend requests, challenges,
