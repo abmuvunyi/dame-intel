@@ -1,15 +1,122 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, MoreThan, Repository } from 'typeorm';
+import { ILike, In, MoreThan, Repository } from 'typeorm';
 import { User } from './user.entity';
 import { updateStreak } from './streak';
+import { Permission, Role, hasPermission, normalizeRoles, permissionsFor } from '../access/roles';
+import { Access, accessFor } from '../billing/access';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    // Optional so unit tests can build UsersService with just a repository.
+    @Optional() private readonly audit?: AuditService,
   ) {}
+
+  // Promote every username listed in ADMIN_USERNAMES (comma-separated) to ADMIN at
+  // boot. Idempotent and deliberately promote-only — removing a name from the env var
+  // does NOT demote anyone (use `npm run admin:grant -- <name> --revoke`), so a typo
+  // in a deploy's env can never silently lock every admin out.
+  async onApplicationBootstrap(): Promise<void> {
+    const names = parseAdminUsernames(process.env.ADMIN_USERNAMES);
+    for (const username of names) {
+      const user = await this.findOneByUsername(username);
+      if (!user) {
+        this.logger.warn(`ADMIN_USERNAMES lists "${username}", but no such user exists yet (register it, then restart).`);
+        continue;
+      }
+      if (!this.getRoles(user).includes('ADMIN')) {
+        await this.setRoles(user.id, [...this.getRoles(user), 'ADMIN'], { actorType: 'SYSTEM', reason: 'ADMIN_USERNAMES' });
+      }
+    }
+  }
+
+  getRoles(user: User | null | undefined): Role[] {
+    return normalizeRoles(user?.roles);
+  }
+
+  getPermissions(user: User | null | undefined): Permission[] {
+    return permissionsFor(user?.roles);
+  }
+
+  hasPermission(user: User | null | undefined, permission: Permission): boolean {
+    return hasPermission(user?.roles, permission);
+  }
+
+  isAdmin(user: User | null | undefined): boolean {
+    return this.getRoles(user).includes('ADMIN');
+  }
+
+  countAdmins(): Promise<number> {
+    // simple-array is stored as comma-separated text; match ADMIN as a whole item.
+    return this.usersRepository
+      .createQueryBuilder('u')
+      .where("(',' || u.roles || ',') LIKE :needle", { needle: '%,ADMIN,%' })
+      .getCount();
+  }
+
+  /**
+   * The ONLY way roles change. Replaces the user's roles, invalidates their existing
+   * sessions (so a revoked role stops working immediately) and records an audit event.
+   */
+  async setRoles(
+    userId: number,
+    roles: readonly string[],
+    ctx: { actorUserId?: number | null; actorType?: 'USER' | 'SYSTEM' | 'CLI'; reason?: string; req?: any } = {},
+  ): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    const before = this.getRoles(user);
+    const after = normalizeRoles(roles);
+    if (before.join(',') === after.join(',')) return user;
+    user.roles = after;
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await this.usersRepository.save(user);
+    this.logger.log(`Roles of "${user.username}" changed: [${before.join(', ')}] -> [${after.join(', ')}]`);
+    await this.audit?.record({
+      action: 'roles.changed',
+      actorType: ctx.actorType ?? (ctx.actorUserId ? 'USER' : 'SYSTEM'),
+      actorUserId: ctx.actorUserId ?? null,
+      targetType: 'user',
+      targetId: user.id,
+      details: { username: user.username, before, after, reason: ctx.reason ?? null },
+      req: ctx.req,
+    });
+    return user;
+  }
+
+  /** Invalidate every token issued so far for this user (bans, "log out everywhere"). */
+  async revokeSessions(userId: number): Promise<void> {
+    await this.usersRepository.increment({ id: userId }, 'tokenVersion', 1);
+  }
+
+  /** What this player can use right now (paid plan / trial / free) — see billing/access.ts. */
+  accessFor(user: User | null | undefined, now: Date = new Date()): Access {
+    return accessFor(user, now);
+  }
+
+  async searchUsers(query: string | undefined, limit = 25): Promise<User[]> {
+    const q = (query ?? '').trim();
+    return this.usersRepository.find({
+      where: q ? { username: ILike(`%${q.replace(/[%_]/g, '')}%`) } : {},
+      order: { id: 'ASC' },
+      take: Math.min(Math.max(limit, 1), 100),
+    });
+  }
+
+  /** Staff roles are rare, so this is cheap: everyone who holds at least one. */
+  async listStaff(): Promise<User[]> {
+    return this.usersRepository
+      .createQueryBuilder('u')
+      .where("u.roles <> ''")
+      .orderBy('u.id', 'ASC')
+      .getMany();
+  }
 
   findOneByUsername(username: string): Promise<User | null> {
     return this.usersRepository.findOneBy({ username });
@@ -47,6 +154,10 @@ export class UsersService {
     user.moderationStatus = status;
     user.moderationNote = note;
     user.tempBanUntil = tempBanUntil;
+    // Phase 15: a ban ends every existing session immediately.
+    if (status === 'TEMP_BANNED' || status === 'PERMA_BANNED') {
+      user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    }
     return this.usersRepository.save(user);
   }
 
@@ -68,7 +179,7 @@ export class UsersService {
   // brief. Nothing outside UsersService/SubscriptionsService should read
   // `membershipTier` directly.
   hasPremium(user: User | null | undefined): boolean {
-    return user?.membershipTier === 'PREMIUM';
+    return this.accessFor(user).entitlements.premiumPuzzles;
   }
 
   findByStripeCustomerId(stripeCustomerId: string): Promise<User | null> {
@@ -85,12 +196,20 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  // Phase 13: the ONLY place membershipTier/membershipStatus are ever written.
-  // Called exclusively from SubscriptionsService's Stripe webhook handler — the
-  // single source of truth is Stripe's own event stream, never a client request.
+  // The ONLY place membershipTier/membershipStatus/planVersion are written. Called
+  // exclusively from SubscriptionsService's Stripe webhook handler — the single
+  // source of truth is Stripe's own event stream, never a client request.
   async applyMembershipUpdate(
     userId: number,
-    update: { tier: string, status: string, stripeSubscriptionId: string | null, renewsAt: Date | null },
+    update: {
+      tier: string;
+      status: string;
+      stripeSubscriptionId: string | null;
+      renewsAt: Date | null;
+      planVersion?: number | null;
+      stripePriceId?: string | null;
+      billingInterval?: string | null;
+    },
   ): Promise<User | null> {
     const user = await this.usersRepository.findOneBy({ id: userId });
     if (!user) return null;
@@ -98,7 +217,46 @@ export class UsersService {
     user.membershipStatus = update.status;
     user.stripeSubscriptionId = update.stripeSubscriptionId;
     user.membershipRenewsAt = update.renewsAt;
+    if (update.planVersion !== undefined) user.planVersion = update.planVersion;
+    if (update.stripePriceId !== undefined) user.stripePriceId = update.stripePriceId;
+    if (update.billingInterval !== undefined) user.billingInterval = update.billingInterval;
     return this.usersRepository.save(user);
+  }
+
+  // Free trial bookkeeping — the rules (one per account, not while subscribed) live
+  // in TrialService; this only persists.
+  async startTrial(userId: number, plan: string, version: number, startedAt: Date, endsAt: Date): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    user.trialPlan = plan;
+    user.trialPlanVersion = version;
+    user.trialStartedAt = startedAt;
+    user.trialEndsAt = endsAt;
+    user.trialEndingNotifiedAt = null;
+    user.trialEndedNotifiedAt = null;
+    return this.usersRepository.save(user);
+  }
+
+  async markTrialNotified(userId: number, field: 'trialEndingNotifiedAt' | 'trialEndedNotifiedAt', at: Date): Promise<void> {
+    await this.usersRepository.update(userId, { [field]: at });
+  }
+
+  /** Trials that end within `withinMs` and haven't been warned yet. */
+  findTrialsEndingSoon(now: Date, withinMs: number): Promise<User[]> {
+    return this.usersRepository
+      .createQueryBuilder('u')
+      .where('u.trialEndsAt > :now AND u.trialEndsAt <= :limit', { now, limit: new Date(now.getTime() + withinMs) })
+      .andWhere('u.trialEndingNotifiedAt IS NULL')
+      .getMany();
+  }
+
+  /** Trials that have ended and haven't had their "trial ended" notice yet. */
+  findEndedTrialsToNotify(now: Date): Promise<User[]> {
+    return this.usersRepository
+      .createQueryBuilder('u')
+      .where('u.trialEndsAt <= :now', { now })
+      .andWhere('u.trialEndedNotifiedAt IS NULL')
+      .getMany();
   }
 
   async getRankings(limit: number = 100): Promise<User[]> {
@@ -194,4 +352,11 @@ export class UsersService {
     // Calculate rating delta
     return Math.round(k * (actualScore - expectedScore));
   }
+}
+
+export function parseAdminUsernames(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }

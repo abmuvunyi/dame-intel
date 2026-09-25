@@ -19,6 +19,16 @@ queue, and graduated-response scaffolding with real login/WebSocket enforcement 
 (2026-08-18). See "How this was verified" below for exact method, and the per-phase sections below for each
 phase specifically.
 
+**Phase 14 (2026-09-23): deployment, CI/CD and production readiness** — admin role, Postgres migrations,
+fail-fast production config, security hardening, engine worker threads, structured logging/error tracking,
+health checks, cloud-agnostic Docker images, GitHub Actions CI, dependency upgrades (NestJS 11, 0 known
+vulnerabilities) and a WebSocket load test. See "Phase 14" below; hosting provider intentionally not chosen yet.
+
+**Phase 15 (2026-09-23): staff roles (Admin / Moderator / Organizer / Content editor), plans
+(Free / Premium / Pro) with plan versioning, a 7-day no-card trial, API versioning (`/api/v1`),
+an audit trail, revocable sessions, and PostgreSQL 13–18 portability** — see "Phase 15" below
+and docs/ACCESS-AND-BILLING.md.
+
 ## Backend (NestJS)
 
 | Module | Exists (Y/N) | Has tests (Y/N) | Tests passing (Y/N) | Verified (Y/N) | Notes |
@@ -38,7 +48,7 @@ phase specifically.
 | Analysis endpoint (`game/analysis.controller.ts`) | Y | Y | Y | Y | **Bug found and fixed in Phase 3** (pre-existing, not caused by the Phase 2 rebuild): `analyze()` constructed `new DraughtsEngine()` with no rules at all, always defaulting to 8x8. Since `getLegalMoves()`'s own scan is bounded by `rules.boardSize`, any 10x10 game submitted for analysis had pieces on rows 8–9 silently invisible to move generation — not clipped, just never considered. Fixed to derive board size (and accept explicit rules) from the submitted position. Had zero test coverage before this pass; now has 3 tests, including one that fails without the fix (verified by temporarily reverting it) so this can't silently regress. **Reused live in Phase 11** as the exact engine query the automated review's replay pass is built on. |
 | Anticheat (`anticheat.service.ts`) | Y | Y | Y | Y | **Real bug found and fixed in Phase 11**, discovered while building the near-identical post-game review replay pass: `analyzeGameForCheating()` had the *exact same* "no rules passed, silently defaults to 8x8" bug Phase 3 already fixed in `analysis.controller.ts` — just never caught here. Confirmed directly (not assumed): for a 10x10 game, the very first recorded move already fails to apply on the wrong-sized engine, freezing the "replay" at the initial position for the whole game. Fixed by accepting an optional `rules` parameter (backward compatible) and passing `room.rules` from the gateway call site. New regression test proves a real 10x10 self-play replay tracks genuinely distinct positions move-to-move with rules passed, versus staying frozen (well under the move count) without them. **Phase 12** rebuilt detection on top of this: engine-correlation now restricted to critical positions (see below), plus a new move-timing anomaly detector. Both only ever create `CheatFlag` rows — see "Phase 12" below for the full moderator-review/graduated-response design and the exact thresholds. |
 | `anticheat/move-timing-stats.ts` | Y | Y | Y | Y | **New in Phase 12.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter/move-classification modules) — coefficient-of-variation-based think-time consistency check. 10 tests. |
-| Moderator review queue (`GET/POST /anticheat/admin/*`) | Y | Y | Y | Y | **New in Phase 12.** No admin-role system exists in this codebase (same documented simplification as Phase 7's puzzle admin routes and Phase 8b's tournament lifecycle routes) — lists flags, and applies a moderator's decision. Explicitly the *only* code path that can ever write `User.moderationStatus` — the detection methods themselves never do. |
+| Moderator review queue (`GET/POST /anticheat/admin/*`) | Y | Y | Y | Y | **New in Phase 12.** No admin-role system exists in this codebase (same documented simplification as Phase 7's puzzle admin routes and Phase 8b's tournament lifecycle routes) — lists flags, and applies a moderator's decision. Explicitly the *only* code path that can ever write `User.moderationStatus` — the detection methods themselves never do. **Phase 14:** now restricted to ADMIN-role users by `AdminGuard` (was: any logged-in account) — see "Phase 14" below. |
 | Graduated response (`User.moderationStatus`/`tempBanUntil`) | Y | Y | Y | Y | **New in Phase 12.** WARNED/RATING_RESET_FLAGGED/TEMP_BANNED/PERMA_BANNED states, settable only via the moderator endpoint above. Real enforcement wired at both `AuthService.signIn` (login rejected) and `GameGateway.handleConnection` (WebSocket authentication rejected) — live-verified end-to-end, not just scaffolding that sits unused. |
 | `game/review/move-classification.ts` | Y | Y | Y | Y | **New in Phase 11.** Pure, framework-independent (same pattern as the engine/matchmaking/chat-filter) — explicit, documented eval-delta thresholds classify each move as BEST/GOOD/INACCURACY/MISTAKE/BLUNDER, plus a simple credit-weighted accuracy-percentage formula. 14 tests covering every threshold boundary on both sides and the accuracy formula's edge cases. See "Phase 11" below for the exact thresholds and their reasoning. |
 | `game/review/game-review.service.ts` + `GameReview` entity | Y | Y | Y | Y | **New in Phase 11.** The actual "automated post-game review" — replays a completed game's real recorded moves on a real engine, queries `AiService.analyzePosition()` at every position (the same call `analysis.controller.ts` already exposes), classifies each move, and persists per-move classifications plus per-player accuracy so a viewer never triggers a recompute. Triggered fire-and-forget from `game.gateway.ts`'s `handleGameOver` — same established "don't block the gateway, it's CPU intensive" pattern already used for anti-cheat, for every completed game including vs-AI (unlike anti-cheat, which only applies between two humans). 13 tests against real in-memory sqlite + a real (not mocked) `AiService`, including a genuine worked example (one deliberately suboptimal move among several best-play moves) and a separate mocked suite proving a mid-analysis failure is recorded as `FAILED` with the error message, not silently swallowed. **2026-08-30**: `MoveReview` gained `evaluation` (LIGHT-normalized, for a chess.com-style eval bar) and `bestMove` — see "Eval bar" in "AI strength/speed..." below. **2026-09-02**: `MoveReview` gained `recommendedLine`/`punishmentLine` — real, engine-followed multi-ply continuations, not generated text — see "Review-page 'best continuation'..." below. |
@@ -88,11 +98,11 @@ unchanged from Phase 0/1: their test coverage is still thin, mostly happy-path o
 | `/puzzles/rush` (Puzzle Storm) | Y | Y | Y | **New in Phase 7.** Live-verified: real countdown, score, and streak UI backed by the server-authoritative rush session. |
 | `/tournaments` + `/tournaments/[id]` | Y | Y (1 + 4 API calls) | Y (list only) | List view confirmed live with real seeded data. Detail view (`[id]`) not driven live this pass. |
 | `/analysis/[id]` | Y | Y (2 API calls, +1 in Phase 11) | Y | **Board/replay verified and extended in Phase 11** (was un-driven-live before): the existing step-forward/back board and on-demand "Run Engine" query both confirmed working; new accuracy summary panel, a per-move classification badge, and a clickable move-by-move classification strip, all backed by `GET /game-review/:id` (polls every 3s only while the review is still PENDING). Live-verified with Playwright against a real completed review. |
-| `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. |
+| `/rankings` | Y | Y (calls `/users/rankings`, `/users/stats`) | Y | Live-verified — renders correctly, zero console errors, correct empty state on a fresh DB. Still not linked from any nav. **Phase 14:** linked from the `DashboardShell` sidebar (it had been since the dark-theme redesign; this row was stale). |
 | `Timer.tsx` | Y | Y | Y | Wired in during Phase 4 (was orphaned since Phase 0); **as of Phase 5, genuinely server-authoritative** — it's fed a live-computed snapshot of the backend's real clock/turnStartedAt on every move, not a fixed cosmetic constant. See "Phase 5" below. |
-| Site-wide nav/sidebar | N | — | — | Still doesn't exist. Unchanged from Phase 0. Not in scope for Phases 4 or 5. |
+| Site-wide nav/sidebar | Y | Y | Y | `DashboardShell.tsx` (dark-theme redesign, 2026-08-27) — this row was stale until Phase 14. **Phase 14:** shows a Moderation link to ADMIN-role users only. |
 | Direct-challenge-by-user-ID UI | Y | Y | Y | **Built in Phase 10** (the gap this row tracked since Phase 5) — "Friends Online" list + Challenge button on `/`, an incoming-challenge banner with Accept/Decline, wired to the existing `challengePlayer`/`challengeReceived`/`respondToChallenge` events. Live-verified with two real browser tabs (see "Phase 10" below). |
-| `/moderation` (moderator review queue) | Y | Y | Y | **New in Phase 12.** Lists real unreviewed `CheatFlag` rows with user/reason/score/sample size, a link to the supporting game where one exists, and Dismiss/Warn/Rating-Reset/Temp-Ban/Perma-Ban actions. Not linked from any nav — same "no admin-role system, just requires login" simplification as the backend endpoints it calls. Live-verified with Playwright against a real flag, including the toggle to reveal reviewed flags. |
+| `/moderation` (moderator review queue) | Y | Y | Y | **New in Phase 12.** Lists real unreviewed `CheatFlag` rows with user/reason/score/sample size, a link to the supporting game where one exists, and Dismiss/Warn/Rating-Reset/Temp-Ban/Perma-Ban actions. Not linked from any nav — same "no admin-role system, just requires login" simplification as the backend endpoints it calls. Live-verified with Playwright against a real flag, including the toggle to reveal reviewed flags. **Phase 14:** backend routes now require the ADMIN role; non-admins see an "Administrator access required" message; linked from the sidebar for admins. |
 
 **Type check:** `npx tsc --noEmit` from `frontend/` → clean, no errors. **Production build** (`npm run build`,
 not just the type-check) → succeeds, all 14 routes generated (Phase 12 adds `/moderation`), zero build
@@ -1852,6 +1862,164 @@ appear only where they should, the punishment preview stepped through and visual
 exact right moves ply by ply (cross-checked against the exact coordinates the backend computed), the best-
 continuation preview confirmed working the same way, and Exit Preview confirmed to actually close the overlay.
 Zero console errors throughout.
+
+## Phase 14: deployment, CI/CD and production readiness (2026-09-23)
+
+Hosting provider deliberately **not chosen yet** — everything below is cloud-agnostic (two
+container images + PostgreSQL + optional Redis). The old Render/Vercel leftovers were removed
+(`vercel.json`'s security headers moved into `next.config.ts`).
+
+### Real blockers found (the app could not have been deployed as it was)
+
+1. **The backend could not start on PostgreSQL at all.** Four columns were declared
+   `type: 'datetime'`, which Postgres doesn't support — TypeORM refused to initialise
+   (`Data type "datetime" in "User.tempBanUntil" is not supported by "postgres" database`).
+   Every test and every live verification so far ran on sqlite, so this was invisible.
+   Fixed with `type: Date` (datetime on sqlite, timestamp on Postgres).
+2. **`npm run start:prod` / the Dockerfile's `node dist/main` pointed at a file that didn't exist.**
+   A stray root-level `seed_history.ts` was compiled too, shifting the output to `dist/src/main.js`.
+   Removed the script (it inserted a hardcoded sqlite row) and scoped the build to `src/`.
+3. **Any logged-in account could ban any other account**, approve/reject/generate puzzles and
+   create/start tournaments — every "admin" route only checked for a login.
+4. **First boot on an empty database: the server did not listen for ~5 minutes.** Puzzle
+   seeding (CPU-bound self-play) was awaited inside `onModuleInit`. Measured on a 2-vCPU machine:
+   304 s before "Nest application successfully started" — long enough for any cloud health check to
+   kill and restart the container, which would then start seeding again (restart loop).
+5. **One AI move froze every game on the server.** All engine searches (vs-AI moves — up to 6 s at
+   difficulty 7 — plus post-game review, anti-cheat replay, puzzle generation, `/analysis`) ran on
+   Node's single event loop.
+
+### What was built
+
+| Area | Change |
+|---|---|
+| Admin role | `User.role` ('USER' / 'ADMIN'), `AdminGuard` (role re-read from DB each request, so demotions/bans apply immediately) on every moderator/organizer route: anti-cheat queue, puzzle admin, tournament create/open/start. Admins via `ADMIN_USERNAMES` (promote-only, at boot) or `npm run admin:grant -- <user> [--revoke]`. No HTTP route can change roles. Sidebar shows "Moderation" to admins only. |
+| Migrations | `src/database/data-source.ts` shared by app and TypeORM CLI. Postgres: `synchronize` off, migrations applied at boot (`DB_MIGRATIONS_RUN`). Initial migration generated from the entities against a real Postgres 16 and verified: applies to an empty DB, and a re-generate finds **no drift**. sqlite + synchronize only when `DATABASE_URL` is unset (dev). |
+| Config / secrets | `src/config/env.validation.ts` — in production the server **refuses to start** without a ≥32-char `JWT_SECRET`, `DATABASE_URL`, explicit `CORS_ORIGINS` (no `*`), `APP_URL`; half-configured Stripe or Resend also fails. Dev keeps working with zero config (warnings only). No default JWT secret in production. `backend/.env.example` and `frontend/.env.example` document every variable. |
+| Hardening | helmet; CORS allowlist shared by HTTP and Socket.IO (was `enableCors()` / `cors: true`); global `ValidationPipe` + DTOs (register: 3-20 char username, ≥8 char password; tournaments, clubs, moderator actions); rate limiting (300/min/IP default, login 10/min, register 5/min; Stripe webhook exempt); `/analysis` rejects non-8x8/10x10 boards; DB TLS verifies certificates by default (`DB_SSL`, `DB_SSL_CA`); `/auth/profile` no longer returns Stripe IDs or moderation notes; `trust proxy` configurable. |
+| Engine worker threads | `engine-worker-pool.ts` + `engine.worker.ts`: every server-side search runs on worker threads (`AI_WORKERS`, default cores−1, max 4) with two priorities — *interactive* (AI moves, `/analysis`) always ahead of *background* (review, anti-cheat, puzzle generation). A crashed worker is replaced. The gateway re-checks the room after the AI "thinks" and discards the move if the game ended meanwhile. Tests run the same code inline. |
+| Boot | Puzzle seeding moved to after start-up, in the background (`PUZZLE_SEED_ON_BOOT=false` to disable). Server now answers `/health` ~5 s after start on an empty DB, and stays responsive (~10 ms) while seeding. |
+| Observability | Structured JSON logs (pino) with request IDs (reuses `x-request-id`), secrets redacted, health checks excluded; all `console.*` replaced by the Nest logger; global exception filter logs every 5xx with stack; optional Sentry-compatible error tracking (`SENTRY_DSN`); `GET /health` (DB check, 503 when down) and `GET /health/live`; Redis adapter now reconnects after a blip instead of silently breaking. |
+| Containers | Backend and frontend Dockerfiles on Node 22 (multi-stage, non-root, healthchecks); frontend uses Next.js `standalone` output and self-hosted Geist fonts (build no longer needs Google Fonts); frontend production build fails without `NEXT_PUBLIC_API_URL` (31 hardcoded `localhost:3001` fallbacks consolidated into `src/lib/api.ts`); `docker-compose.prod.yml` for a full production-like stack. |
+| Dependencies | NestJS 10 → 11 (+ config 4, jwt 11, schedule 6, typeorm 11), bcrypt 6, sqlite3 6 (now dev-only), Next 16.3.6, axios, multer override. `npm audit`: backend 32 → **0**, frontend 11 → **0** (including dev dependencies). |
+| CI | `.github/workflows/ci.yml` — see README. Backend lint was completely broken (flat config on ESLint 8 with its plugins never installed); now ESLint 9, correctness rules only, and it caught 15 un-awaited promises in the game gateway (now handled). Frontend lint errors 62 → 0 (`any` kept as a warning). |
+| Tests | Backend 413 → **460** unit tests, all passing in ~50 s (was 2 failing on timeouts; the self-play puzzle test blocked the event loop for 60 s+), plus **8 e2e tests** booting the real `AppModule` through the production HTTP pipeline (health, helmet, CORS, validation, admin 401/403/200, login rate limit, analysis input). New: `AdminGuard` + route-wiring net, env validation, CORS, health, worker pool (real threads), async-AI race conditions. |
+
+### Load test (`npm run loadtest`)
+
+Same machine (2 vCPU), same scenario: 10x10 boards, random legal moves with 0–400 ms think time,
+60-ply cap, plus 10 concurrent vs-AI games at difficulty 4; a probe hits the server every 250 ms.
+
+| Metric | Before (main @ 38d32fc, sqlite) | After (Phase 14 build, Postgres + Redis, production mode) | After, 100 PvP + 10 AI |
+|---|---|---|---|
+| Clients connected / games completed | 110 / 58 of 60 | 110 / 60 of 60 | 210 / 110 of 110 |
+| Move acknowledgement p50 / p95 / p99 / max | 191 / 1 347 / 2 288 / 4 668 ms | **1 / 4 / 12 / 34 ms** | 1 / 5 / 18 / 36 ms |
+| Probe response p50 / p99 / max | 430 / 4 618 / 4 618 ms | **2 / 23 / 40 ms** | 2 / 10 / 63 ms |
+| AI reply p50 / p95 (1.2 s think budget + 0.5 s delay) | 1 259 / 2 528 ms | 1 455 / 2 803 ms | 1 225 / 2 553 ms |
+| Backend peak memory (RSS, incl. worker threads) | 1 160 MB | 1 075 MB | 1 085 MB |
+| Moves/sec handled | 38 | 60 | 127 |
+| Server errors logged | — | 0 | 0 |
+
+**Bottlenecks found:** (1) main-thread engine searches — fixed (worker threads): human moves and
+every other request no longer wait behind the AI; (2) first-boot seeding blocking startup — fixed.
+Memory is dominated by the engine's transposition tables (up to 400k entries per search), not by
+connections — plan for ≥ 2 GB RAM on the backend. **Remaining, by design:** engine work is CPU-bound, so AI
+replies and background reviews queue when many AI games run at once on few cores (after the 100-game
+run, ~170 post-game reviews were still queued as PENDING and worked through them afterwards) —
+give the backend more vCPUs and raise `AI_WORKERS`. Load test was run against Postgres + Redis on
+the same host; a real cloud network adds its own latency on top.
+
+### Remaining work (not done in this phase)
+
+- **Single backend instance only.** Rooms, clocks, the matchmaking queue, presence and pending
+  challenges live in process memory; the Redis adapter only fans out broadcasts. Horizontal scaling
+  needs that state moved to Redis (or sticky routing per game) first.
+- **Background review queue isn't durable.** A restart drops queued reviews (they stay PENDING).
+  A persistent job queue (e.g. BullMQ on Redis) would fix it.
+- ~~Existing JWTs of a banned user still work on non-admin HTTP routes~~ — fixed in Phase 15
+  (revocable sessions).
+- **Rate limits are per instance** (in-memory store) — fine with one instance.
+- **Choose the host**, then: managed Postgres with backups, TLS, secrets in its secret manager,
+  branch protection on `main`, and a staging environment.
+- Old remote feature branches (7) still exist on GitHub; delete them to satisfy CONTRIBUTING.md.
+
+## Phase 15: roles, plans & trials, API versioning, audit trail, database portability (2026-09-23)
+
+Full reference: **docs/ACCESS-AND-BILLING.md**.
+
+### Database: PostgreSQL, portable across clouds
+PostgreSQL is the database every major cloud offers as a managed service, so it stays the
+production database. Verified in this session by applying all migrations, running the
+drift check and rolling back on **PostgreSQL 13.23, 14.23, 15.18, 16, 17.10 and 18.4**:
+all passed. The full e2e suite also passed on Postgres 16. CI now does the same on every
+push (a matrix of 13–18). New: separate `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`
+settings (AWS/Kubernetes style) as an alternative to `DATABASE_URL`, provider URLs with
+`?sslmode=` understood (and no longer able to silently override `DB_SSL*`), connection
+timeout, optional statement timeout, `application_name`.
+
+### Staff roles (least privilege)
+`ADMIN` (everything incl. roles + audit), `MODERATOR` (anti-cheat queue, bans),
+`ORGANIZER` (tournaments), `CONTENT_EDITOR` (puzzles). Players have none; a user can hold
+several. Permission-based guard (`@RequirePermissions`) replaces Phase 14's single
+`AdminGuard`. Admin API: list roles, search users, list staff, set roles (can't remove the
+last admin), read audit. Admin page in the frontend; sidebar shows staff links by permission.
+CLI: `npm run admin:grant -- <user> [ROLE] [--revoke]`. The existing `role = 'ADMIN'` values
+are carried over by the migration.
+
+**Revocable sessions (closes the Phase 14 gap):** JWTs carry a token version; AuthGuard now
+loads the account on every request and rejects deleted, banned or revoked tokens. A role
+change, a ban, or "log out everywhere" (`POST /auth/logout-all`) takes effect immediately
+on HTTP and WebSocket connections.
+
+### Plans: Free / Premium / Pro, versioned
+Catalog in `billing/plans.ts`; effective access (subscription vs trial vs free) in
+`billing/access.ts`; every feature gate asks `UsersService.accessFor(user).entitlements`.
+Enforced: analysis depth (4 / 6 / 8), premium puzzles, full game review lines (Premium+),
+clubs you may create (1 / 3 / 10), hosting your own tournaments (Pro; can manage only
+their own). Checkout takes plan + monthly/annual; one subscription per account, changes via
+Stripe's portal. Webhooks map the Stripe price → plan **and version**; subscribers keep the
+version they bought (grandfathering), an unmapped price never cuts a paying member off
+(Premium + error + audit event). Phase 13 env names still work for Premium.
+**Default limits are placeholders — set real ones before the first subscriber.**
+
+### Free trial
+7 days (configurable), no card, once per account, Premium by default (`TRIAL_PLAN`).
+Access ends by time alone; an hourly job sends "ends tomorrow" / "has ended" notices.
+Refused to accounts that already had a trial or are paying.
+
+### API versioning
+All HTTP routes now live under `/api/v1/...` (URI versioning), `/health` and `/health/live`
+unversioned. Frontend uses `API_BASE` from `lib/api.ts`. **Stripe webhook URL changes to
+`/api/v1/subscriptions/webhook`.** Policy: breaking changes ship as v2 alongside v1.
+
+### Audit trail
+Append-only `audit_log` (who/what/target/details/IP/request id); secrets redacted; never
+throws into the user action. Recorded: role changes, moderation decisions, registrations,
+failed and banned logins, trials, checkouts, subscription changes, unknown prices,
+tournament and puzzle management. Read on the Admin page (`audit.read`).
+
+### Verification
+- Backend: **519 unit tests** (53 suites) pass. The e2e suite grew from 8 to **17**, covering
+  each role's access (401/403/200), granting a role through the API and the change applying
+  immediately, the last-admin guard, token revocation, the trial flow and its audit, plan
+  entitlements (Pro depth, hosting tournaments, club limits) and failed logins being audited
+  without the password. The e2e suite passes on sqlite and on real PostgreSQL 16.
+- Migration `RolesPlansTrialsAudit`: applied to a database holding real rows. The admin
+  kept ADMIN, the paid member was pinned to plan version 1, rollback restored `role`, and
+  re-applying worked.
+- The UI was checked in headless Chromium against the production builds (backend on Postgres) with
+  zero console errors: the membership page (3 plans, interval toggle, trial start → "Premium
+  (free trial)"), the Admin page (staff, role checkboxes, player search, audit trail), and the
+  sidebar showing Moderation/Admin only to staff.
+- Lint clean (backend 0 problems; frontend 0 errors), `npm audit` 0 vulnerabilities.
+
+### Still open
+- No frontend screens yet for Organizers / Pro hosts to create tournaments, or for content
+  editors to review puzzles (the APIs exist and are permission-checked).
+- Trial abuse via new accounts is possible; add email verification before trials if needed.
+- Real Stripe test-mode run (checkout → webhook → portal) once keys exist.
+- Email addresses still aren't collected at registration, so trial/billing notices are
+  in-app only unless an email is set.
 
 ## Repo cleanup notes (Phase 0)
 

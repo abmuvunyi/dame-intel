@@ -4,6 +4,7 @@ import { AiService } from './ai/ai/ai.service';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { DraughtsEngine, PieceColor, PieceType, BoardState } from './engine/engine.service';
+import { accessFor } from '../billing/access';
 
 function fakeRequest(token?: string): any {
   return { headers: token ? { authorization: `Bearer ${token}` } : {} };
@@ -12,13 +13,15 @@ function fakeRequest(token?: string): any {
 describe('AnalysisController', () => {
   let controller: AnalysisController;
   let jwtService: { verifyAsync: jest.Mock };
-  let usersService: { findOneById: jest.Mock, hasPremium: jest.Mock };
+  let usersService: { findOneById: jest.Mock, accessFor: jest.Mock, isCurrentlyBanned: jest.Mock };
 
   beforeEach(async () => {
     jwtService = { verifyAsync: jest.fn() };
     usersService = {
       findOneById: jest.fn(),
-      hasPremium: jest.fn((user: any) => user?.membershipTier === 'PREMIUM'),
+      // Phase 15: the real plan/trial resolution, not a stand-in.
+      accessFor: jest.fn((user: any) => accessFor(user)),
+      isCurrentlyBanned: jest.fn(() => false),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -60,8 +63,8 @@ describe('AnalysisController', () => {
     expect(evaluations.some(({ move }) => move.from.row === 9)).toBe(true);
   });
 
-  // Phase 13: depth capped behind the PREMIUM feature flag.
-  describe('analysis-depth gate (Phase 13)', () => {
+  // Depth capped by plan (billing/plans.ts): Free 4, Premium 6, Pro 8.
+  describe('analysis-depth gate (by plan)', () => {
     const board = DraughtsEngine.createAmerican().getBoard();
 
     it('an anonymous caller (no token at all) is capped at the free depth', async () => {
@@ -81,7 +84,7 @@ describe('AnalysisController', () => {
 
     it('a PREMIUM user can request up to the higher premium ceiling', async () => {
       jwtService.verifyAsync.mockResolvedValue({ sub: 2 });
-      usersService.findOneById.mockResolvedValue({ id: 2, membershipTier: 'PREMIUM' });
+      usersService.findOneById.mockResolvedValue({ id: 2, membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE' });
       const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 6 });
       expect(result.depthUsed).toBe(6); // not capped — 6 <= premium ceiling
       expect(result.depthCapped).toBe(false);
@@ -89,10 +92,34 @@ describe('AnalysisController', () => {
 
     it('even a PREMIUM user is capped at the premium ceiling, not truly unlimited', async () => {
       jwtService.verifyAsync.mockResolvedValue({ sub: 2 });
-      usersService.findOneById.mockResolvedValue({ id: 2, membershipTier: 'PREMIUM' });
+      usersService.findOneById.mockResolvedValue({ id: 2, membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE' });
       const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 20 });
       expect(result.depthUsed).toBe(result.maxDepth);
       expect(result.depthCapped).toBe(true);
+    });
+
+    it('a PRO subscriber gets the deepest analysis', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 3 });
+      usersService.findOneById.mockResolvedValue({ id: 3, membershipTier: 'PRO', membershipStatus: 'ACTIVE' });
+      const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 20 });
+      expect(result.maxDepth).toBe(8);
+    });
+
+    it('a player on an active free trial gets the trial plan\'s depth', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 4 });
+      usersService.findOneById.mockResolvedValue({
+        id: 4, trialPlan: 'PREMIUM', trialStartedAt: new Date(), trialEndsAt: new Date(Date.now() + 86_400_000),
+      });
+      const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 20 });
+      expect(result.maxDepth).toBe(6);
+    });
+
+    it('a banned user\'s token counts as anonymous', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 5 });
+      usersService.findOneById.mockResolvedValue({ id: 5, membershipTier: 'PRO', membershipStatus: 'ACTIVE' });
+      usersService.isCurrentlyBanned.mockReturnValue(true);
+      const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 20 });
+      expect(result.maxDepth).toBe(4);
     });
 
     it('an invalid/expired token is treated as anonymous, not an error', async () => {

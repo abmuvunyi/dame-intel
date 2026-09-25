@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import DashboardShell from '@/components/DashboardShell';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface LessonSummary {
   slug: string;
@@ -32,7 +32,7 @@ export default function LearnPage() {
   const router = useRouter();
 
   useEffect(() => {
-    axios.get<LessonSummary[]>(`${API_URL}/lessons`).then(res => setLessons(res.data)).catch(() => {});
+    axios.get<LessonSummary[]>(`${API_BASE}/lessons`).then(res => setLessons(res.data)).catch(() => {});
   }, []);
 
   const grouped = CATEGORY_ORDER.map(category => ({

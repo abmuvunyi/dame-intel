@@ -1,16 +1,21 @@
-import { Body, Controller, Get, Post, Param, ParseIntPipe, UseGuards, Request, Query } from '@nestjs/common';
+import { Body, Controller, Get, Optional, Post, Param, ParseIntPipe, UseGuards, Request, Query } from '@nestjs/common';
 import { AnticheatService } from './anticheat.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { PermissionsGuard, RequirePermissions } from '../access/permissions.guard';
+import { PERMISSIONS } from '../access/roles';
+import { AuditService } from '../audit/audit.service';
+import { ReviewFlagDto } from './review-flag.dto';
 
-// Phase 12's moderator review queue. No admin-role system exists anywhere in this
-// codebase — every route here just requires being logged in, the same bar every
-// other "admin" surface in the app already uses (Phase 7's puzzle admin routes,
-// Phase 8b's tournament lifecycle routes). A real role check is future work, not
-// invented here as a side effect of this phase.
+// Phase 12's moderator review queue. Phase 15: requires the moderation.review
+// permission (MODERATOR or ADMIN role). Every decision is written to the audit trail.
 @Controller('anticheat/admin')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionsGuard)
+@RequirePermissions(PERMISSIONS.MODERATION_REVIEW)
 export class AnticheatController {
-  constructor(private readonly anticheatService: AnticheatService) {}
+  constructor(
+    private readonly anticheatService: AnticheatService,
+    @Optional() private readonly audit?: AuditService,
+  ) {}
 
   // ?reviewed=false (default expectation for a review queue) | true | omitted for all
   @Get('flags')
@@ -33,8 +38,17 @@ export class AnticheatController {
   async reviewFlag(
     @Request() req: any,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { action: 'DISMISS' | 'WARN' | 'RATING_RESET_FLAG' | 'TEMP_BAN' | 'PERMA_BAN', note?: string, tempBanDays?: number },
+    @Body() body: ReviewFlagDto,
   ) {
-    return this.anticheatService.applyModeratorAction(id, req.user.sub, body.action, body.note, body.tempBanDays);
+    const result = await this.anticheatService.applyModeratorAction(id, req.user.sub, body.action, body.note, body.tempBanDays);
+    await this.audit?.record({
+      action: 'moderation.action',
+      actorUserId: req.user.sub,
+      targetType: 'cheat_flag',
+      targetId: id,
+      details: { decision: body.action, tempBanDays: body.tempBanDays ?? null, note: body.note ?? null, flaggedUserId: (result as any)?.userId ?? null },
+      req,
+    });
+    return result;
   }
 }

@@ -4,8 +4,8 @@ import DashboardShell from "@/components/DashboardShell";
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface Profile {
   id: number;
@@ -91,23 +91,26 @@ export default function Home() {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
+    // Browser-only storage can only be read after hydration, so this one synchronous
+    // setState in an effect is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAuthenticated(!!token);
     if (!token) return;
 
-    axios.get<Profile>(`${API_URL}/auth/profile`, authHeaders(token))
+    axios.get<Profile>(`${API_BASE}/auth/profile`, authHeaders(token))
       .then((res) => setProfile(res.data))
       .catch(() => { localStorage.removeItem('token'); setIsAuthenticated(false); });
 
-    axios.get<RankInfo>(`${API_URL}/users/rank`, authHeaders(token)).then((res) => setRankInfo(res.data)).catch(() => {});
-    axios.get<RecommendedMatch | null>(`${API_URL}/users/recommended-match`, authHeaders(token)).then((res) => setRecommendedMatch(res.data)).catch(() => {});
-    axios.get<RecentGame[]>(`${API_URL}/history/my-games`, authHeaders(token)).then((res) => setRecentGames(res.data.slice(0, 5))).catch(() => {});
-    axios.get<Friend[]>(`${API_URL}/friends`, authHeaders(token)).then((res) => setFriends(res.data)).catch(() => {});
+    axios.get<RankInfo>(`${API_BASE}/users/rank`, authHeaders(token)).then((res) => setRankInfo(res.data)).catch(() => {});
+    axios.get<RecommendedMatch | null>(`${API_BASE}/users/recommended-match`, authHeaders(token)).then((res) => setRecommendedMatch(res.data)).catch(() => {});
+    axios.get<RecentGame[]>(`${API_BASE}/history/my-games`, authHeaders(token)).then((res) => setRecentGames(res.data.slice(0, 5))).catch(() => {});
+    axios.get<Friend[]>(`${API_BASE}/friends`, authHeaders(token)).then((res) => setFriends(res.data)).catch(() => {});
   }, []);
 
   // Daily puzzle is free for everyone regardless of login state — fetched
   // unconditionally, matching /puzzles/daily's own no-auth-required design.
   useEffect(() => {
-    axios.get<DailyPuzzle | null>(`${API_URL}/puzzles/daily`).then((res) => setDailyPuzzle(res.data)).catch(() => {});
+    axios.get<DailyPuzzle | null>(`${API_BASE}/puzzles/daily`).then((res) => setDailyPuzzle(res.data)).catch(() => {});
   }, []);
 
   const handleChallengeRecommended = useCallback(() => {

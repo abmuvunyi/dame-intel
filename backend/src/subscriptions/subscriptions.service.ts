@@ -1,8 +1,13 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, Optional } from '@nestjs/common';
 import Stripe from 'stripe';
 import { StripeService } from './stripe.service';
 import { UsersService } from '../users/users.service';
 import { mapStripeSubscriptionStatus } from './subscription-status';
+import { BillingInterval, PlanCode, currentPlan, isPlanCode, priceIdFor, resolvePriceId } from '../billing/plans';
+import { AuditService } from '../audit/audit.service';
+import type { User } from '../users/user.entity';
+
+const logger = new Logger('SubscriptionsService');
 
 // Where the frontend redirects back to after Stripe's own hosted Checkout/Portal
 // flow — configurable, defaults to local dev.
@@ -13,16 +18,34 @@ export class SubscriptionsService {
   constructor(
     private stripeService: StripeService,
     private usersService: UsersService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
-  async createCheckoutSession(userId: number, plan: 'monthly' | 'annual'): Promise<{ url: string }> {
-    const priceId = plan === 'monthly' ? process.env.STRIPE_PRICE_MONTHLY : process.env.STRIPE_PRICE_ANNUAL;
+  /**
+   * Starts a Stripe Checkout for a paid plan. Always uses the plan's CURRENT catalog
+   * version. `plan` may also be the Phase 13 shorthand 'monthly' | 'annual' (= Premium).
+   */
+  async createCheckoutSession(
+    userId: number,
+    plan: PlanCode | 'monthly' | 'annual',
+    interval: BillingInterval = 'monthly',
+    req?: any,
+  ): Promise<{ url: string }> {
+    const code: PlanCode = plan === 'monthly' || plan === 'annual' ? 'PREMIUM' : plan;
+    const billing: BillingInterval = plan === 'monthly' || plan === 'annual' ? plan : interval;
+    if (!isPlanCode(code) || code === 'FREE') throw new BadRequestException('Choose a paid plan: PREMIUM or PRO.');
+    const priceId = priceIdFor(code, billing);
     if (!priceId) {
-      throw new BadRequestException(`No Stripe price configured for the "${plan}" plan.`);
+      throw new BadRequestException(`No Stripe price configured for ${code} (${billing}).`);
     }
 
     const user = await this.usersService.findOneById(userId);
     if (!user) throw new NotFoundException('User not found');
+    // One subscription per account: plan changes (upgrade/downgrade/interval) go
+    // through Stripe's billing portal, which updates the existing subscription.
+    if (user.stripeSubscriptionId && ['ACTIVE', 'PAST_DUE'].includes(user.membershipStatus)) {
+      throw new BadRequestException('You already have a subscription — change plans from "Manage billing".');
+    }
 
     const customerId = await this.stripeService.findOrCreateCustomer(userId, user.stripeCustomerId);
     if (!user.stripeCustomerId) {
@@ -38,6 +61,10 @@ export class SubscriptionsService {
     });
 
     if (!session.url) throw new BadRequestException('Stripe did not return a checkout URL.');
+    await this.audit?.record({
+      action: 'subscription.checkout_started', actorUserId: userId, targetType: 'user', targetId: userId,
+      details: { plan: code, version: currentPlan(code).version, interval: billing }, req,
+    });
     return { url: session.url };
   }
 
@@ -60,17 +87,17 @@ export class SubscriptionsService {
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
     switch (event.type) {
       case 'checkout.session.completed':
-        await this.handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await this.handleCheckoutCompleted(event.data.object);
         break;
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        await this.handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
+        await this.handleSubscriptionUpdated(event.data.object);
         break;
       case 'customer.subscription.deleted':
-        await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        await this.handleSubscriptionDeleted(event.data.object);
         break;
       case 'invoice.payment_failed':
-        await this.handlePaymentFailed(event.data.object as Stripe.Invoice);
+        await this.handlePaymentFailed(event.data.object);
         break;
       default:
         // Deliberately silent for event types this app doesn't act on — Stripe
@@ -99,18 +126,63 @@ export class SubscriptionsService {
     const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id;
     const user = await this.usersService.findByStripeCustomerId(customerId);
     if (!user) {
-      console.warn(`[Subscriptions] Received a subscription event for unknown Stripe customer ${customerId}`);
+      logger.warn(`[Subscriptions] Received a subscription event for unknown Stripe customer ${customerId}`);
       return;
     }
 
-    const { tier, status } = mapStripeSubscriptionStatus(subscription.status);
-    const periodEnd = (subscription as any).current_period_end as number | undefined;
-    await this.usersService.applyMembershipUpdate(user.id, {
+    const { tier: mappedTier, status } = mapStripeSubscriptionStatus(subscription.status);
+    const item = (subscription as any).items?.data?.[0];
+    const priceId: string | null = item?.price?.id ?? null;
+    // Newer Stripe API versions put the period end on the item; older ones on the subscription.
+    const periodEnd = (item?.current_period_end ?? (subscription as any).current_period_end) as number | undefined;
+
+    let tier = 'FREE';
+    let planVersion: number | null = null;
+    let billingInterval: string | null = null;
+    if (mappedTier !== 'FREE') {
+      const resolved = resolvePriceId(priceId);
+      if (resolved) {
+        ({ code: tier, version: planVersion, interval: billingInterval } = resolved);
+      } else if (priceId && priceId === user.stripePriceId && isPlanCode(user.membershipTier) && user.membershipTier !== 'FREE') {
+        // A price no longer in the env/catalog but already on record for this user:
+        // keep exactly the plan version they bought (grandfathered).
+        tier = user.membershipTier;
+        planVersion = user.planVersion;
+        billingInterval = user.billingInterval;
+      } else {
+        // Paying customer on a price we can't map: never cut them off, grant Premium
+        // and make the misconfiguration loud so the catalog/env can be fixed.
+        tier = 'PREMIUM';
+        planVersion = currentPlan('PREMIUM').version;
+        logger.error(`[Subscriptions] Unknown Stripe price "${priceId}" on subscription ${subscription.id} — granted PREMIUM. Add it to the plan catalog / env.`);
+        await this.audit?.record({
+          action: 'subscription.unknown_price', actorType: 'STRIPE', targetType: 'user', targetId: user.id,
+          details: { priceId, subscriptionId: subscription.id },
+        });
+      }
+    }
+
+    await this.applyAndAudit(user, {
       tier,
       status,
       stripeSubscriptionId: subscription.id,
       renewsAt: periodEnd ? new Date(periodEnd * 1000) : null,
+      planVersion,
+      stripePriceId: priceId,
+      billingInterval,
     });
+  }
+
+  private async applyAndAudit(user: User, update: Parameters<UsersService['applyMembershipUpdate']>[1]) {
+    const before = { plan: user.membershipTier, version: user.planVersion, status: user.membershipStatus };
+    await this.usersService.applyMembershipUpdate(user.id, update);
+    const after = { plan: update.tier, version: update.planVersion ?? user.planVersion, status: update.status };
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      await this.audit?.record({
+        action: 'subscription.changed', actorType: 'STRIPE', targetType: 'user', targetId: user.id,
+        details: { before, after, stripeSubscriptionId: update.stripeSubscriptionId },
+      });
+    }
   }
 
   private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -118,11 +190,14 @@ export class SubscriptionsService {
     const user = await this.usersService.findByStripeCustomerId(customerId);
     if (!user) return;
 
-    await this.usersService.applyMembershipUpdate(user.id, {
+    await this.applyAndAudit(user, {
       tier: 'FREE',
       status: 'CANCELED',
       stripeSubscriptionId: null,
       renewsAt: null,
+      planVersion: null,
+      stripePriceId: null,
+      billingInterval: null,
     });
   }
 
@@ -136,7 +211,7 @@ export class SubscriptionsService {
     // that decision, surfaced later via customer.subscription.updated (-> past_due)
     // or .deleted once retries are exhausted. This just keeps the visible status
     // honest in the meantime, preserving whatever tier/subscription the user already had.
-    await this.usersService.applyMembershipUpdate(user.id, {
+    await this.applyAndAudit(user, {
       tier: user.membershipTier,
       status: 'PAST_DUE',
       stripeSubscriptionId: user.stripeSubscriptionId,

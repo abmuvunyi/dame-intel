@@ -11,6 +11,8 @@ import CapturedTray, { materialValue } from './CapturedTray';
 import GameOverModal from './GameOverModal';
 import ConnectionStatus from './ConnectionStatus';
 import Timer from './Timer';
+import { API_URL, API_BASE } from '@/lib/api';
+import Link from 'next/link';
 
 // Re-exported for any older imports still pointing at this module.
 export { PieceColor, PieceType } from '@/lib/draughts';
@@ -127,7 +129,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    const newSocket = io((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'), {
+    const newSocket = io(API_URL, {
       auth: { token },
     });
     setSocket(newSocket);
@@ -157,7 +159,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
       const authToken = localStorage.getItem('token');
       if (!authToken) return;
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends`, {
+        const res = await axios.get(`${API_BASE}/friends`, {
           headers: { Authorization: `Bearer ${authToken}` },
         });
         setFriends(res.data);
@@ -567,9 +569,9 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
         <a href="/profile" className="text-sm text-blue-600 hover:underline">
           Manage Friends & Requests →
         </a>
-        <a href="/clubs" className="text-sm text-blue-600 hover:underline">
+        <Link href="/clubs" className="text-sm text-blue-600 hover:underline">
           Browse Clubs →
-        </a>
+        </Link>
       </div>
     );
   }
