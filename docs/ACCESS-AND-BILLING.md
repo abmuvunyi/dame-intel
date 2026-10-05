@@ -8,11 +8,11 @@ the frontend only mirrors it.
 | | **Staff roles** | **Plans** |
 |---|---|---|
 | What it unlocks | Staff tools (moderation, tournaments, puzzles, admin) | Player features (analysis depth, premium puzzles, …) |
-| Who has it | A few trusted people | Every player: Free, Premium or Pro |
+| Who has it | A few trusted people | Every player: Free, Plus or Premium |
 | How it's granted | An admin (Admin page or CLI) | Stripe subscription, or the free trial |
 | Code | `backend/src/access/roles.ts` | `backend/src/billing/plans.ts`, `billing/access.ts` |
 
-A person can be both, e.g. a Pro subscriber who is also a Moderator.
+A person can be both, e.g. a Premium subscriber who is also a Moderator.
 
 ## Staff roles
 
@@ -37,23 +37,34 @@ A person can be both, e.g. a Pro subscriber who is also a Moderator.
 Defaults below are starting values. **Adjust them in `billing/plans.ts` before the first
 real subscriber**; after that, add a new version instead (see *Plan versioning*).
 
-| | Free | Premium | Pro |
+| | Free | Plus | Premium |
 |---|---|---|---|
-| Analysis depth | 4 | 6 | 8 |
+| Price | $0 | $1.99/mo ($19.99/yr) | $4.99/mo ($49.99/yr) |
+| Analysis depth | none | 6 | 8 |
+| Game review (accuracy, classifications, best continuations) | – | ✓ | ✓ |
 | Premium puzzles | – | ✓ | ✓ |
-| Full game review (best continuation, how mistakes get punished) | – | ✓ | ✓ |
+| Highest AI difficulty | 4 | 6 | 7 |
 | Clubs you can create | 1 | 3 | 10 |
-| Host your own tournaments | – | – | ✓ |
+| Host your own tournaments | – | – | ✓ (planned, not yet built) |
 | Billing | – | monthly / annual | monthly / annual |
 
+- Free gets zero engine analysis and zero game review — not a reduced depth, no access
+  at all. Both are refused outright (`403`/`LOCKED`) rather than run at a token depth.
+- AI difficulty levels above a plan's ceiling are shown in the UI (locked, not hidden)
+  and enforced server-side in `game.gateway.ts`'s `handlePlayVsAi` — the client-side
+  lock is cosmetic only.
 - Effective access = the higher of an active paid subscription and an active trial,
   otherwise Free (`billing/access.ts`). `PAST_DUE` keeps access during Stripe's retries.
 - Plan changes (upgrade, downgrade, monthly ↔ annual, cancel) happen in Stripe's billing
   portal; the webhook updates the account. One subscription per account.
+- Premium's tournament-organizing and local-competition features are reserved for a
+  later pass — the entitlement scaffolding (`hostTournaments`) already exists, but
+  nothing in the product builds on it yet.
 
 ## Free trial
 
 - **7 days, no card, once per account** (`TRIALS_ENABLED`, `TRIAL_DAYS`, `TRIAL_PLAN`).
+  `TRIAL_PLAN` defaults to Plus, the entry-level paid plan.
 - Starts from the Membership page (`POST /api/v1/subscriptions/trial`).
 - Ends by time alone: no background job is needed for access to stop. An hourly job
   sends "ends tomorrow" and "has ended" notifications.
@@ -71,14 +82,15 @@ To change a paid plan:
 
 1. Create the new Prices in Stripe.
 2. In `billing/plans.ts`, set the old entry's `current: false` and add a new entry with
-   `version: n + 1`, `current: true` and new env names (e.g. `STRIPE_PRICE_PRO_MONTHLY_V2`).
+   `version: n + 1`, `current: true` and new env names (e.g. `STRIPE_PRICE_PREMIUM_MONTHLY_V2`).
    Never edit or delete an entry that has subscribers.
 3. Set the new env vars **and keep the old ones**, so renewals on old prices still map
    to their version.
 
 New checkouts use the current version. If Stripe ever reports a price the catalog
-doesn't know, the member keeps access (Premium), and an error plus a
-`subscription.unknown_price` audit event flag the misconfiguration.
+doesn't know, the member keeps access (the entry-level paid plan, Plus — never silently
+upgraded to Premium), and an error plus a `subscription.unknown_price` audit event flag
+the misconfiguration.
 
 ## API versioning
 

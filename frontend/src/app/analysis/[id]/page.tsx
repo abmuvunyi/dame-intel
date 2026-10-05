@@ -78,6 +78,10 @@ export default function AnalysisPage() {
   // honoring the requested depth — surfaced here so a capped free-tier user sees why
   // and gets a path to upgrade, instead of a silently shallower engine line.
   const [depthInfo, setDepthInfo] = useState<{ depthUsed: number, depthCapped: boolean, maxDepth: number } | null>(null);
+  // Free's analysisMaxDepth is 0 (billing/plans.ts) — the endpoint refuses outright
+  // (403) rather than clamping, so the on-demand "Run Engine" panel needs its own
+  // locked state distinct from "haven't clicked Run Engine yet".
+  const [analysisLocked, setAnalysisLocked] = useState(false);
   // Phase 11: the automated post-game review (move classifications + accuracy),
   // computed asynchronously server-side — see GameReviewService. Separate from
   // `evaluations` above, which is this page's own pre-existing on-demand "Run Engine"
@@ -139,13 +143,14 @@ export default function AnalysisPage() {
 
     const fetchReview = async () => {
       try {
-        // Signed-in players send their token: the engine's continuation lines are
-        // included only for plans with full game review (Premium / Pro / trial).
+        // Signed-in players send their token: the whole review (not just the
+        // engine's "best continuation"/"punishment" lines) requires a plan with
+        // fullGameReview — Plus, Premium, or an active trial of either.
         const token = localStorage.getItem('token');
         const res = await axios.get(`${API_BASE}/game-review/${id}`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
         if (cancelled) return;
         setReview(res.data);
-        if (res.data.status === 'COMPLETED' || res.data.status === 'FAILED') {
+        if (['COMPLETED', 'FAILED', 'LOCKED'].includes(res.data.status)) {
           if (interval) clearInterval(interval);
         }
       } catch {
@@ -166,10 +171,12 @@ export default function AnalysisPage() {
     setIsAnalyzing(true);
     try {
       const state = boardStates[currentMoveIndex];
-      // Ask for the premium ceiling (8) regardless of who's asking — the endpoint
-      // itself silently clamps this down to whatever the caller's actual tier allows
-      // (see FREE_MAX_DEPTH/PREMIUM_MAX_DEPTH in analysis.controller.ts) and reports
-      // back what it really used, so there's no benefit to under-requesting here.
+      // Ask for the Premium ceiling (8) regardless of who's asking — the endpoint
+      // itself clamps this down to whatever the caller's actual plan allows
+      // (billing/plans.ts's entitlements.analysisMaxDepth) and reports back what it
+      // really used, so there's no benefit to under-requesting here. Free/anonymous
+      // callers get refused outright (403) rather than clamped, since Free's own
+      // ceiling is 0 — handled below.
       const token = localStorage.getItem('token');
       const res = await axios.post(
         `${API_BASE}/analysis`,
@@ -178,8 +185,13 @@ export default function AnalysisPage() {
       );
       setEvaluations(res.data.evaluations);
       setDepthInfo({ depthUsed: res.data.depthUsed, depthCapped: res.data.depthCapped, maxDepth: res.data.maxDepth });
-    } catch(err) {
-      console.error(err);
+      setAnalysisLocked(false);
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        setAnalysisLocked(true);
+      } else {
+        console.error(err);
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -298,9 +310,20 @@ export default function AnalysisPage() {
       </div>
 
       {/* Automated post-game review (Phase 11) — computed once, server-side, shown
-          instantly here rather than recomputed on every view. */}
+          instantly here rather than recomputed on every view. Product decision
+          (2026-09): the whole review (not just the best-move/punishment lines) now
+          requires a paid plan — see game-review.controller.ts. */}
       <div className="w-full max-w-5xl mb-6">
-        {!review || review.status === 'NOT_STARTED' || review.status === 'PENDING' ? (
+        {review?.status === 'LOCKED' ? (
+          <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between gap-4">
+            <p className="text-sm text-gray-600">
+              Game review (accuracy, move-by-move classifications, and the eval bar) requires a {review.requiresPlan === 'PREMIUM' ? 'Premium' : 'Plus'} plan.
+            </p>
+            <Link href="/membership" className="shrink-0 px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition">
+              Upgrade
+            </Link>
+          </div>
+        ) : !review || review.status === 'NOT_STARTED' || review.status === 'PENDING' ? (
           <div className="bg-white rounded-lg shadow p-4 text-sm text-gray-500 flex items-center gap-2">
             <span className="inline-block w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
             Post-game analysis {review?.status === 'PENDING' ? 'in progress' : 'not started yet'}...
@@ -430,13 +453,6 @@ export default function AnalysisPage() {
               </div>
             )}
 
-            {!previewLine && review?.linesIncluded === false && review?.status === 'COMPLETED' && (
-              <p className="mt-2 text-xs text-slate-500">
-                Want to see the engine&apos;s best continuation and how mistakes get punished?{' '}
-                <Link href="/membership" className="text-purple-700 hover:underline">Premium and Pro include full game review</Link>.
-              </p>
-            )}
-
             {previewLine && (
               <div className="mt-2 w-full max-w-md bg-purple-50 border border-purple-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -503,17 +519,25 @@ export default function AnalysisPage() {
                </button>
            </h2>
 
-           {evaluations.length > 0 ? (
+           {analysisLocked ? (
+               <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800 text-center">
+                 Engine analysis requires a Plus or Premium plan.{' '}
+                 <Link href="/membership" className="font-semibold underline hover:text-amber-900">
+                   Upgrade
+                 </Link>{' '}
+                 to unlock it.
+               </div>
+           ) : evaluations.length > 0 ? (
                <div className="space-y-3 mt-4">
                    <p className="text-sm text-gray-500 mb-2">
                      Best calculated moves for {boardStates[currentMoveIndex].turn === 'L' ? 'Light' : 'Dark'} at Depth {depthInfo?.depthUsed ?? '?'}:
                    </p>
                    {depthInfo?.depthCapped && (
                      <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
-                       Free tier is capped at depth {depthInfo.maxDepth}.{' '}
-                       <a href="/membership" className="font-semibold underline hover:text-amber-900">
-                         Upgrade to Premium
-                       </a>{' '}
+                       Your plan is capped at depth {depthInfo.maxDepth}.{' '}
+                       <Link href="/membership" className="font-semibold underline hover:text-amber-900">
+                         Upgrade
+                       </Link>{' '}
                        for deeper analysis.
                      </div>
                    )}

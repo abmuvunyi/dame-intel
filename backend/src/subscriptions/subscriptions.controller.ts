@@ -6,7 +6,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { TrialService, trialConfig } from './trial.service';
 import { CheckoutDto } from './checkout.dto';
-import { publicCatalog } from '../billing/plans';
+import { publicCatalog, priceIdFor, BillingInterval } from '../billing/plans';
 
 @Controller('subscriptions')
 export class SubscriptionsController {
@@ -17,11 +17,28 @@ export class SubscriptionsController {
     private readonly trialService: TrialService,
   ) {}
 
-  // Public: what each plan includes, which can currently be bought, and the trial offer.
+  // Public: what each plan includes, which can currently be bought, and the trial
+  // offer. Each purchasable plan/interval gets its REAL Stripe price when one is
+  // configured (so "the price is $X" only has to be set once, in Stripe) — falling
+  // back to the catalog's own static displayPrice otherwise, so the pricing page
+  // still shows real-looking numbers before Stripe is ever configured at all.
   @Get('plans')
-  getPlans() {
+  async getPlans() {
+    const catalog = publicCatalog();
+    const plans = await Promise.all(catalog.map(async (plan) => {
+      const displayPrice = { ...plan.displayPrice };
+      if (this.stripeService.isConfigured()) {
+        for (const interval of ['monthly', 'annual'] as BillingInterval[]) {
+          if (!plan.purchasable[interval]) continue;
+          const priceId = priceIdFor(plan.code, interval);
+          const live = priceId ? await this.stripeService.getFormattedPrice(priceId) : null;
+          if (live) (displayPrice as any)[interval] = live;
+        }
+      }
+      return { ...plan, displayPrice };
+    }));
     return {
-      plans: publicCatalog(),
+      plans,
       trial: trialConfig(),
       paymentsEnabled: this.stripeService.isConfigured(),
     };

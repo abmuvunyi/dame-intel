@@ -98,6 +98,12 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   const [incomingChallenge, setIncomingChallenge] = useState<{ challengeId: string, fromUser: { id: number, username: string } } | null>(null);
   const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
 
+  // The highest AI difficulty this account's plan allows (billing/plans.ts's
+  // maxAiDifficulty) — defaults to Free's ceiling until (if logged in) the real value
+  // loads, so nothing ever briefly looks unlocked that isn't. The server enforces this
+  // independently (game.gateway.ts's handlePlayVsAi) — this is only the UI lock.
+  const [maxAiDifficulty, setMaxAiDifficulty] = useState(4);
+
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
@@ -169,6 +175,20 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     };
     fetchFriends();
     const friendsPollInterval = setInterval(fetchFriends, 5000);
+
+    const fetchMaxAiDifficulty = async () => {
+      const authToken = localStorage.getItem('token');
+      if (!authToken) return; // anonymous stays at the Free default above
+      try {
+        const res = await axios.get(`${API_BASE}/subscriptions/me`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        setMaxAiDifficulty(res.data.entitlements.maxAiDifficulty);
+      } catch {
+        // Stays at the Free default — safe (never over-grants access).
+      }
+    };
+    fetchMaxAiDifficulty();
 
     newSocket.on('challengeReceived', (data: { challengeId: string, fromUser: { id: number, username: string } }) => {
       setIncomingChallenge(data);
@@ -291,6 +311,10 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     // without this, the user would be stuck on "Connecting to spectate..." forever.
     newSocket.on('error', (data: { message: string }) => {
       if (roomIdToSpectate) setStatus(`Couldn't join as spectator: ${data.message}`);
+      // Backstop for the AI-difficulty plan gate (game.gateway.ts) — the button lock
+      // above should normally prevent this, but a stale/unfetched maxAiDifficulty
+      // shouldn't leave the user staring at a silently-ignored click.
+      else if (data.message?.includes('requires a higher plan')) alert(data.message);
     });
 
     newSocket.on('spectatorJoined', (data: { count: number }) => setSpectatorCount(data.count));
@@ -315,6 +339,10 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   };
 
   const handlePlayAI = (difficulty: number) => {
+    if (difficulty > maxAiDifficulty) {
+      router.push('/membership');
+      return;
+    }
     socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
   };
 
@@ -508,15 +536,22 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
           <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
 
           <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
-              >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
-              </button>
-            ))}
+            {[1, 2, 3, 4, 5, 6, 7].map(level => {
+              const locked = level > maxAiDifficulty;
+              return (
+                <button
+                  key={level}
+                  onClick={() => handlePlayAI(level)}
+                  title={locked ? 'Upgrade your plan to unlock this difficulty' : undefined}
+                  className={`w-full px-2 py-2 text-white rounded transition text-sm flex items-center justify-center gap-1 ${
+                    level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'
+                  } ${locked ? 'opacity-60' : ''}`}
+                >
+                  {locked && <span aria-hidden>🔒</span>}
+                  AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                </button>
+              );
+            })}
           </div>
         </div>
 

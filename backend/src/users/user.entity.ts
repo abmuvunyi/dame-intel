@@ -61,7 +61,7 @@ export class User {
   // trials). Feature code never reads these directly — it asks
   // UsersService.accessFor(user).entitlements.
   @Column({ default: 'FREE' })
-  membershipTier: string; // paid plan code: 'FREE' | 'PREMIUM' | 'PRO'
+  membershipTier: string; // paid plan code: 'FREE' | 'PLUS' | 'PREMIUM'
 
   // Which version of that plan the subscriber bought (grandfathering: their
   // entitlements stay those of this version even after the catalog changes).

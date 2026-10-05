@@ -125,7 +125,7 @@ describe('SubscriptionsService', () => {
       expect(fresh!.stripeCustomerId).toBe('cus_frank_new');
     });
 
-    it('customer.subscription.created grants PREMIUM/ACTIVE and a real renewsAt date', async () => {
+    it('customer.subscription.created with no price info on the event grants the entry-level paid plan (PLUS)/ACTIVE and a real renewsAt date', async () => {
       const user = await usersService.create('grace', 'hash');
       await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_grace' });
 
@@ -139,7 +139,7 @@ describe('SubscriptionsService', () => {
 
       await service.handleWebhookEvent(event);
       const fresh = await usersService.findOneById(user.id);
-      expect(fresh!.membershipTier).toBe('PREMIUM');
+      expect(fresh!.membershipTier).toBe('PLUS');
       expect(fresh!.membershipStatus).toBe('ACTIVE');
       expect(fresh!.stripeSubscriptionId).toBe('sub_grace_1');
       expect(fresh!.membershipRenewsAt).not.toBeNull();
@@ -148,7 +148,7 @@ describe('SubscriptionsService', () => {
 
     it('customer.subscription.updated with status=canceled correctly downgrades to FREE', async () => {
       const user = await usersService.create('henry', 'hash');
-      await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_henry', membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE' });
+      await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_henry', membershipTier: 'PLUS', membershipStatus: 'ACTIVE' });
 
       const event = stripeEvent('customer.subscription.updated', {
         id: 'sub_henry_1',
@@ -166,7 +166,7 @@ describe('SubscriptionsService', () => {
     it('customer.subscription.deleted resets tier, status, subscription id, and renewsAt all the way', async () => {
       const user = await usersService.create('iris', 'hash');
       await (usersService as any).usersRepository.update(user.id, {
-        stripeCustomerId: 'cus_iris', membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE',
+        stripeCustomerId: 'cus_iris', membershipTier: 'PLUS', membershipStatus: 'ACTIVE',
         stripeSubscriptionId: 'sub_iris_1', membershipRenewsAt: new Date(),
       });
 
@@ -184,7 +184,7 @@ describe('SubscriptionsService', () => {
       const user = await usersService.create('jack', 'hash');
       const renewsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
       await (usersService as any).usersRepository.update(user.id, {
-        stripeCustomerId: 'cus_jack', membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE',
+        stripeCustomerId: 'cus_jack', membershipTier: 'PLUS', membershipStatus: 'ACTIVE',
         stripeSubscriptionId: 'sub_jack_1', membershipRenewsAt: renewsAt,
       });
 
@@ -192,7 +192,7 @@ describe('SubscriptionsService', () => {
       await service.handleWebhookEvent(event);
 
       const fresh = await usersService.findOneById(user.id);
-      expect(fresh!.membershipTier).toBe('PREMIUM'); // unchanged — still has access during the grace period
+      expect(fresh!.membershipTier).toBe('PLUS'); // unchanged — still has access during the grace period
       expect(fresh!.membershipStatus).toBe('PAST_DUE');
       expect(fresh!.stripeSubscriptionId).toBe('sub_jack_1'); // preserved
     });
@@ -203,8 +203,8 @@ describe('SubscriptionsService', () => {
       beforeEach(() => {
         process.env = {
           ...OLD_ENV,
+          STRIPE_PRICE_PLUS_MONTHLY: 'price_plus_m', STRIPE_PRICE_PLUS_ANNUAL: 'price_plus_y',
           STRIPE_PRICE_PREMIUM_MONTHLY: 'price_prem_m', STRIPE_PRICE_PREMIUM_ANNUAL: 'price_prem_y',
-          STRIPE_PRICE_PRO_MONTHLY: 'price_pro_m', STRIPE_PRICE_PRO_ANNUAL: 'price_pro_y',
         };
       });
       afterEach(() => { process.env = OLD_ENV; });
@@ -215,53 +215,53 @@ describe('SubscriptionsService', () => {
           items: { data: [{ price: priceId ? { id: priceId } : null, current_period_end: Math.floor(Date.now() / 1000) + 86400 }] },
         });
 
-      it('a Pro annual price grants PRO v1 with the annual interval and Pro entitlements', async () => {
-        const user = await usersService.create('pro_user', 'hash');
-        await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_pro' });
-        await service.handleWebhookEvent(subEvent('customer.subscription.created', 'cus_pro', 'price_pro_y'));
+      it('a Premium annual price grants PREMIUM v1 with the annual interval and Premium entitlements', async () => {
+        const user = await usersService.create('premium_user', 'hash');
+        await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_premium' });
+        await service.handleWebhookEvent(subEvent('customer.subscription.created', 'cus_premium', 'price_prem_y'));
         const fresh = await usersService.findOneById(user.id);
-        expect(fresh).toMatchObject({ membershipTier: 'PRO', planVersion: 1, billingInterval: 'annual', stripePriceId: 'price_pro_y' });
+        expect(fresh).toMatchObject({ membershipTier: 'PREMIUM', planVersion: 1, billingInterval: 'annual', stripePriceId: 'price_prem_y' });
         expect(usersService.accessFor(fresh).entitlements.hostTournaments).toBe(true);
       });
 
-      it('upgrading Premium → Pro in the billing portal updates the plan', async () => {
+      it('upgrading Plus → Premium in the billing portal updates the plan', async () => {
         const user = await usersService.create('upgrader', 'hash');
         await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_up' });
-        await service.handleWebhookEvent(subEvent('customer.subscription.created', 'cus_up', 'price_prem_m'));
+        await service.handleWebhookEvent(subEvent('customer.subscription.created', 'cus_up', 'price_plus_m'));
+        expect((await usersService.findOneById(user.id))!.membershipTier).toBe('PLUS');
+        await service.handleWebhookEvent(subEvent('customer.subscription.updated', 'cus_up', 'price_prem_m'));
         expect((await usersService.findOneById(user.id))!.membershipTier).toBe('PREMIUM');
-        await service.handleWebhookEvent(subEvent('customer.subscription.updated', 'cus_up', 'price_pro_m'));
-        expect((await usersService.findOneById(user.id))!.membershipTier).toBe('PRO');
       });
 
       it('grandfathering: a renewal on a price that is no longer configured keeps the version on record', async () => {
         const user = await usersService.create('oldtimer', 'hash');
         await (usersService as any).usersRepository.update(user.id, {
-          stripeCustomerId: 'cus_old', membershipTier: 'PRO', membershipStatus: 'ACTIVE', planVersion: 1,
-          stripePriceId: 'price_pro_2025', billingInterval: 'monthly',
+          stripeCustomerId: 'cus_old', membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE', planVersion: 1,
+          stripePriceId: 'price_prem_2025', billingInterval: 'monthly',
         });
-        await service.handleWebhookEvent(subEvent('customer.subscription.updated', 'cus_old', 'price_pro_2025'));
-        expect(await usersService.findOneById(user.id)).toMatchObject({ membershipTier: 'PRO', planVersion: 1, membershipStatus: 'ACTIVE' });
+        await service.handleWebhookEvent(subEvent('customer.subscription.updated', 'cus_old', 'price_prem_2025'));
+        expect(await usersService.findOneById(user.id)).toMatchObject({ membershipTier: 'PREMIUM', planVersion: 1, membershipStatus: 'ACTIVE' });
       });
 
-      it('an unknown price never cuts off a paying customer (falls back to Premium, loudly)', async () => {
+      it('an unknown price never cuts off a paying customer (falls back to the entry-level paid plan, PLUS, loudly)', async () => {
         const user = await usersService.create('mystery', 'hash');
         await (usersService as any).usersRepository.update(user.id, { stripeCustomerId: 'cus_mystery' });
         await service.handleWebhookEvent(subEvent('customer.subscription.created', 'cus_mystery', 'price_nobody_knows'));
-        expect((await usersService.findOneById(user.id))!.membershipTier).toBe('PREMIUM');
+        expect((await usersService.findOneById(user.id))!.membershipTier).toBe('PLUS');
       });
 
-      it('checkout for PRO annual uses the current Pro annual price', async () => {
+      it('checkout for PREMIUM annual uses the current Premium annual price', async () => {
         const user = await usersService.create('buyer', 'hash');
         stripeServiceMock.findOrCreateCustomer.mockResolvedValue('cus_buyer');
         stripeServiceMock.createCheckoutSession.mockResolvedValue({ url: 'https://checkout.stripe.com/x' });
-        await service.createCheckoutSession(user.id, 'PRO', 'annual');
-        expect(stripeServiceMock.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ priceId: 'price_pro_y' }));
+        await service.createCheckoutSession(user.id, 'PREMIUM', 'annual');
+        expect(stripeServiceMock.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ priceId: 'price_prem_y' }));
       });
 
       it('refuses a second checkout while a subscription is active (plan changes go through the portal)', async () => {
         const user = await usersService.create('twice', 'hash');
-        await (usersService as any).usersRepository.update(user.id, { stripeSubscriptionId: 'sub_1', membershipStatus: 'ACTIVE', membershipTier: 'PREMIUM' });
-        await expect(service.createCheckoutSession(user.id, 'PRO', 'monthly')).rejects.toThrow(BadRequestException);
+        await (usersService as any).usersRepository.update(user.id, { stripeSubscriptionId: 'sub_1', membershipStatus: 'ACTIVE', membershipTier: 'PLUS' });
+        await expect(service.createCheckoutSession(user.id, 'PREMIUM', 'monthly')).rejects.toThrow(BadRequestException);
       });
 
       it('refuses checkout for the Free plan', async () => {

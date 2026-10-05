@@ -12,20 +12,20 @@ describe('accessFor (effective plan)', () => {
   });
 
   it('an active paid subscription grants its plan version', () => {
-    const a = accessFor({ membershipTier: 'PRO', membershipStatus: 'ACTIVE', planVersion: 1 }, NOW);
-    expect(a).toMatchObject({ plan: 'PRO', version: 1, source: 'SUBSCRIPTION' });
+    const a = accessFor({ membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE', planVersion: 1 }, NOW);
+    expect(a).toMatchObject({ plan: 'PREMIUM', version: 1, source: 'SUBSCRIPTION' });
     expect(a.entitlements.hostTournaments).toBe(true);
   });
 
   it('keeps access during a payment problem (PAST_DUE) but not after cancellation', () => {
-    expect(accessFor({ membershipTier: 'PREMIUM', membershipStatus: 'PAST_DUE' }, NOW).plan).toBe('PREMIUM');
-    expect(accessFor({ membershipTier: 'PREMIUM', membershipStatus: 'CANCELED' }, NOW).plan).toBe('FREE');
-    expect(accessFor({ membershipTier: 'PREMIUM', membershipStatus: 'NONE' }, NOW).plan).toBe('FREE');
+    expect(accessFor({ membershipTier: 'PLUS', membershipStatus: 'PAST_DUE' }, NOW).plan).toBe('PLUS');
+    expect(accessFor({ membershipTier: 'PLUS', membershipStatus: 'CANCELED' }, NOW).plan).toBe('FREE');
+    expect(accessFor({ membershipTier: 'PLUS', membershipStatus: 'NONE' }, NOW).plan).toBe('FREE');
   });
 
   it('an active trial grants the trial plan until it ends, then falls back to Free by itself', () => {
-    const user = { trialPlan: 'PREMIUM', trialPlanVersion: 1, trialStartedAt: inDays(-6), trialEndsAt: inDays(1) };
-    expect(accessFor(user, NOW)).toMatchObject({ plan: 'PREMIUM', source: 'TRIAL' });
+    const user = { trialPlan: 'PLUS', trialPlanVersion: 1, trialStartedAt: inDays(-6), trialEndsAt: inDays(1) };
+    expect(accessFor(user, NOW)).toMatchObject({ plan: 'PLUS', source: 'TRIAL' });
     expect(isTrialActive(user, NOW)).toBe(true);
 
     const later = inDays(1.01);
@@ -36,11 +36,11 @@ describe('accessFor (effective plan)', () => {
 
   it('the higher of subscription and trial wins', () => {
     const user = {
-      membershipTier: 'PREMIUM', membershipStatus: 'ACTIVE',
-      trialPlan: 'PRO', trialStartedAt: inDays(-1), trialEndsAt: inDays(6),
+      membershipTier: 'PLUS', membershipStatus: 'ACTIVE',
+      trialPlan: 'PREMIUM', trialStartedAt: inDays(-1), trialEndsAt: inDays(6),
     };
-    expect(accessFor(user, NOW)).toMatchObject({ plan: 'PRO', source: 'TRIAL' });
-    expect(accessFor({ ...user, trialPlan: 'PREMIUM' }, NOW)).toMatchObject({ plan: 'PREMIUM', source: 'SUBSCRIPTION' });
+    expect(accessFor(user, NOW)).toMatchObject({ plan: 'PREMIUM', source: 'TRIAL' });
+    expect(accessFor({ ...user, trialPlan: 'PLUS' }, NOW)).toMatchObject({ plan: 'PLUS', source: 'SUBSCRIPTION' });
   });
 
   it('never grants access from unknown/corrupt values', () => {

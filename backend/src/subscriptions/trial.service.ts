@@ -20,11 +20,11 @@ export interface TrialConfig {
 // "ending soon" / "ended" notices; it is not needed for access to stop on time.
 export function trialConfig(env: NodeJS.ProcessEnv = process.env): TrialConfig {
   const days = Math.floor(Number(env.TRIAL_DAYS));
-  const plan = (env.TRIAL_PLAN ?? 'PREMIUM').toUpperCase();
+  const plan = (env.TRIAL_PLAN ?? 'PLUS').toUpperCase();
   return {
     enabled: env.TRIALS_ENABLED !== 'false',
     days: days >= 1 && days <= 90 ? days : TRIAL_DEFAULT_DAYS,
-    plan: isPlanCode(plan) && plan !== 'FREE' ? plan : 'PREMIUM',
+    plan: isPlanCode(plan) && plan !== 'FREE' ? plan : 'PLUS',
   };
 }
 

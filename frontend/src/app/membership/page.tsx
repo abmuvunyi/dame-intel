@@ -9,7 +9,7 @@ import { API_BASE } from '@/lib/api';
 // no card. Plans and what they include come from the backend catalog
 // (GET /subscriptions/plans) so this page never drifts from what's enforced.
 
-type PlanCode = 'FREE' | 'PREMIUM' | 'PRO';
+type PlanCode = 'FREE' | 'PLUS' | 'PREMIUM';
 type Interval = 'monthly' | 'annual';
 
 interface Entitlements {
@@ -18,6 +18,7 @@ interface Entitlements {
   fullGameReview: boolean;
   maxClubsOwned: number;
   hostTournaments: boolean;
+  maxAiDifficulty: number;
 }
 
 interface CatalogPlan {
@@ -49,9 +50,10 @@ interface Membership {
 
 function features(e: Entitlements): string[] {
   return [
-    `Engine analysis up to depth ${e.analysisMaxDepth}`,
+    e.analysisMaxDepth > 0 ? `Engine analysis up to depth ${e.analysisMaxDepth}` : 'No engine analysis',
     e.premiumPuzzles ? 'Full puzzle library, including premium puzzles' : 'Standard puzzle library',
-    e.fullGameReview ? 'Full game review: best continuations and how mistakes get punished' : 'Game review: accuracy and move classifications',
+    e.fullGameReview ? 'Full game review: accuracy, classifications, and best continuations' : 'No game review',
+    `Play AI opponents up to level ${e.maxAiDifficulty}`,
     `Create up to ${e.maxClubsOwned} club${e.maxClubsOwned === 1 ? '' : 's'}`,
     ...(e.hostTournaments ? ['Host and run your own tournaments'] : []),
   ];
@@ -239,7 +241,7 @@ function MembershipPageInner() {
                 return (
                   <div
                     key={plan.code}
-                    className={`p-6 rounded-xl border flex flex-col ${plan.code === 'PRO' ? 'border-green-600 bg-slate-800' : 'border-slate-700 bg-slate-800/70'}`}
+                    className={`p-6 rounded-xl border flex flex-col ${plan.code === 'PREMIUM' ? 'border-green-600 bg-slate-800' : 'border-slate-700 bg-slate-800/70'}`}
                   >
                     <div className="flex items-baseline justify-between">
                       <h2 className="text-xl font-bold text-slate-100">{plan.name}</h2>

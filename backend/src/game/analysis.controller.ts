@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Post, Body, Req } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Post, Body, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { AiService } from './ai/ai/ai.service';
@@ -55,6 +55,13 @@ export class AnalysisController {
     engine.loadBoard(body.board, body.turn);
 
     const maxDepth = await this.resolveMaxDepth(req);
+    // Free's analysisMaxDepth is 0 (billing/plans.ts) — refuse outright rather than
+    // silently running a trivial depth-0 (effectively depth-1) search, which would
+    // still leak a real, if shallow, engine opinion to a tier that isn't supposed to
+    // have any analysis access at all.
+    if (maxDepth <= 0) {
+      throw new ForbiddenException('Engine analysis requires a Plus or Premium plan.');
+    }
     const requestedDepth = body.depth || DEFAULT_DEPTH;
     const depth = Math.min(requestedDepth, maxDepth);
 

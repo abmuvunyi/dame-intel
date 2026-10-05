@@ -23,7 +23,8 @@ export class SubscriptionsService {
 
   /**
    * Starts a Stripe Checkout for a paid plan. Always uses the plan's CURRENT catalog
-   * version. `plan` may also be the Phase 13 shorthand 'monthly' | 'annual' (= Premium).
+   * version. `plan` may also be the Phase 13 shorthand 'monthly' | 'annual' (= Plus,
+   * the original single paid tier before Plus/Premium existed as two tiers).
    */
   async createCheckoutSession(
     userId: number,
@@ -31,9 +32,9 @@ export class SubscriptionsService {
     interval: BillingInterval = 'monthly',
     req?: any,
   ): Promise<{ url: string }> {
-    const code: PlanCode = plan === 'monthly' || plan === 'annual' ? 'PREMIUM' : plan;
+    const code: PlanCode = plan === 'monthly' || plan === 'annual' ? 'PLUS' : plan;
     const billing: BillingInterval = plan === 'monthly' || plan === 'annual' ? plan : interval;
-    if (!isPlanCode(code) || code === 'FREE') throw new BadRequestException('Choose a paid plan: PREMIUM or PRO.');
+    if (!isPlanCode(code) || code === 'FREE') throw new BadRequestException('Choose a paid plan: PLUS or PREMIUM.');
     const priceId = priceIdFor(code, billing);
     if (!priceId) {
       throw new BadRequestException(`No Stripe price configured for ${code} (${billing}).`);
@@ -130,7 +131,7 @@ export class SubscriptionsService {
       return;
     }
 
-    const { tier: mappedTier, status } = mapStripeSubscriptionStatus(subscription.status);
+    const { paid, status } = mapStripeSubscriptionStatus(subscription.status);
     const item = (subscription as any).items?.data?.[0];
     const priceId: string | null = item?.price?.id ?? null;
     // Newer Stripe API versions put the period end on the item; older ones on the subscription.
@@ -139,7 +140,7 @@ export class SubscriptionsService {
     let tier = 'FREE';
     let planVersion: number | null = null;
     let billingInterval: string | null = null;
-    if (mappedTier !== 'FREE') {
+    if (paid) {
       const resolved = resolvePriceId(priceId);
       if (resolved) {
         ({ code: tier, version: planVersion, interval: billingInterval } = resolved);
@@ -150,11 +151,12 @@ export class SubscriptionsService {
         planVersion = user.planVersion;
         billingInterval = user.billingInterval;
       } else {
-        // Paying customer on a price we can't map: never cut them off, grant Premium
-        // and make the misconfiguration loud so the catalog/env can be fixed.
-        tier = 'PREMIUM';
-        planVersion = currentPlan('PREMIUM').version;
-        logger.error(`[Subscriptions] Unknown Stripe price "${priceId}" on subscription ${subscription.id} — granted PREMIUM. Add it to the plan catalog / env.`);
+        // Paying customer on a price we can't map: never cut them off, grant the
+        // entry-level paid plan (Plus) and make the misconfiguration loud so the
+        // catalog/env can be fixed.
+        tier = 'PLUS';
+        planVersion = currentPlan('PLUS').version;
+        logger.error(`[Subscriptions] Unknown Stripe price "${priceId}" on subscription ${subscription.id} — granted PLUS. Add it to the plan catalog / env.`);
         await this.audit?.record({
           action: 'subscription.unknown_price', actorType: 'STRIPE', targetType: 'user', targetId: user.id,
           details: { priceId, subscriptionId: subscription.id },

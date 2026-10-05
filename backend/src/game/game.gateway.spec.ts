@@ -10,6 +10,7 @@ import { RatingService } from '../rating/rating.service';
 import { PresenceService } from '../presence/presence.service';
 import { GameReviewService } from './review/game-review.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { accessFor } from '../billing/access';
 
 // Minimal stand-in for socket.io's Server: just enough surface for the gateway's
 // `this.server.to(...).emit(...)` and `this.server.sockets.sockets.get(...).join(...)`
@@ -37,7 +38,7 @@ describe('GameGateway', () => {
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: {} },
-        { provide: UsersService, useValue: {} },
+        { provide: UsersService, useValue: { accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: {} },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: {} },
@@ -196,6 +197,7 @@ describe('GameGateway: matchmaking, clocks, and disconnect/reconnect (Phase 5)',
             calculateEloChange: () => 0,
             updateRating: async () => {},
             isCurrentlyBanned: () => false,
+            accessFor: (u: any) => accessFor(u),
           },
         },
         { provide: HistoryService, useValue: { saveGame: async () => {} } },
@@ -380,7 +382,7 @@ describe('GameGateway: Swiss games use the organizer\'s tournament settings, not
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         {
           provide: TournamentsService,
@@ -468,7 +470,7 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -515,10 +517,35 @@ describe('GameGateway: live games dashboard and spectator mode (Phase 9)', () =>
     it('reports the AI difficulty as the opponent for a vs-AI game', () => {
       const mock = createMockServer();
       (gw as any).server = mock;
-      gw.handlePlayVsAi(mockSocket('ai-p1', '1') as any, { difficulty: 5, rules: { boardSize: 8 } });
+      // This socket is never run through handleConnection, so it's anonymous (FREE,
+      // maxAiDifficulty 4) — use a difficulty within that range since this test is
+      // about opponent-identity reporting, not plan gating (covered separately below).
+      gw.handlePlayVsAi(mockSocket('ai-p1', '1') as any, { difficulty: 4, rules: { boardSize: 8 } });
 
       const start = mock.emitted.find((e: any) => e.room === 'ai-p1' && e.event === 'gameStart')?.payload;
-      expect(start.opponent).toEqual({ type: 'ai', difficulty: 5 });
+      expect(start.opponent).toEqual({ type: 'ai', difficulty: 4 });
+    });
+
+    it('refuses an AI difficulty above the requester\'s plan, server-side — the client-side lock is cosmetic only', async () => {
+      const mock = createMockServer();
+      (gw as any).server = mock;
+      const emitted: any[] = [];
+      // alice (USERS[1]) has no membershipTier set, so she resolves to FREE (maxAiDifficulty 4).
+      await gw.handleConnection(mockSocket('ai-free', '1', emitted) as any);
+      gw.handlePlayVsAi(mockSocket('ai-free', '1', emitted) as any, { difficulty: 6, rules: { boardSize: 8 } });
+
+      expect((gw as any).socketToRoom.get('ai-free')).toBeUndefined();
+      expect(mock.emitted.find((e: any) => e.event === 'gameStart')).toBeUndefined();
+      expect(emitted).toContainEqual(expect.objectContaining({ event: 'error', payload: expect.objectContaining({ message: expect.stringContaining('requires a higher plan') }) }));
+    });
+
+    it('allows an AI difficulty exactly at the requester\'s plan ceiling', async () => {
+      const mock = createMockServer();
+      (gw as any).server = mock;
+      await gw.handleConnection(mockSocket('ai-capped', '1') as any);
+      gw.handlePlayVsAi(mockSocket('ai-capped', '1') as any, { difficulty: 4, rules: { boardSize: 8 } });
+
+      expect((gw as any).socketToRoom.get('ai-capped')).toBeDefined();
     });
 
     it('reports no opponent identity when the other seat is anonymous (nothing to rematch against)', () => {
@@ -653,7 +680,7 @@ describe('GameGateway: presence tracking and chat moderation (Phase 10)', () => 
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 1 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -789,7 +816,7 @@ describe('GameGateway: post-game review trigger (Phase 11)', () => {
         { provide: GameReviewService, useValue: { analyzeCompletedGame } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 4242 }) } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -865,7 +892,7 @@ describe('GameGateway: gameOver broadcast degrades gracefully if the save itself
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify: async () => ({}) } },
         { provide: JwtService, useValue: {} },
-        { provide: UsersService, useValue: { isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: { saveGame: async () => { throw new Error('DB unavailable'); } } },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: { analyzeGameForCheating: async () => {} } },
@@ -926,6 +953,7 @@ describe('GameGateway: anti-cheat wiring and banned-user connection rejection (P
           useValue: {
             findOneById: async (id: number) => USERS[id] ?? null,
             isCurrentlyBanned: (user: any) => bannedUserIds.has(user.id),
+            accessFor: (u: any) => accessFor(u),
           },
         },
         { provide: HistoryService, useValue: { saveGame: async () => ({ id: 777 }) } },
@@ -1016,7 +1044,7 @@ describe('GameGateway: correspondence turn-reminder notification trigger (Phase 
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: {} },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: {} },
@@ -1140,7 +1168,7 @@ describe('GameGateway: direct-challenge notification trigger (Phase 13)', () => 
         { provide: GameReviewService, useValue: { analyzeCompletedGame: async () => {} } },
         { provide: NotificationsService, useValue: { notify } },
         { provide: JwtService, useValue: { verifyAsync: async (token: string) => ({ sub: Number(token) }) } },
-        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false } },
+        { provide: UsersService, useValue: { findOneById: async (id: number) => USERS[id] ?? null, isCurrentlyBanned: () => false, accessFor: (u: any) => accessFor(u) } },
         { provide: HistoryService, useValue: {} },
         { provide: TournamentsService, useValue: {} },
         { provide: AnticheatService, useValue: {} },

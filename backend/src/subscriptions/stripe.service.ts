@@ -75,6 +75,24 @@ export class StripeService {
     });
   }
 
+  // The real, currently-configured price for one plan/interval, formatted for
+  // display on the public pricing page — so "the price is $X" only ever needs to be
+  // set once, in Stripe itself, not copy-pasted into this codebase too. Deliberately
+  // never throws: this backs a public marketing page, and a Stripe hiccup or a
+  // stale/deleted price id here should fall back to the catalog's own static
+  // displayPrice (see billing/plans.ts), not break the whole pricing page.
+  async getFormattedPrice(priceId: string): Promise<string | null> {
+    if (!this.stripe) return null;
+    try {
+      const price = await this.stripe.prices.retrieve(priceId);
+      if (price.unit_amount == null || !price.currency) return null;
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: price.currency }).format(price.unit_amount / 100);
+    } catch (err) {
+      logger.warn(`[Stripe] Could not fetch display price for "${priceId}": ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   // Verifies the event genuinely came from Stripe (HMAC signature over the exact raw
   // request bytes) before anything in this app trusts its contents — this is the
   // entire reason main.ts turns on rawBody: true.

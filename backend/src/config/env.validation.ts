@@ -51,9 +51,9 @@ export function checkEnv(env: Record<string, unknown>): EnvCheckResult {
 
   // --- optional integrations: all-or-nothing so a half-configured one fails loudly ---
   // Payments: all-or-nothing, so a half-configured Stripe setup fails loudly.
-  // Every CURRENT paid plan version needs its price IDs (billing/plans.ts). Premium
-  // also accepts the Phase 13 names STRIPE_PRICE_MONTHLY / STRIPE_PRICE_ANNUAL.
-  const legacy: Record<string, string> = { STRIPE_PRICE_PREMIUM_MONTHLY: 'STRIPE_PRICE_MONTHLY', STRIPE_PRICE_PREMIUM_ANNUAL: 'STRIPE_PRICE_ANNUAL' };
+  // Every CURRENT paid plan version needs its price IDs (billing/plans.ts). Plus also
+  // accepts the Phase 13 names STRIPE_PRICE_MONTHLY / STRIPE_PRICE_ANNUAL.
+  const legacy: Record<string, string> = { STRIPE_PRICE_PLUS_MONTHLY: 'STRIPE_PRICE_MONTHLY', STRIPE_PRICE_PLUS_ANNUAL: 'STRIPE_PRICE_ANNUAL' };
   const has = (k: string) => !!str(k) || (!!legacy[k] && !!str(legacy[k]));
   const stripeKeys = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', ...requiredPriceEnvNames()];
   const stripeSet = stripeKeys.filter(has);
@@ -64,8 +64,8 @@ export function checkEnv(env: Record<string, unknown>): EnvCheckResult {
   }
 
   const trialPlan = str('TRIAL_PLAN');
-  if (trialPlan && !['PREMIUM', 'PRO'].includes(trialPlan.toUpperCase())) {
-    errors.push('TRIAL_PLAN must be PREMIUM or PRO.');
+  if (trialPlan && !['PLUS', 'PREMIUM'].includes(trialPlan.toUpperCase())) {
+    errors.push('TRIAL_PLAN must be PLUS or PREMIUM.');
   }
   const trialDays = str('TRIAL_DAYS');
   if (trialDays && !(Number(trialDays) >= 1 && Number(trialDays) <= 90)) {

@@ -25,9 +25,17 @@ health checks, cloud-agnostic Docker images, GitHub Actions CI, dependency upgra
 vulnerabilities) and a WebSocket load test. See "Phase 14" below; hosting provider intentionally not chosen yet.
 
 **Phase 15 (2026-09-23): staff roles (Admin / Moderator / Organizer / Content editor), plans
-(Free / Premium / Pro) with plan versioning, a 7-day no-card trial, API versioning (`/api/v1`),
-an audit trail, revocable sessions, and PostgreSQL 13–18 portability** — see "Phase 15" below
-and docs/ACCESS-AND-BILLING.md.
+(Free / Premium / Pro, since renamed to Free / Plus / Premium in Phase 16) with plan versioning,
+a 7-day no-card trial, API versioning (`/api/v1`), an audit trail, revocable sessions, and
+PostgreSQL 13–18 portability** — see "Phase 15" below and docs/ACCESS-AND-BILLING.md.
+
+**Phase 16 (2026-09-27): monetization tiers finalized** — plans renamed Free / Plus / Premium
+($0 / $1.99 / $4.99), Free loses all analysis and game-review access (was depth-4 analysis,
+Premium puzzles, and lite review — now a hard refusal/lock on both), a new `maxAiDifficulty`
+entitlement gates AI opponent levels 5–7 behind Plus/Premium (shown locked, not hidden, and
+enforced server-side in `game.gateway.ts` — the client lock is cosmetic only), and the pricing
+page now shows the real live Stripe price per plan once Stripe is configured (no code change
+needed to go live — see "Phase 16" below and docs/ACCESS-AND-BILLING.md).
 
 ## Backend (NestJS)
 
@@ -2020,6 +2028,70 @@ tournament and puzzle management. Read on the Admin page (`audit.read`).
 - Real Stripe test-mode run (checkout → webhook → portal) once keys exist.
 - Email addresses still aren't collected at registration, so trial/billing notices are
   in-app only unless an email is set.
+
+## Phase 16: monetization tiers finalized — rename, stricter free tier, AI difficulty gate (2026-09-27)
+
+Product decisions from the owner, implemented on top of Phase 15's plan/entitlement
+architecture (not a rebuild): three tiers, Free / Plus / Premium, at $0 / $1.99 / $4.99.
+
+### Rename: Premium/Pro → Plus/Premium
+Phase 15's cheaper paid tier (`PREMIUM`, depth 6) is renamed `PLUS`; its pricier top tier
+(`PRO`, depth 8, `hostTournaments`) is renamed `PREMIUM`. This is a real rename of the
+internal `membershipTier` values (migrations, Stripe env var names, DB values), not just a
+display label — confirmed explicitly with the owner before changing it, since a code/label
+mismatch would have been confusing going forward. Touched ~20 files: `billing/plans.ts`
+(`PLAN_CODES`, catalog, `LEGACY_PRICE_ENV`), `billing/access.ts`, `subscriptions/*`
+(service, checkout DTO, `subscription-status.ts` — simplified from a fake `tier` field to
+a plain `paid: boolean`, since it only ever meant "is the subscription active"),
+`config/env.validation.ts`, `game/review/game-review.controller.ts`,
+`game/analysis.controller.ts`, `frontend/app/membership/page.tsx`, `.env.example`,
+`docs/ACCESS-AND-BILLING.md`, `README.md`. Stripe price env vars:
+`STRIPE_PRICE_PREMIUM_*` → `STRIPE_PRICE_PLUS_*`, `STRIPE_PRICE_PRO_*` →
+`STRIPE_PRICE_PREMIUM_*`. An unmapped Stripe price now grants Plus (was Premium) — the
+rename was done meaning-first (cheap/fallback → Plus, deliberate top tier → Premium) at
+every call site, not a blind string substitution, specifically to avoid a renamed fallback
+silently upgrading a customer to the pricier tier.
+
+### Free tier: zero analysis, zero game review (was depth-4 analysis + lite review)
+`analysisMaxDepth: 0` for Free (was 4); `GET /game/analysis` now throws
+`ForbiddenException` outright for a depth-0 requester instead of running a trivial search.
+`game-review.controller.ts` now gates the **whole** review response (`{status: 'LOCKED',
+requiresPlan: 'PLUS'}`), not just the best-continuation/punishment lines as before — Plus
+and Premium both get the full review. Frontend (`analysis/[id]/page.tsx`) shows a LOCKED
+upgrade panel for a locked review, and a separate "Engine analysis requires a Plus or
+Premium plan" panel for a 403'd analysis request, both linking to `/membership`.
+
+### New entitlement: `maxAiDifficulty` — AI levels 5–7 locked behind a plan
+Free 4, Plus 6, Premium 7. AI difficulty levels are **shown, not hidden**, per the owner's
+explicit instruction — locked levels get a 🔒 and clicking one routes to `/membership`
+instead of starting a game (`GameBoard.tsx`, fetches the real ceiling from
+`GET /subscriptions/me` for a logged-in user, defaults to Free's ceiling for anonymous
+players). Enforced server-side regardless of the client state:
+`game.gateway.ts`'s `handlePlayVsAi` rejects any request above the resolved
+`accessFor(user).entitlements.maxAiDifficulty` with a socket `error` event — the client
+lock is cosmetic only. Puzzle tiering is unchanged (Plus and Premium both keep
+`premiumPuzzles: true`; no further puzzle-tier split was requested).
+
+### Stripe: pricing page shows the real price once keys are set, no code change
+`StripeService.getFormattedPrice(priceId)` fetches the live Stripe Price and formats it
+(`Intl.NumberFormat`); `GET /subscriptions/plans` prefers that over the catalog's static
+`displayPrice` fallback whenever Stripe is configured. This was the direct answer to "I
+want to just add the API key later": every other piece (checkout, webhooks, the pricing
+page) is already wired to `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/the price env vars
+being set — setting them is the entire remaining step before going live with payments.
+
+### Tracked, not built in this phase
+Premium's tournament-organizing and local-competition features (mentioned by the owner as
+"Premium = Plus + tournaments/local competition later") — `hostTournaments` entitlement
+already exists from Phase 15, nothing in the product builds on it yet.
+
+### Verification
+Backend: **528/529 tests pass** (55 suites; 1 `todo`), including new/rewritten coverage for
+the rename (`plans.spec.ts`, `access.spec.ts`, `subscriptions.service.spec.ts`,
+`subscription-status.spec.ts`, `trial.service.spec.ts`, `env.validation.spec.ts`), the
+analysis 403 (`analysis.controller.spec.ts`), a new `game-review.controller.spec.ts` (did
+not exist before this phase), and new `game.gateway.spec.ts` coverage for the AI-difficulty
+gate (refuses above the plan ceiling, allows exactly at it). Frontend: `tsc --noEmit` clean.
 
 ## Repo cleanup notes (Phase 0)
 

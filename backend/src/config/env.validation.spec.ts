@@ -42,18 +42,18 @@ describe('env validation (Phase 14)', () => {
         ...GOOD_PROD,
         STRIPE_SECRET_KEY: 'sk',
         STRIPE_WEBHOOK_SECRET: 'wh',
-        STRIPE_PRICE_PREMIUM_MONTHLY: 'p1',
-        STRIPE_PRICE_PREMIUM_ANNUAL: 'p2',
-        STRIPE_PRICE_PRO_MONTHLY: 'p3',
-        STRIPE_PRICE_PRO_ANNUAL: 'p4',
+        STRIPE_PRICE_PLUS_MONTHLY: 'p1',
+        STRIPE_PRICE_PLUS_ANNUAL: 'p2',
+        STRIPE_PRICE_PREMIUM_MONTHLY: 'p3',
+        STRIPE_PRICE_PREMIUM_ANNUAL: 'p4',
       }),
     ).not.toThrow();
   });
 
-  it('rejects Stripe with only the old single-tier prices (Pro prices missing)', () => {
+  it('rejects Stripe with only the old single-tier prices (Premium prices missing)', () => {
     expect(() =>
       validateEnv({ ...GOOD_PROD, STRIPE_SECRET_KEY: 'sk', STRIPE_WEBHOOK_SECRET: 'wh', STRIPE_PRICE_MONTHLY: 'p1', STRIPE_PRICE_ANNUAL: 'p2' }),
-    ).toThrow(/STRIPE_PRICE_PRO_MONTHLY/);
+    ).toThrow(/STRIPE_PRICE_PREMIUM_MONTHLY/);
   });
 
   it('accepts separate DB_* variables instead of DATABASE_URL', () => {
@@ -65,7 +65,7 @@ describe('env validation (Phase 14)', () => {
   it('validates trial settings', () => {
     expect(() => validateEnv({ ...GOOD_PROD, TRIAL_PLAN: 'FREE' })).toThrow(/TRIAL_PLAN/);
     expect(() => validateEnv({ ...GOOD_PROD, TRIAL_DAYS: '365' })).toThrow(/TRIAL_DAYS/);
-    expect(() => validateEnv({ ...GOOD_PROD, TRIAL_PLAN: 'pro', TRIAL_DAYS: '14' })).not.toThrow();
+    expect(() => validateEnv({ ...GOOD_PROD, TRIAL_PLAN: 'premium', TRIAL_DAYS: '14' })).not.toThrow();
   });
 
   it('requires a from-address when email sending is enabled', () => {

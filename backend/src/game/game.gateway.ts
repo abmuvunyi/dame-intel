@@ -524,6 +524,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   @SubscribeMessage('playVsAi')
   handlePlayVsAi(@ConnectedSocket() client: Socket, @MessageBody() data: { difficulty: number, rules?: Partial<GameRules>, timeControl?: string }) {
+    const requestedDifficulty = data.difficulty || 2;
+    // Levels 5-7 are shown in the UI but locked behind a plan (billing/plans.ts's
+    // maxAiDifficulty) — enforce that server-side too, since the client's lock is only cosmetic.
+    const maxAiDifficulty = this.usersService.accessFor(this.socketToUser.get(client.id)).entitlements.maxAiDifficulty;
+    if (requestedDifficulty > maxAiDifficulty) {
+      client.emit('error', { message: `AI difficulty ${requestedDifficulty} requires a higher plan. Your plan allows up to level ${maxAiDifficulty}.` });
+      return;
+    }
+
     // Remove from existing game if any
     const existingRoom = this.socketToRoom.get(client.id);
     if(existingRoom) {
@@ -551,7 +560,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         [PieceColor.LIGHT]: client.id, // Player is always LIGHT for AI games for simplicity right now
       },
       spectators: [],
-      aiDifficulty: data.difficulty || 2, // Default to level 2
+      aiDifficulty: requestedDifficulty,
       aiColor: PieceColor.DARK,
       playerProfiles: {
         [PieceColor.LIGHT]: this.socketToUser.get(client.id),

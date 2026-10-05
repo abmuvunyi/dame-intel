@@ -6,7 +6,7 @@ ratings, puzzles and Puzzle Storm, Swiss tournaments, spectating, friends/clubs/
 automated game review, anti-cheat with a moderator queue, lessons, and Stripe memberships.
 
 See **STATUS.md** for the verified, per-module state of the project, and
-**docs/ACCESS-AND-BILLING.md** for staff roles, plans (Free / Premium / Pro), the free
+**docs/ACCESS-AND-BILLING.md** for staff roles, plans (Free / Plus / Premium), the free
 trial, plan and API versioning, and the audit trail.
 
 ## Stack
@@ -69,7 +69,7 @@ full list with explanations in `backend/.env.example`):
 (`DATABASE_URL`, or `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`),
 `CORS_ORIGINS` (the frontend's exact origin), `APP_URL`. Usually also `DB_SSL=true` for
 managed Postgres, `ADMIN_USERNAMES`, and — if payments are on — `STRIPE_SECRET_KEY`,
-`STRIPE_WEBHOOK_SECRET` and the four `STRIPE_PRICE_{PREMIUM,PRO}_{MONTHLY,ANNUAL}` values
+`STRIPE_WEBHOOK_SECRET` and the four `STRIPE_PRICE_{PLUS,PREMIUM}_{MONTHLY,ANNUAL}` values
 (webhook URL: `https://<api-host>/api/v1/subscriptions/webhook`), plus the `RESEND_*`
 values for email. Store secrets in your platform's secret manager; never commit them.
 

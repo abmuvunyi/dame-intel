@@ -11,28 +11,55 @@
 //   1. Create new Price objects in Stripe.
 //   2. Add a NEW entry below with version + 1 and `current: true`; set the old entry's
 //      `current` to false. NEVER edit or delete an entry people are subscribed to.
-//   3. Point the new entry's priceEnv at new env vars (e.g. STRIPE_PRICE_PRO_MONTHLY_V2)
+//   3. Point the new entry's priceEnv at new env vars (e.g. STRIPE_PRICE_PREMIUM_MONTHLY_V2)
 //      and keep the old env vars set, so renewals on old prices still resolve.
 // New checkouts always use the current version; renewals keep their version.
 //
 // FREE has no price. Its version only matters for documentation/auditing — free
 // users always get the current FREE entitlements.
+//
+// Naming (2026-09, product decision): the three plan codes ARE their display names —
+// FREE / PLUS / PREMIUM — no separate internal-vs-marketing naming split. Earlier in
+// this phase the codes were PREMIUM/PRO with "Plus"/"Premium" as just a display
+// label on top, which read as a mismatch the moment you opened this file (PREMIUM
+// the code showing as "Plus" the product). Renamed everywhere instead: PLAN_CODES,
+// every User.membershipTier value ever written, Stripe price env var names, the
+// checkout DTO, trial defaults. Safe to do as a real rename rather than an additive
+// migration because there are no real subscribers yet (see STATUS.md) — nothing to
+// grandfather.
 
-export const PLAN_CODES = ['FREE', 'PREMIUM', 'PRO'] as const;
+export const PLAN_CODES = ['FREE', 'PLUS', 'PREMIUM'] as const;
 export type PlanCode = (typeof PLAN_CODES)[number];
 export type BillingInterval = 'monthly' | 'annual';
 
 export interface Entitlements {
   /** Access to puzzles marked premium-only. */
   premiumPuzzles: boolean;
-  /** Maximum engine depth for the analysis board (/analysis). */
+  /**
+   * Maximum engine depth for the analysis board (/analysis). 0 means no access at
+   * all — the analysis endpoint refuses the request outright rather than silently
+   * running a trivial depth-0 search (see analysis.controller.ts).
+   */
   analysisMaxDepth: number;
-  /** Game review includes the engine's "best continuation" and "how this gets punished" lines. */
+  /**
+   * Any post-game review at all — classifications, accuracy, and the eval bar, not
+   * just the "best continuation"/"how this gets punished" lines. False means the
+   * review endpoint reports the game as LOCKED rather than returning review data
+   * (see game-review.controller.ts). Product decision (2026-09): review used to be
+   * free for everyone; Free now gets none of it, matching analysis access.
+   */
   fullGameReview: boolean;
   /** How many clubs the player may create. */
   maxClubsOwned: number;
   /** May create and run their own tournaments (staff organizers can always). */
   hostTournaments: boolean;
+  /**
+   * Highest AI difficulty level (1-7, see ai.service.ts's DIFFICULTY_MAX_DEPTH /
+   * DIFFICULTY_TIME_BUDGET_MS) this plan may start a game against. Every level is
+   * always shown in the UI — this only gates whether starting a game at it succeeds,
+   * matching the product decision to show locked levels rather than hide them.
+   */
+  maxAiDifficulty: number;
 }
 
 export interface PlanVersion {
@@ -45,11 +72,24 @@ export interface PlanVersion {
   entitlements: Entitlements;
   /** Env var names holding this version's Stripe price IDs (paid plans only). */
   priceEnv?: Partial<Record<BillingInterval, string>>;
+  /**
+   * A static, cosmetic price label shown on the pricing page BEFORE a real Stripe
+   * price is looked up (or if that lookup fails) — see
+   * SubscriptionsController.getPlans(), which prefers the real Stripe amount
+   * whenever priceEnv resolves to a configured price and only falls back to this.
+   * Not billing-authoritative: the actual charge is whatever the Stripe Price object
+   * says, always. Keep this in sync with Stripe by hand when the real price changes.
+   */
+  displayPrice?: Partial<Record<BillingInterval, string>>;
 }
 
-// NOTE (product decision): the limits below are sensible starting defaults, not
-// final pricing. Adjust them BEFORE the first real subscriber; after that, add a
-// new version instead of editing.
+// NOTE (product decision, 2026-09): pricing confirmed — Free $0, Plus $1.99/mo,
+// Premium $4.99/mo. Annual prices aren't a decision that's been made yet; the
+// figures below are a placeholder ~17% ("2 months free") discount, the common SaaS
+// convention, not a confirmed number — adjust in Stripe and here before launch.
+// Premium's own further build-out (tournament organizing beyond hostTournaments,
+// and a "local competition" feature) is intentionally NOT part of this pass — noted
+// here as a real product commitment for later, not forgotten, not yet built.
 export const PLAN_CATALOG: readonly PlanVersion[] = [
   {
     code: 'FREE',
@@ -57,29 +97,31 @@ export const PLAN_CATALOG: readonly PlanVersion[] = [
     name: 'Free',
     tagline: 'Play, learn and solve puzzles.',
     current: true,
-    entitlements: { premiumPuzzles: false, analysisMaxDepth: 4, fullGameReview: false, maxClubsOwned: 1, hostTournaments: false },
+    entitlements: { premiumPuzzles: false, analysisMaxDepth: 0, fullGameReview: false, maxClubsOwned: 1, hostTournaments: false, maxAiDifficulty: 4 },
+  },
+  {
+    code: 'PLUS',
+    version: 1,
+    name: 'Plus',
+    tagline: 'Every puzzle, real game review, and analysis up to depth 6.',
+    current: true,
+    entitlements: { premiumPuzzles: true, analysisMaxDepth: 6, fullGameReview: true, maxClubsOwned: 3, hostTournaments: false, maxAiDifficulty: 6 },
+    priceEnv: { monthly: 'STRIPE_PRICE_PLUS_MONTHLY', annual: 'STRIPE_PRICE_PLUS_ANNUAL' },
+    displayPrice: { monthly: '$1.99', annual: '$19.99' },
   },
   {
     code: 'PREMIUM',
     version: 1,
     name: 'Premium',
-    tagline: 'Every puzzle, deeper analysis and full game reviews.',
+    tagline: 'Maximum analysis depth, the toughest bots unlocked, host your own tournaments.',
     current: true,
-    entitlements: { premiumPuzzles: true, analysisMaxDepth: 6, fullGameReview: true, maxClubsOwned: 3, hostTournaments: false },
+    entitlements: { premiumPuzzles: true, analysisMaxDepth: 8, fullGameReview: true, maxClubsOwned: 10, hostTournaments: true, maxAiDifficulty: 7 },
     priceEnv: { monthly: 'STRIPE_PRICE_PREMIUM_MONTHLY', annual: 'STRIPE_PRICE_PREMIUM_ANNUAL' },
-  },
-  {
-    code: 'PRO',
-    version: 1,
-    name: 'Pro',
-    tagline: 'Maximum analysis depth, host your own tournaments, run more clubs.',
-    current: true,
-    entitlements: { premiumPuzzles: true, analysisMaxDepth: 8, fullGameReview: true, maxClubsOwned: 10, hostTournaments: true },
-    priceEnv: { monthly: 'STRIPE_PRICE_PRO_MONTHLY', annual: 'STRIPE_PRICE_PRO_ANNUAL' },
+    displayPrice: { monthly: '$4.99', annual: '$49.99' },
   },
 ];
 
-const PLAN_RANK: Record<PlanCode, number> = { FREE: 0, PREMIUM: 1, PRO: 2 };
+const PLAN_RANK: Record<PlanCode, number> = { FREE: 0, PLUS: 1, PREMIUM: 2 };
 
 export function isPlanCode(value: unknown): value is PlanCode {
   return typeof value === 'string' && (PLAN_CODES as readonly string[]).includes(value);
@@ -100,10 +142,13 @@ export function planVersion(code: PlanCode, version: number | null | undefined, 
   return catalog.find((p) => p.code === code && p.version === version) ?? currentPlan(code, catalog);
 }
 
-// Legacy env names from Phase 13 (single paid tier) keep working for Premium v1.
+// Legacy env names from Phase 13 (a single paid tier, back when it was also called
+// "Premium" — today's Plus) keep working for Plus v1, so a server whose operator
+// only ever set the original unsuffixed names doesn't lose its price config over a
+// pure renaming pass.
 const LEGACY_PRICE_ENV: Record<string, string> = {
-  STRIPE_PRICE_PREMIUM_MONTHLY: 'STRIPE_PRICE_MONTHLY',
-  STRIPE_PRICE_PREMIUM_ANNUAL: 'STRIPE_PRICE_ANNUAL',
+  STRIPE_PRICE_PLUS_MONTHLY: 'STRIPE_PRICE_MONTHLY',
+  STRIPE_PRICE_PLUS_ANNUAL: 'STRIPE_PRICE_ANNUAL',
 };
 
 function readPriceEnv(envName: string, env: Record<string, string | undefined>): string | undefined {
@@ -152,6 +197,10 @@ export function publicCatalog(env: Record<string, string | undefined> = process.
       name: p.name,
       tagline: p.tagline,
       entitlements: p.entitlements,
+      // Cosmetic only — see PlanVersion.displayPrice's own doc comment.
+      // SubscriptionsController.getPlans() overrides this with the real Stripe
+      // amount when a price is actually configured; this is what shows before that.
+      displayPrice: p.displayPrice ?? null,
       purchasable: {
         monthly: !!(p.priceEnv?.monthly && readPriceEnv(p.priceEnv.monthly, env)),
         annual: !!(p.priceEnv?.annual && readPriceEnv(p.priceEnv.annual, env)),

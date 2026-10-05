@@ -41,17 +41,17 @@ describe('TrialService (7-day, no card, once per account)', () => {
 
   afterEach(() => { process.env = OLD_ENV; });
 
-  it('defaults: enabled, 7 days, Premium', () => {
-    expect(trialConfig({} as any)).toEqual({ enabled: true, days: 7, plan: 'PREMIUM' });
-    expect(trialConfig({ TRIAL_DAYS: '14', TRIAL_PLAN: 'pro' } as any)).toEqual({ enabled: true, days: 14, plan: 'PRO' });
-    expect(trialConfig({ TRIAL_DAYS: 'abc', TRIAL_PLAN: 'FREE' } as any)).toEqual({ enabled: true, days: 7, plan: 'PREMIUM' });
+  it('defaults: enabled, 7 days, Plus (the entry-level paid plan)', () => {
+    expect(trialConfig({} as any)).toEqual({ enabled: true, days: 7, plan: 'PLUS' });
+    expect(trialConfig({ TRIAL_DAYS: '14', TRIAL_PLAN: 'premium' } as any)).toEqual({ enabled: true, days: 14, plan: 'PREMIUM' });
+    expect(trialConfig({ TRIAL_DAYS: 'abc', TRIAL_PLAN: 'FREE' } as any)).toEqual({ enabled: true, days: 7, plan: 'PLUS' });
   });
 
-  it('starts a 7-day Premium trial that grants Premium immediately, notifies and audits', async () => {
+  it('starts a 7-day Plus trial that grants Plus immediately, notifies and audits', async () => {
     const u = await users.create('alice', 'h');
     const now = new Date('2026-09-23T10:00:00Z');
     const access = await trials.startTrial(u.id, undefined, now);
-    expect(access).toMatchObject({ plan: 'PREMIUM', source: 'TRIAL' });
+    expect(access).toMatchObject({ plan: 'PLUS', source: 'TRIAL' });
     expect(access.trial.endsAt!.getTime()).toBe(now.getTime() + 7 * DAY);
     expect(notify).toHaveBeenCalledWith(u.id, 'TRIAL_STARTED', expect.stringContaining('7-day'));
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ action: 'trial.started', targetId: u.id }));
@@ -69,7 +69,7 @@ describe('TrialService (7-day, no card, once per account)', () => {
     const start = new Date('2026-01-01T00:00:00Z');
     await trials.startTrial(u.id, undefined, start);
     const fresh = await users.findOneById(u.id);
-    expect(users.accessFor(fresh, new Date(start.getTime() + 7 * DAY - 1000)).plan).toBe('PREMIUM');
+    expect(users.accessFor(fresh, new Date(start.getTime() + 7 * DAY - 1000)).plan).toBe('PLUS');
     expect(users.accessFor(fresh, new Date(start.getTime() + 7 * DAY + 1000)).plan).toBe('FREE');
   });
 
