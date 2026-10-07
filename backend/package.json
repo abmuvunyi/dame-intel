@@ -26,6 +26,7 @@
     "migration:show": "typeorm migration:show -d dist/database/data-source.js",
     "migration:check": "typeorm migration:generate -d dist/database/data-source.js --check src/database/migrations/DriftCheck",
     "admin:grant": "node dist/scripts/grant-admin.js",
+    "dev:test-accounts": "ts-node -r tsconfig-paths/register src/scripts/seed-test-accounts.ts",
     "loadtest": "node scripts/loadtest.mjs"
   },
   "dependencies": {

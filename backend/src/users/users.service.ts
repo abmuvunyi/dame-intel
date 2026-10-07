@@ -223,6 +223,15 @@ export class UsersService implements OnApplicationBootstrap {
     return this.usersRepository.save(user);
   }
 
+  // Free plan's daily review — the rules live in billing/free-review.ts; this only persists.
+  async useFreeReview(userId: number, gameId: number, at: Date): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    if (!user) return null;
+    user.lastFreeReviewAt = at;
+    user.lastFreeReviewGameId = gameId;
+    return this.usersRepository.save(user);
+  }
+
   // Free trial bookkeeping — the rules (one per account, not while subscribed) live
   // in TrialService; this only persists.
   async startTrial(userId: number, plan: string, version: number, startedAt: Date, endsAt: Date): Promise<User | null> {

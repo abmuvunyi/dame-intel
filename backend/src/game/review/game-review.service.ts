@@ -21,6 +21,10 @@ const ANALYSIS_DEPTH = 4;
 // in a full game and to stay genuinely "a couple of moves", not a full continuation.
 const PREVIEW_LINE_ADDITIONAL_PLIES = 2;
 
+// A position as "side to move + board", normalized through the engine so two boards
+// compare equal however their piece objects were serialized.
+export const positionKey = (engine: DraughtsEngine) => `${engine.getCurrentTurn()}|${engine.getBoardString()}`;
+
 @Injectable()
 export class GameReviewService {
   constructor(
@@ -32,6 +36,28 @@ export class GameReviewService {
 
   async getReview(gameId: number): Promise<GameReview | null> {
     return this.reviewRepository.findOne({ where: { gameId } });
+  }
+
+  // Every position reached in a saved game (see positionKey), or null if the game
+  // doesn't exist. Lets analysis under a free review confirm a submitted position
+  // really belongs to the game the review was spent on.
+  async gamePositionKeys(gameId: number): Promise<Set<string> | null> {
+    const game = await this.historyService.getGame(gameId);
+    if (!game) return null;
+    let moves: Move[];
+    try {
+      moves = typeof game.moves === 'string' ? JSON.parse(game.moves) : game.moves;
+    } catch {
+      moves = [];
+    }
+    const rules = typeof game.rules === 'string' ? JSON.parse(game.rules) : (game.rules ?? {});
+    const engine = new DraughtsEngine(rules);
+    const keys = new Set<string>([positionKey(engine)]);
+    for (const move of Array.isArray(moves) ? moves : []) {
+      if (!engine.makeMove(move)) break;
+      keys.add(positionKey(engine));
+    }
+    return keys;
   }
 
   // Builds a short engine-vs-engine continuation: `firstMove` played from

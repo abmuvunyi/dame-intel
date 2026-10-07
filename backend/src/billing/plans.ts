@@ -60,6 +60,9 @@ export interface Entitlements {
    * matching the product decision to show locked levels rather than hide them.
    */
   maxAiDifficulty: number;
+  // One full review (plus engine analysis of that game) every 24h, for plans without
+  // fullGameReview — a taste of what Plus unlocks. See billing/free-review.ts.
+  dailyFreeReview: boolean;
 }
 
 export interface PlanVersion {
@@ -97,7 +100,7 @@ export const PLAN_CATALOG: readonly PlanVersion[] = [
     name: 'Free',
     tagline: 'Play, learn and solve puzzles.',
     current: true,
-    entitlements: { premiumPuzzles: false, analysisMaxDepth: 0, fullGameReview: false, maxClubsOwned: 1, hostTournaments: false, maxAiDifficulty: 4 },
+    entitlements: { premiumPuzzles: false, analysisMaxDepth: 0, fullGameReview: false, maxClubsOwned: 1, hostTournaments: false, maxAiDifficulty: 4, dailyFreeReview: true },
   },
   {
     code: 'PLUS',
@@ -105,7 +108,7 @@ export const PLAN_CATALOG: readonly PlanVersion[] = [
     name: 'Plus',
     tagline: 'Every puzzle, real game review, and analysis up to depth 6.',
     current: true,
-    entitlements: { premiumPuzzles: true, analysisMaxDepth: 6, fullGameReview: true, maxClubsOwned: 3, hostTournaments: false, maxAiDifficulty: 6 },
+    entitlements: { premiumPuzzles: true, analysisMaxDepth: 6, fullGameReview: true, maxClubsOwned: 3, hostTournaments: false, maxAiDifficulty: 6, dailyFreeReview: false },
     priceEnv: { monthly: 'STRIPE_PRICE_PLUS_MONTHLY', annual: 'STRIPE_PRICE_PLUS_ANNUAL' },
     displayPrice: { monthly: '$1.99', annual: '$19.99' },
   },
@@ -115,7 +118,7 @@ export const PLAN_CATALOG: readonly PlanVersion[] = [
     name: 'Premium',
     tagline: 'Maximum analysis depth, the toughest bots unlocked, host your own tournaments.',
     current: true,
-    entitlements: { premiumPuzzles: true, analysisMaxDepth: 8, fullGameReview: true, maxClubsOwned: 10, hostTournaments: true, maxAiDifficulty: 7 },
+    entitlements: { premiumPuzzles: true, analysisMaxDepth: 8, fullGameReview: true, maxClubsOwned: 10, hostTournaments: true, maxAiDifficulty: 7, dailyFreeReview: false },
     priceEnv: { monthly: 'STRIPE_PRICE_PREMIUM_MONTHLY', annual: 'STRIPE_PRICE_PREMIUM_ANNUAL' },
     displayPrice: { monthly: '$4.99', annual: '$49.99' },
   },

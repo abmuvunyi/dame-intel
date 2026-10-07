@@ -122,7 +122,7 @@ describe('Production HTTP pipeline (e2e)', () => {
       await request(server()).get(`${V1}/puzzles/admin/pending`).set(bearer(moderator)).expect(403);
       await request(server()).get(`${V1}/puzzles/admin/pending`).set(bearer(editor)).expect(200);
 
-      // Tournaments: organizers (or Pro players — see plans below)
+      // Tournaments: organizers (or Premium players — see plans below)
       const body = { name: 'Kigali Open', format: 'Swiss' };
       await request(server()).post(`${V1}/tournaments`).set(bearer(player)).send(body).expect(403);
       await request(server()).post(`${V1}/tournaments`).set(bearer(editor)).send(body).expect(403);
@@ -170,27 +170,27 @@ describe('Production HTTP pipeline (e2e)', () => {
   });
 
   describe('plans, trials & entitlements', () => {
-    it('lists the Free / Premium / Pro catalog and the trial offer without exposing price IDs', async () => {
+    it('lists the Free / Plus / Premium catalog and the trial offer without exposing price IDs', async () => {
       const res = await request(server()).get(`${V1}/subscriptions/plans`).expect(200);
-      expect(res.body.plans.map((p: any) => p.code)).toEqual(['FREE', 'PREMIUM', 'PRO']);
-      expect(res.body.trial).toEqual({ enabled: true, days: 7, plan: 'PREMIUM' });
+      expect(res.body.plans.map((p: any) => p.code)).toEqual(['FREE', 'PLUS', 'PREMIUM']);
+      expect(res.body.trial).toEqual({ enabled: true, days: 7, plan: 'PLUS' });
       expect(JSON.stringify(res.body)).not.toMatch(/price_/);
     });
 
-    it('7-day trial: no card, unlocks Premium immediately, only once, and is audited', async () => {
+    it('7-day trial: no card, unlocks Plus immediately, only once, and is audited', async () => {
       await register('trialist').expect(201);
       const token = await login('trialist');
       const before = await request(server()).get(`${V1}/subscriptions/me`).set(bearer(token)).expect(200);
       expect(before.body).toMatchObject({ plan: 'FREE', trial: { available: true } });
 
       const started = await request(server()).post(`${V1}/subscriptions/trial`).set(bearer(token)).expect(201);
-      expect(started.body).toMatchObject({ plan: 'PREMIUM', source: 'TRIAL' });
+      expect(started.body).toMatchObject({ plan: 'PLUS', source: 'TRIAL' });
       const days = (new Date(started.body.trial.endsAt).getTime() - Date.now()) / 86_400_000;
       expect(days).toBeGreaterThan(6.9);
       expect(days).toBeLessThanOrEqual(7);
 
       const after = await request(server()).get(`${V1}/subscriptions/me`).set(bearer(token)).expect(200);
-      expect(after.body).toMatchObject({ plan: 'PREMIUM', source: 'TRIAL', entitlements: { premiumPuzzles: true, analysisMaxDepth: 6 } });
+      expect(after.body).toMatchObject({ plan: 'PLUS', source: 'TRIAL', entitlements: { premiumPuzzles: true, analysisMaxDepth: 6 } });
       expect(after.body.trial.available).toBe(false);
 
       await request(server()).post(`${V1}/subscriptions/trial`).set(bearer(token)).expect(409);
@@ -201,28 +201,30 @@ describe('Production HTTP pipeline (e2e)', () => {
       expect(audit.body.total).toBe(1);
     });
 
-    it('analysis depth follows the plan: guest 4, Pro 8', async () => {
+    it('analysis follows the plan: none for guests and Free, Premium 8', async () => {
       const board = Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) =>
         (r + c) % 2 === 1 && r < 3 ? { color: 'D', type: 'MAN' } : (r + c) % 2 === 1 && r > 4 ? { color: 'L', type: 'MAN' } : null));
-      const guest = await request(server()).post(`${V1}/analysis`).send({ board, turn: 'L', depth: 1 }).expect(201);
-      expect(guest.body.maxDepth).toBe(4);
+      await request(server()).post(`${V1}/analysis`).send({ board, turn: 'L', depth: 1 }).expect(403);
+      await register('free_analyst').expect(201);
+      const freeToken = await login('free_analyst');
+      await request(server()).post(`${V1}/analysis`).set(bearer(freeToken)).send({ board, turn: 'L', depth: 1 }).expect(403);
 
-      await register('pro_player').expect(201);
-      const pro = await users.findOneByUsername('pro_player');
-      await users.applyMembershipUpdate(pro!.id, { tier: 'PRO', status: 'ACTIVE', stripeSubscriptionId: 'sub_e2e', renewsAt: null, planVersion: 1 });
-      const tok_pro_player = await login('pro_player');
-      const res = await request(server()).post(`${V1}/analysis`).set(bearer(tok_pro_player)).send({ board, turn: 'L', depth: 1 }).expect(201);
+      await register('premium_player').expect(201);
+      const premium = await users.findOneByUsername('premium_player');
+      await users.applyMembershipUpdate(premium!.id, { tier: 'PREMIUM', status: 'ACTIVE', stripeSubscriptionId: 'sub_e2e', renewsAt: null, planVersion: 1 });
+      const tok_premium_player = await login('premium_player');
+      const res = await request(server()).post(`${V1}/analysis`).set(bearer(tok_premium_player)).send({ board, turn: 'L', depth: 1 }).expect(201);
       expect(res.body.maxDepth).toBe(8);
     });
 
-    it('Pro players can host their own tournaments and manage only those', async () => {
-      const proToken = await login('pro_player');
-      const created = await request(server()).post(`${V1}/tournaments`).set(bearer(proToken)).send({ name: 'Pro Club Swiss', format: 'Swiss' }).expect(201);
-      await request(server()).post(`${V1}/tournaments/${created.body.id}/open-registration`).set(bearer(proToken)).expect(201);
+    it('Premium players can host their own tournaments and manage only those', async () => {
+      const premiumToken = await login('premium_player');
+      const created = await request(server()).post(`${V1}/tournaments`).set(bearer(premiumToken)).send({ name: 'Premium Club Swiss', format: 'Swiss' }).expect(201);
+      await request(server()).post(`${V1}/tournaments/${created.body.id}/open-registration`).set(bearer(premiumToken)).expect(201);
 
       const organizer = await login('org1');
       const staffEvent = await request(server()).post(`${V1}/tournaments`).set(bearer(organizer)).send({ name: 'Staff Swiss', format: 'Swiss' }).expect(201);
-      await request(server()).post(`${V1}/tournaments/${staffEvent.body.id}/open-registration`).set(bearer(proToken)).expect(403);
+      await request(server()).post(`${V1}/tournaments/${staffEvent.body.id}/open-registration`).set(bearer(premiumToken)).expect(403);
     });
 
     it('club creation is limited by plan (Free: 1)', async () => {

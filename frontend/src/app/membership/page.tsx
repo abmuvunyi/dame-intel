@@ -19,6 +19,7 @@ interface Entitlements {
   maxClubsOwned: number;
   hostTournaments: boolean;
   maxAiDifficulty: number;
+  dailyFreeReview: boolean;
 }
 
 interface CatalogPlan {
@@ -54,7 +55,11 @@ function features(e: Entitlements): { text: string; included: boolean }[] {
   return [
     { text: e.analysisMaxDepth > 0 ? `Engine analysis up to depth ${e.analysisMaxDepth}` : 'No engine analysis', included: e.analysisMaxDepth > 0 },
     { text: e.premiumPuzzles ? 'Full puzzle library, including premium puzzles' : 'Standard puzzle library', included: true },
-    { text: e.fullGameReview ? 'Full game review: accuracy, classifications, and best continuations' : 'No game review', included: e.fullGameReview },
+    e.fullGameReview
+      ? { text: 'Full game review: accuracy, classifications, and best continuations', included: true }
+      : e.dailyFreeReview
+        ? { text: '1 free game review per day, with engine analysis', included: true }
+        : { text: 'No game review', included: false },
     { text: `Play AI opponents up to level ${e.maxAiDifficulty}`, included: true },
     { text: `Create up to ${e.maxClubsOwned} club${e.maxClubsOwned === 1 ? '' : 's'}`, included: true },
     ...(e.hostTournaments ? [{ text: 'Host and run your own tournaments', included: true }] : []),

@@ -41,15 +41,20 @@ real subscriber**; after that, add a new version instead (see *Plan versioning*)
 |---|---|---|---|
 | Price | $0 | $1.99/mo ($19.99/yr) | $4.99/mo ($49.99/yr) |
 | Analysis depth | none | 6 | 8 |
-| Game review (accuracy, classifications, best continuations) | – | ✓ | ✓ |
+| Game review (accuracy, classifications, best continuations) | 1 game per 24h | ✓ | ✓ |
 | Premium puzzles | – | ✓ | ✓ |
 | Highest AI difficulty | 4 | 6 | 7 |
 | Clubs you can create | 1 | 3 | 10 |
 | Host your own tournaments | – | – | ✓ (planned, not yet built) |
 | Billing | – | monthly / annual | monthly / annual |
 
-- Free gets zero engine analysis and zero game review — not a reduced depth, no access
-  at all. Both are refused outright (`403`/`LOCKED`) rather than run at a token depth.
+- Free gets no engine analysis and no game review, except **one free review every 24
+  hours** (like chess.com): the player picks the game ("Use free review" on its review
+  page), and that game's full review plus engine analysis (at Plus depth, only for
+  positions from that game) stay unlocked for 24h; the next free review is available
+  24h after the last one was used. Rules: `billing/free-review.ts`; spending it:
+  `POST /api/v1/game-review/:gameId/free-review` (audited as `review.free_used`).
+  Everything else is refused outright (`403`/`LOCKED`) rather than run at a token depth.
 - AI difficulty levels above a plan's ceiling are shown in the UI (locked, not hidden)
   and enforced server-side in `game.gateway.ts`'s `handlePlayVsAi` — the client-side
   lock is cosmetic only.
@@ -60,6 +65,13 @@ real subscriber**; after that, add a new version instead (see *Plan versioning*)
 - Premium's tournament-organizing and local-competition features are reserved for a
   later pass — the entitlement scaffolding (`hostTournaments`) already exists, but
   nothing in the product builds on it yet.
+
+### Test accounts (local development)
+
+`npm run dev:test-accounts` (in `backend/`) creates or resets `test_free`, `test_plus`
+and `test_premium` (password `testpass123`, or pass your own: `-- <password>`) with
+their plans applied directly, no Stripe needed. Refuses to run with
+`NODE_ENV=production`.
 
 ## Free trial
 
@@ -116,6 +128,7 @@ target, details, IP and request id. Admins read it on the Admin page
 | `moderation.action` | A moderator's decision on an anti-cheat flag (incl. bans) |
 | `auth.registered`, `auth.login_failed`, `auth.login_blocked_banned` | Account security |
 | `trial.started`, `trial.ended` | Free trials |
+| `review.free_used` | A Free player spends the daily free review on a game |
 | `subscription.checkout_started`, `subscription.changed`, `subscription.unknown_price` | Payments |
 | `tournament.created`, `tournament.registration_opened`, `tournament.started` | Tournaments |
 | `puzzle.approved`, `puzzle.rejected`, `puzzle.premium_changed` | Puzzle curation |

@@ -63,6 +63,10 @@ const CLASSIFICATION_STYLE: Record<string, { label: string, dot: string, badge: 
   BLUNDER: { label: 'Blunder', dot: 'bg-red-500', badge: 'bg-red-100 text-red-800' },
 };
 
+function formatWhen(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
 export default function AnalysisPage() {
   const params = useParams();
   const id = params.id as string;
@@ -87,6 +91,10 @@ export default function AnalysisPage() {
   // `evaluations` above, which is this page's own pre-existing on-demand "Run Engine"
   // query for whatever position is currently showing.
   const [review, setReview] = useState<any>(null);
+  // Bumped after spending the Free plan's daily review, to restart review polling.
+  const [reviewKey, setReviewKey] = useState(0);
+  const [freeReviewError, setFreeReviewError] = useState<string | null>(null);
+  const [usingFreeReview, setUsingFreeReview] = useState(false);
   // A short engine-vs-engine continuation being previewed on the board — either
   // "why the recommended move is best" (GameReview.MoveReview.recommendedLine) or
   // "how a mistake gets punished" (...punishmentLine), both computed server-side by
@@ -143,9 +151,8 @@ export default function AnalysisPage() {
 
     const fetchReview = async () => {
       try {
-        // Signed-in players send their token: the whole review (not just the
-        // engine's "best continuation"/"punishment" lines) requires a plan with
-        // fullGameReview — Plus, Premium, or an active trial of either.
+        // Signed-in players send their token: the review needs Plus or Premium (or a
+        // trial), or the Free plan's one free review per 24h spent on this game.
         const token = localStorage.getItem('token');
         const res = await axios.get(`${API_BASE}/game-review/${id}`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
         if (cancelled) return;
@@ -164,7 +171,23 @@ export default function AnalysisPage() {
     const interval = setInterval(fetchReview, 3000);
     void fetchReview();
     return () => { cancelled = true; clearInterval(interval); };
-  }, [id]);
+  }, [id, reviewKey]);
+
+  const handleUseFreeReview = async () => {
+    setUsingFreeReview(true);
+    setFreeReviewError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API_BASE}/game-review/${id}/free-review`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      setReview(res.data);
+      setReviewKey((k) => k + 1);
+      void handleAnalyze();
+    } catch (err: any) {
+      setFreeReviewError(err?.response?.data?.message || 'Could not use your free review.');
+    } finally {
+      setUsingFreeReview(false);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!boardStates[currentMoveIndex]) return;
@@ -180,7 +203,8 @@ export default function AnalysisPage() {
       const token = localStorage.getItem('token');
       const res = await axios.post(
         `${API_BASE}/analysis`,
-        { board: state.board, turn: state.turn, depth: 8 },
+        // gameId lets a Free user's daily free review cover this game's positions.
+        { board: state.board, turn: state.turn, depth: 8, gameId: Number(id) },
         token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
       );
       setEvaluations(res.data.evaluations);
@@ -215,10 +239,10 @@ export default function AnalysisPage() {
       }
   };
 
-  // Automatically analyze the new board state whenever the move index changes
+  // Analyze automatically once the game has loaded, and again on every move change.
   useEffect(() => {
       handleAnalyze();
-  }, [currentMoveIndex]);
+  }, [currentMoveIndex, boardStates.length]);
 
   if (!game || boardStates.length === 0) return <div className="p-10 text-center">Loading game data...</div>;
 
@@ -314,14 +338,45 @@ export default function AnalysisPage() {
           (2026-09): the whole review (not just the best-move/punishment lines) now
           requires a paid plan — see game-review.controller.ts. */}
       <div className="w-full max-w-5xl mb-6">
+        {review?.freeReview?.unlockedUntil && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3 flex items-center justify-between gap-4 text-sm text-green-900">
+            <span>
+              <strong>Free review</strong> — this game is unlocked until {formatWhen(review.freeReview.unlockedUntil)}. Plus reviews every game you play.
+            </span>
+            <Link href="/membership" className="shrink-0 font-semibold underline hover:text-green-700">See plans</Link>
+          </div>
+        )}
         {review?.status === 'LOCKED' ? (
           <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between gap-4">
-            <p className="text-sm text-gray-600">
-              Game review (accuracy, move-by-move classifications, and the eval bar) requires a {review.requiresPlan === 'PREMIUM' ? 'Premium' : 'Plus'} plan.
-            </p>
-            <Link href="/membership" className="shrink-0 px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition">
-              Upgrade
-            </Link>
+            <div className="text-sm text-gray-600">
+              <p>
+                Game review — accuracy, move-by-move classifications, the eval bar and engine analysis — is part of {review.requiresPlan === 'PREMIUM' ? 'Premium' : 'Plus'}.
+              </p>
+              {review.freeReview?.signInRequired ? (
+                <p className="mt-1">
+                  <Link href="/login" className="font-semibold text-green-700 underline">Sign in</Link> to get one free game review every day.
+                </p>
+              ) : review.freeReview?.available ? (
+                <p className="mt-1 text-gray-800">You have <strong>1 free review</strong> today. Use it on this game?</p>
+              ) : review.freeReview?.nextAvailableAt ? (
+                <p className="mt-1">Today&apos;s free review is used. Your next one is available {formatWhen(review.freeReview.nextAvailableAt)}.</p>
+              ) : null}
+              {freeReviewError && <p className="mt-1 text-red-600">{freeReviewError}</p>}
+            </div>
+            <div className="shrink-0 flex gap-2">
+              {review.freeReview?.available && (
+                <button
+                  onClick={handleUseFreeReview}
+                  disabled={usingFreeReview}
+                  className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+                >
+                  {usingFreeReview ? 'Unlocking...' : 'Use free review'}
+                </button>
+              )}
+              <Link href="/membership" className="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700 transition">
+                Upgrade
+              </Link>
+            </div>
           </div>
         ) : !review || review.status === 'NOT_STARTED' || review.status === 'PENDING' ? (
           <div className="bg-white rounded-lg shadow p-4 text-sm text-gray-500 flex items-center gap-2">
@@ -508,7 +563,7 @@ export default function AnalysisPage() {
 
         {/* Right side: Engine */}
         <div className="flex-1 bg-white p-6 rounded-lg shadow border border-gray-200 h-fit">
-           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+           <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-gray-900">
                Engine Evaluation
                <button
                   onClick={handleAnalyze}
@@ -521,7 +576,8 @@ export default function AnalysisPage() {
 
            {analysisLocked ? (
                <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800 text-center">
-                 Engine analysis requires a Plus or Premium plan.{' '}
+                 Engine analysis requires a Plus or Premium plan
+                 {review?.freeReview?.available ? ' — or use your free review for today above' : ''}.{' '}
                  <Link href="/membership" className="font-semibold underline hover:text-amber-900">
                    Upgrade
                  </Link>{' '}

@@ -101,6 +101,14 @@ export class User {
   @Column({ type: Date, nullable: true })
   trialEndedNotifiedAt: Date | null;
 
+  // Free plan's one-review-per-24h (billing/free-review.ts): which game it was spent
+  // on and when. That game stays unlocked for 24h; the next one is available after.
+  @Column({ type: Date, nullable: true })
+  lastFreeReviewAt: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  lastFreeReviewGameId: number | null;
+
   @Column({ type: 'text', nullable: true, unique: true })
   stripeCustomerId: string | null;
 

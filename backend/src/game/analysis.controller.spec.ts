@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { DraughtsEngine, PieceColor, PieceType, BoardState } from './engine/engine.service';
 import { accessFor } from '../billing/access';
+import { GameReviewService, positionKey } from './review/game-review.service';
 
 function fakeRequest(token?: string): any {
   return { headers: token ? { authorization: `Bearer ${token}` } : {} };
@@ -14,6 +15,7 @@ describe('AnalysisController', () => {
   let controller: AnalysisController;
   let jwtService: { verifyAsync: jest.Mock };
   let usersService: { findOneById: jest.Mock, accessFor: jest.Mock, isCurrentlyBanned: jest.Mock };
+  let gameReviewService: { gamePositionKeys: jest.Mock };
 
   beforeEach(async () => {
     jwtService = { verifyAsync: jest.fn() };
@@ -23,6 +25,12 @@ describe('AnalysisController', () => {
       accessFor: jest.fn((user: any) => accessFor(user)),
       isCurrentlyBanned: jest.fn(() => false),
     };
+    // Game 42 is the opening position followed by one move.
+    const game = DraughtsEngine.createAmerican();
+    const keys = new Set([positionKey(game)]);
+    game.makeMove(game.getLegalMoves()[0]);
+    keys.add(positionKey(game));
+    gameReviewService = { gamePositionKeys: jest.fn(async (id: number) => (id === 42 ? keys : null)) };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AnalysisController],
@@ -30,6 +38,7 @@ describe('AnalysisController', () => {
         AiService,
         { provide: JwtService, useValue: jwtService },
         { provide: UsersService, useValue: usersService },
+        { provide: GameReviewService, useValue: gameReviewService },
       ],
     }).compile();
 
@@ -142,6 +151,45 @@ describe('AnalysisController', () => {
       usersService.findOneById.mockResolvedValue({ id: 6, membershipTier: 'PLUS', membershipStatus: 'ACTIVE' });
       const result = await controller.analyze(fakeRequest('token'), { board, turn: PieceColor.LIGHT, depth: 4 });
       expect(result.depthCapped).toBe(false);
+    });
+  });
+
+  // Free plan's daily free review (billing/free-review.ts) also unlocks engine
+  // analysis — but only of positions from the game it was spent on.
+  describe('analysis under a Free daily review', () => {
+    function freeUserWithReviewOn(gameId: number, hoursAgo = 1) {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 7 });
+      usersService.findOneById.mockResolvedValue({
+        id: 7, membershipTier: 'FREE', lastFreeReviewGameId: gameId,
+        lastFreeReviewAt: new Date(Date.now() - hoursAgo * 3_600_000),
+      });
+      return fakeRequest('token');
+    }
+    const start = () => DraughtsEngine.createAmerican();
+
+    it('allows Plus depth on a position from the unlocked game', async () => {
+      const res = await controller.analyze(freeUserWithReviewOn(42), { board: start().getBoard(), turn: PieceColor.LIGHT, depth: 8, gameId: 42 });
+      expect(res.depthUsed).toBe(6);
+      expect(res.evaluations.length).toBeGreaterThan(0);
+    });
+
+    it('refuses a position that is not from that game', async () => {
+      const board: BoardState = Array(8).fill(null).map(() => Array(8).fill(null));
+      board[5][0] = { color: PieceColor.LIGHT, type: PieceType.MAN };
+      await expect(controller.analyze(freeUserWithReviewOn(42), { board, turn: PieceColor.LIGHT, depth: 4, gameId: 42 }))
+        .rejects.toThrow('Engine analysis requires a Plus or Premium plan.');
+    });
+
+    it('refuses without a gameId, for another game, and after 24h', async () => {
+      const body = { board: start().getBoard(), turn: PieceColor.LIGHT, depth: 4 };
+      await expect(controller.analyze(freeUserWithReviewOn(42), body)).rejects.toThrow(/Plus or Premium/);
+      await expect(controller.analyze(freeUserWithReviewOn(43), { ...body, gameId: 42 })).rejects.toThrow(/Plus or Premium/);
+      await expect(controller.analyze(freeUserWithReviewOn(42, 25), { ...body, gameId: 42 })).rejects.toThrow(/Plus or Premium/);
+    });
+
+    it('refuses an anonymous caller even with a gameId', async () => {
+      await expect(controller.analyze(fakeRequest(), { board: start().getBoard(), turn: PieceColor.LIGHT, depth: 4, gameId: 42 }))
+        .rejects.toThrow(/Plus or Premium/);
     });
   });
 });

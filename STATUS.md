@@ -2093,6 +2093,38 @@ analysis 403 (`analysis.controller.spec.ts`), a new `game-review.controller.spec
 not exist before this phase), and new `game.gateway.spec.ts` coverage for the AI-difficulty
 gate (refuses above the plan ceiling, allows exactly at it). Frontend: `tsc --noEmit` clean.
 
+## Phase 16b: daily free review, test accounts, in-game board layout (2026-10-08)
+
+- **One free game review per 24h for Free** (owner's request, modelled on chess.com, to
+  show Free players what review and analysis are worth). The player chooses the game
+  ("Use free review" on a locked review); that game's full review and engine analysis
+  (Plus depth, 6) stay unlocked for 24h, and the next free review is available 24h
+  after the last. Analysis under a free review is only allowed for positions that
+  actually occur in that game (server replays the game and compares), so it can't be
+  used as general-purpose analysis. New `dailyFreeReview` entitlement,
+  `billing/free-review.ts`, `POST /game-review/:gameId/free-review`, user columns
+  `lastFreeReviewAt`/`lastFreeReviewGameId` (migration `DailyFreeReview`).
+- **Test accounts:** `npm run dev:test-accounts` creates/resets `test_free`,
+  `test_plus`, `test_premium` (password `testpass123`) locally, no Stripe. Dev only.
+- **In-game board layout fix:** the board sized itself from the column width only, with
+  ~350px of status/clocks/buttons above it, so on most laptop screens its bottom rows
+  fell below the fold. It now fits the viewport height as well (Board.tsx), only the two
+  clock rows sit above/below it, and status/actions/captures moved to the side column.
+  The home page hides its dashboard cards during a game so the board can use the room
+  (8x8 at 1440x900: 340px → 636px, fully visible). Also fixed: the frame's border wasn't
+  counted in its size, so squares overflowed the frame by 12px; on phones the board was
+  clipped (minimum square size wider than the column).
+- **Analysis page:** engine now runs automatically when the page loads (previously only
+  after changing moves); "Engine Evaluation" heading was nearly invisible.
+- **e2e suite** brought up to date with the Free/Plus/Premium rename (5 tests had been
+  failing since the Phase 16 commit; only unit tests were run then).
+- Verified: 544 unit + 17 e2e tests pass; driven in headless Chromium — two real games
+  played as test_free, free review spent on one (review + depth-6 analysis unlocked),
+  the other stays locked with the next-available time; test_plus sees full review; board
+  checked at 1280x720, 1440x900, 1920x1080 (8x8 and 10x10) and 390x844.
+- Noticed, not fixed: the analysis page header shows "AI (Light) vs AI (Dark)" for a
+  logged-in player's game against the AI.
+
 ## Repo cleanup notes (Phase 0)
 
 - Original state: 96 branches, 95 open PRs, no `main` — default branch was the auto-named
