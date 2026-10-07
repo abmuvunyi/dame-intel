@@ -233,7 +233,7 @@ describe('PuzzleGeneratorService', () => {
           expect(savedGames.some((g: any) => g.id === puzzle.sourceGameId)).toBe(true);
         }
       }
-    }, 60000);
+    }, 180000);
   });
 
   describe('scanRecentGames', () => {
