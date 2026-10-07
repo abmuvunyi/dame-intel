@@ -48,14 +48,16 @@ interface Membership {
   hasBillingAccount: boolean;
 }
 
-function features(e: Entitlements): string[] {
+// included: false renders with a muted ✕ instead of a green ✓ — a plan's gaps are
+// worth showing (so Free vs. Plus is legible at a glance), but not as a false positive.
+function features(e: Entitlements): { text: string; included: boolean }[] {
   return [
-    e.analysisMaxDepth > 0 ? `Engine analysis up to depth ${e.analysisMaxDepth}` : 'No engine analysis',
-    e.premiumPuzzles ? 'Full puzzle library, including premium puzzles' : 'Standard puzzle library',
-    e.fullGameReview ? 'Full game review: accuracy, classifications, and best continuations' : 'No game review',
-    `Play AI opponents up to level ${e.maxAiDifficulty}`,
-    `Create up to ${e.maxClubsOwned} club${e.maxClubsOwned === 1 ? '' : 's'}`,
-    ...(e.hostTournaments ? ['Host and run your own tournaments'] : []),
+    { text: e.analysisMaxDepth > 0 ? `Engine analysis up to depth ${e.analysisMaxDepth}` : 'No engine analysis', included: e.analysisMaxDepth > 0 },
+    { text: e.premiumPuzzles ? 'Full puzzle library, including premium puzzles' : 'Standard puzzle library', included: true },
+    { text: e.fullGameReview ? 'Full game review: accuracy, classifications, and best continuations' : 'No game review', included: e.fullGameReview },
+    { text: `Play AI opponents up to level ${e.maxAiDifficulty}`, included: true },
+    { text: `Create up to ${e.maxClubsOwned} club${e.maxClubsOwned === 1 ? '' : 's'}`, included: true },
+    ...(e.hostTournaments ? [{ text: 'Host and run your own tournaments', included: true }] : []),
   ];
 }
 
@@ -250,9 +252,9 @@ function MembershipPageInner() {
                     <p className="text-sm text-slate-400 mt-1 mb-4">{plan.tagline}</p>
                     <ul className="space-y-2 mb-6 flex-1">
                       {features(plan.entitlements).map((f) => (
-                        <li key={f} className="flex gap-2 text-sm text-slate-300">
-                          <span className="text-green-500" aria-hidden>✓</span>
-                          {f}
+                        <li key={f.text} className={`flex gap-2 text-sm ${f.included ? 'text-slate-300' : 'text-slate-500'}`}>
+                          <span className={f.included ? 'text-green-500' : 'text-slate-600'} aria-hidden>{f.included ? '✓' : '✕'}</span>
+                          {f.text}
                         </li>
                       ))}
                     </ul>
