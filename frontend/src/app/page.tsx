@@ -87,6 +87,8 @@ export default function Home() {
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [autoChallengeUserId, setAutoChallengeUserId] = useState<number | null>(null);
+  // While a game is on screen the dashboard cards are hidden so the board can use the room.
+  const [inGame, setInGame] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -155,10 +157,10 @@ export default function Home() {
             reason it does inside GameBoard.tsx itself: a grid/flex item's default
             min-width is its content's own intrinsic size, which would otherwise stop
             this column from ever shrinking down to what's actually available. */}
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
+        <div className={`grid grid-cols-1 gap-6 items-start ${inGame ? '' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
           <div className="min-w-0 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
             <div className="p-4 sm:p-6">
-              <GameBoard autoChallengeUserId={autoChallengeUserId} onAutoChallengeSent={() => setAutoChallengeUserId(null)} />
+              <GameBoard autoChallengeUserId={autoChallengeUserId} onAutoChallengeSent={() => setAutoChallengeUserId(null)} onInGameChange={setInGame} />
             </div>
           </div>
 
@@ -169,7 +171,7 @@ export default function Home() {
               free/unauthenticated by design, see the fetch above); every other card
               below now follows the same "always show the card, vary its content"
               rule that one already modeled. */}
-          <div className="flex flex-col gap-5">
+          <div className={`flex flex-col gap-5 ${inGame ? 'hidden' : ''}`}>
             <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
               <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recommended Match</h2>
               {!isAuthenticated ? (

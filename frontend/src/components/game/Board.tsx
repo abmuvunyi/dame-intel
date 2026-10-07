@@ -20,6 +20,9 @@ interface BoardProps {
   lastMove: Move | null;
   flipped: boolean;
   onMove: (move: Move) => void;
+  // Space to keep free below the board (e.g. a clock row) when fitting it to the
+  // viewport height.
+  reserveBelowPx?: number;
 }
 
 // How long the CSS transition for a moving/captured piece takes. Kept in one place
@@ -36,8 +39,12 @@ const TRANSITION_MS = 260;
 // than always rendering at the same size regardless of context.
 const MAX_CELL_PX = { 8: 88, 10: 68 } as const;
 const MIN_CELL_PX = { 8: 40, 10: 32 } as const;
+// The frame's border and padding (border-box sizing), added around the squares.
+const BORDER_PX = 6;
+const PADDING_PX = 4;
+const FRAME_PX = 2 * (BORDER_PX + PADDING_PX);
 
-export default function Board({ board, myColor, currentTurn, legalMoves, lastMove, flipped, onMove }: BoardProps) {
+export default function Board({ board, myColor, currentTurn, legalMoves, lastMove, flipped, onMove, reserveBelowPx = 24 }: BoardProps) {
   const size = board.length;
   const canMove = myColor !== null && currentTurn === myColor;
   const boardSizeKey = size === 10 ? 10 : 8;
@@ -55,18 +62,25 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
     const container = containerRef.current;
     if (!container) return;
 
+    // The column's width is a hard limit (never overflow it); the viewport height
+    // below the board's top edge is a soft one, honored down to MIN_CELL_PX, so the
+    // whole board is visible without scrolling wherever the screen allows it.
     const recompute = () => {
-      const available = container.clientWidth;
-      const fitted = Math.floor((available - 8) / size);
-      const clamped = Math.max(MIN_CELL_PX[boardSizeKey], Math.min(MAX_CELL_PX[boardSizeKey], fitted));
-      setCellPx(clamped);
+      const top = container.getBoundingClientRect().top + window.scrollY;
+      const byWidth = Math.floor((container.clientWidth - FRAME_PX) / size);
+      const byHeight = Math.floor((window.innerHeight - top - reserveBelowPx - FRAME_PX) / size);
+      setCellPx(Math.min(MAX_CELL_PX[boardSizeKey], byWidth, Math.max(MIN_CELL_PX[boardSizeKey], byHeight)));
     };
 
     recompute();
     const observer = new ResizeObserver(recompute);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [size, boardSizeKey]);
+    window.addEventListener('resize', recompute);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', recompute);
+    };
+  }, [size, boardSizeKey, reserveBelowPx]);
 
   // Keep a stable-identity piece list so CSS transitions can animate a piece moving
   // from one square to another, instead of a square's content just changing instantly.
@@ -219,8 +233,8 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
     >
     <div
       ref={boardRef}
-      className="relative border-[6px] border-slate-800 bg-slate-200 shadow-2xl rounded-sm select-none touch-none"
-      style={{ width: size * cellPx + 8, height: size * cellPx + 8, padding: 4 }}
+      className="relative border-slate-800 bg-slate-200 shadow-2xl rounded-sm select-none touch-none"
+      style={{ width: size * cellPx + FRAME_PX, height: size * cellPx + FRAME_PX, padding: PADDING_PX, borderWidth: BORDER_PX }}
     >
       {/* Squares (background grid + click/drop targets) */}
       {Array.from({ length: size }).map((_, dr) =>
@@ -242,7 +256,7 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
               data-col={col}
               onClick={() => handleSquareClick(row, col)}
               className={`absolute flex items-center justify-center ${bg} ${isDarkSquare ? 'cursor-pointer' : ''} transition-colors duration-150`}
-              style={{ width: cellPx, height: cellPx, left: dc * cellPx + 4, top: dr * cellPx + 4 }}
+              style={{ width: cellPx, height: cellPx, left: dc * cellPx + PADDING_PX, top: dr * cellPx + PADDING_PX }}
             >
               {isHighlighted && !board[row][col] && (
                 <div className="w-1/3 h-1/3 rounded-full bg-green-700/40 pointer-events-none" />
@@ -260,14 +274,14 @@ export default function Board({ board, myColor, currentTurn, legalMoves, lastMov
         const style: React.CSSProperties = isDragging && boardRect
           ? {
               width: cellPx, height: cellPx,
-              left: drag!.x - boardRect.left - cellPx / 2,
-              top: drag!.y - boardRect.top - cellPx / 2,
+              left: drag!.x - boardRect.left - BORDER_PX - cellPx / 2,
+              top: drag!.y - boardRect.top - BORDER_PX - cellPx / 2,
               zIndex: 20,
               transition: 'none',
             }
           : {
               width: cellPx, height: cellPx,
-              left: col * cellPx + 4, top: row * cellPx + 4,
+              left: col * cellPx + PADDING_PX, top: row * cellPx + PADDING_PX,
               transition: `left ${TRANSITION_MS}ms ease, top ${TRANSITION_MS}ms ease, opacity ${TRANSITION_MS}ms ease, transform ${TRANSITION_MS}ms ease`,
               opacity: p.removing ? 0 : 1,
               transform: p.removing ? 'scale(0.4)' : 'scale(1)',
