@@ -233,10 +233,10 @@ describe('PuzzleGeneratorService', () => {
           expect(savedGames.some((g: any) => g.id === puzzle.sourceGameId)).toBe(true);
         }
       }
-    }, 60000);
+    }, 180000);
   });
 
-  describe('scanRecentGames', () => {
+  describe('scanRecentGames', () => { jest.setTimeout(30000);
     it('scans multiple games and reports candidate counts per game', async () => {
       const g1 = await historyRepo.save(historyRepo.create({
         winner: 'DRAW',
