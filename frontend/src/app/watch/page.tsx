@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
+import { API_URL } from '@/lib/api';
 
 // The live-games dashboard (Phase 9). Read-only by design: this page never sends
 // `makeMove`, only ever `getActiveGames` — actually watching a game happens back on
@@ -32,7 +33,7 @@ export default function WatchPage() {
     // No auth token — spectating (and just browsing what's live) never required an
     // account server-side (see joinSpectator in game.gateway.ts), so this page
     // doesn't need one either.
-    const socket: Socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001');
+    const socket: Socket = io(API_URL);
 
     socket.on('connect', () => {
       setConnected(true);

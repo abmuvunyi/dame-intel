@@ -48,7 +48,7 @@ export class Lesson {
   // with the same read-only Board component used elsewhere. Nullable: a purely
   // conceptual lesson (e.g. "control the center") doesn't need one.
   @Column('simple-json', { nullable: true })
-  exampleBoard: any | null;
+  exampleBoard: any; // null when the lesson has no diagram
 
   @Column({ default: 8 })
   exampleBoardSize: number; // only meaningful when exampleBoard is set

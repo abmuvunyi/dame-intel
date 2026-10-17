@@ -1,5 +1,7 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
+
+const logger = new Logger('StripeService');
 
 // Thin wrapper around the real Stripe SDK — every call in this file is Stripe's own
 // hosted flow (Checkout Session, Billing Portal Session, webhook signature
@@ -22,7 +24,7 @@ export class StripeService {
     if (secretKey) {
       this.stripe = new Stripe(secretKey);
     } else {
-      console.warn('[Stripe] STRIPE_SECRET_KEY not set — subscriptions endpoints will return 503 rather than crash the app.');
+      logger.warn('[Stripe] STRIPE_SECRET_KEY not set — subscriptions endpoints will return 503 rather than crash the app.');
     }
   }
 
@@ -71,6 +73,24 @@ export class StripeService {
       customer: customerId,
       return_url: returnUrl,
     });
+  }
+
+  // The real, currently-configured price for one plan/interval, formatted for
+  // display on the public pricing page — so "the price is $X" only ever needs to be
+  // set once, in Stripe itself, not copy-pasted into this codebase too. Deliberately
+  // never throws: this backs a public marketing page, and a Stripe hiccup or a
+  // stale/deleted price id here should fall back to the catalog's own static
+  // displayPrice (see billing/plans.ts), not break the whole pricing page.
+  async getFormattedPrice(priceId: string): Promise<string | null> {
+    if (!this.stripe) return null;
+    try {
+      const price = await this.stripe.prices.retrieve(priceId);
+      if (price.unit_amount == null || !price.currency) return null;
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: price.currency }).format(price.unit_amount / 100);
+    } catch (err) {
+      logger.warn(`[Stripe] Could not fetch display price for "${priceId}": ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 
   // Verifies the event genuinely came from Stripe (HMAC signature over the exact raw

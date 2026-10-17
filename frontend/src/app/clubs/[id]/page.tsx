@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useParams, useRouter } from 'next/navigation';
+import { API_BASE as API } from '@/lib/api';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function ClubDetail() {
   const params = useParams();

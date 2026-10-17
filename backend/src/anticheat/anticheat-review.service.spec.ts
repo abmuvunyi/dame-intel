@@ -20,10 +20,13 @@ describe('AnticheatService: engine-correlation + timing detection (Phase 12)', (
   let service: AnticheatService;
   let usersService: UsersService;
   let historyService: HistoryService;
-  let aiServiceMock: { analyzePosition: jest.Mock };
+  let aiServiceMock: { analyzePosition: jest.Mock; analyzePositionAsync: jest.Mock };
 
   async function setup() {
-    aiServiceMock = { analyzePosition: jest.fn().mockReturnValue([]) };
+    aiServiceMock = { analyzePosition: jest.fn().mockReturnValue([]) } as any;
+    // Phase 14: services call the non-blocking variant; route it through the same
+    // controllable sync mock so every existing expectation keeps working.
+    aiServiceMock.analyzePositionAsync = jest.fn(async (...args: any[]) => aiServiceMock.analyzePosition(...args));
     const module: TestingModule = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot({
@@ -167,11 +170,11 @@ describe('AnticheatService: engine-correlation + timing detection (Phase 12)', (
 
       // Game 1: alice = Light (even indices), consistently ~1000ms; bob = Dark, wildly variable.
       const timings1 = placeholderMoves.map((_, i) => (i % 2 === 0 ? 1000 : 500 + i * 900));
-      await historyService.saveGame(alice as any, bob as any, 'DRAW', placeholderMoves, {}, timings1);
+      await historyService.saveGame(alice, bob, 'DRAW', placeholderMoves, {}, timings1);
 
       // Game 2: alice = Dark (odd indices) this time, still consistently ~1000ms.
       const timings2 = placeholderMoves.map((_, i) => (i % 2 === 1 ? 1000 : 300 + i * 700));
-      await historyService.saveGame(bob as any, alice as any, 'DRAW', placeholderMoves, {}, timings2);
+      await historyService.saveGame(bob, alice, 'DRAW', placeholderMoves, {}, timings2);
 
       // The just-completed "current" game being analyzed right now: alice = Light again.
       const currentTimings = placeholderMoves.map((_, i) => (i % 2 === 0 ? 1000 : 200 + i * 800));

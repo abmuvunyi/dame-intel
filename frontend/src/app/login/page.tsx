@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { API_BASE } from '@/lib/api';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -16,14 +17,16 @@ export default function Login() {
 
     try {
       const endpoint = isRegistering ? '/auth/register' : '/auth/login';
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`, { username, password });
+      const res = await axios.post(`${API_BASE}${endpoint}`, { username, password });
 
       if (res.data.access_token) {
         localStorage.setItem('token', res.data.access_token);
         router.push('/');
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Authentication failed');
+      // Validation errors (Phase 14) arrive as an array of messages.
+      const message = err.response?.data?.message;
+      setError(Array.isArray(message) ? message.join(' ') : message || 'Authentication failed');
     }
   };
 

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Puzzle } from './puzzle.entity';
@@ -8,6 +8,9 @@ import { updateRating, GLICKO2_DEFAULTS } from '../rating/glicko2';
 import { sameMove } from './move-utils';
 import { hashDateToIndex } from './daily-puzzle';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
+import { errorDetail } from '../common/error-detail';
+
+const logger = new Logger('PuzzlesService');
 
 export interface PuzzleAttemptResult {
   correct: boolean;
@@ -27,7 +30,7 @@ function reconstructEngine(puzzle: Puzzle, moveIndex: number): DraughtsEngine {
   const engine = new DraughtsEngine({ boardSize: puzzle.boardSize });
   engine.loadBoard(
     JSON.parse(JSON.stringify(puzzle.board)),
-    puzzle.turnToMove === PieceColor.LIGHT ? PieceColor.LIGHT : PieceColor.DARK,
+    (puzzle.turnToMove as PieceColor) === PieceColor.LIGHT ? PieceColor.LIGHT : PieceColor.DARK,
   );
   for (let i = 0; i < moveIndex; i++) {
     engine.makeMove(puzzle.solution[i]);
@@ -36,7 +39,7 @@ function reconstructEngine(puzzle: Puzzle, moveIndex: number): DraughtsEngine {
 }
 
 @Injectable()
-export class PuzzlesService implements OnModuleInit {
+export class PuzzlesService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(Puzzle)
     private puzzlesRepository: Repository<Puzzle>,
@@ -45,25 +48,40 @@ export class PuzzlesService implements OnModuleInit {
     private puzzleGeneratorService: PuzzleGeneratorService,
   ) {}
 
-  async onModuleInit() {
-    // Seed initial puzzles if none exist. Self-played and scanned for real tactical/
-    // positional moments (see PuzzleGeneratorService.seedFromSelfPlay) rather than a
-    // handful of hand-authored, artificial 2-3-piece toy positions — this used to be
-    // ~4 hardcoded puzzles, none of which were real middlegame or proper endgame
-    // material, exactly the complaint this rewrite fixes.
+  // Phase 14: seeding used to run inside onModuleInit and was AWAITED, so a fresh
+  // database held the whole server back from listening for ~45s of CPU-bound
+  // self-play — long enough for most cloud health checks to kill and restart the
+  // container, which then starts seeding again. It now starts after boot, in the
+  // background, and can be turned off with PUZZLE_SEED_ON_BOOT=false (tests,
+  // additional replicas).
+  onApplicationBootstrap() {
+    if (process.env.PUZZLE_SEED_ON_BOOT === 'false') return;
+    const timer = setTimeout(() => {
+      this.seedIfEmpty().catch((err) => logger.error(`Puzzle seeding failed: ${errorDetail(err)}`));
+    }, 1000);
+    timer.unref(); // never keep a short-lived process (CLI script, test) alive
+  }
+
+  // Seed initial puzzles if none exist. Self-played and scanned for real tactical/
+  // positional moments (see PuzzleGeneratorService.seedFromSelfPlay) rather than a
+  // handful of hand-authored, artificial 2-3-piece toy positions — this used to be
+  // ~4 hardcoded puzzles, none of which were real middlegame or proper endgame
+  // material, exactly the complaint this rewrite fixes.
+  async seedIfEmpty(): Promise<void> {
     const count = await this.puzzlesRepository.count();
     if (count === 0) {
-      console.log('Seeding initial draughts puzzles via self-play...');
+      logger.log('Seeding initial draughts puzzles via self-play...');
       const result = await this.puzzleGeneratorService.seedFromSelfPlay();
-      console.log(`Seeded ${result.puzzlesCreated} puzzles from ${result.gamesPlayed} self-played games.`);
+      logger.log(`Seeded ${result.puzzlesCreated} puzzles from ${result.gamesPlayed} self-played games.`);
     }
   }
+
 
   // What a client is allowed to see: never the solution. Solving is validated
   // server-side against the real engine (see attemptMove) specifically so a puzzle
   // can't just be read out of the network tab, unlike the previous implementation.
   toPublic(puzzle: Puzzle) {
-    const { solution, ...publicFields } = puzzle;
+    const { solution: _solution, ...publicFields } = puzzle;
     return publicFields;
   }
 

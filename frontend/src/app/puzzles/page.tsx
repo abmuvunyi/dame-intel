@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { BoardState, Move, PieceColor } from '@/lib/draughts';
 import Board from '@/components/game/Board';
 import DashboardShell from '@/components/DashboardShell';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface PublicPuzzle {
   id: number;
@@ -49,7 +49,7 @@ function PuzzlesPageInner() {
   // getLegalMoves). Every attempted move is validated server-side against the real
   // rules engine, never compared against a value already sitting in the browser.
   const loadLegalMoves = useCallback(async (puzzleId: number, atMoveIndex: number) => {
-    const res = await axios.get(`${API_URL}/puzzles/${puzzleId}/legal-moves`, { params: { moveIndex: atMoveIndex } });
+    const res = await axios.get(`${API_BASE}/puzzles/${puzzleId}/legal-moves`, { params: { moveIndex: atMoveIndex } });
     setBoard(res.data.board);
     setTurn(res.data.turn);
     setLegalMoves(res.data.legalMoves);
@@ -62,7 +62,7 @@ function PuzzlesPageInner() {
       setFailed(false);
       setLastMove(null);
       setMoveIndex(0);
-      const res = await axios.get<PublicPuzzle>(`${API_URL}/puzzles/random`);
+      const res = await axios.get<PublicPuzzle>(`${API_BASE}/puzzles/random`);
       setPuzzle(res.data);
       setStatus(`Puzzle #${res.data.id} (rating ${Math.round(res.data.rating)}) — Find the best move for ${res.data.turnToMove === 'L' ? 'Light' : 'Dark'}`);
       await loadLegalMoves(res.data.id, 0);
@@ -83,7 +83,7 @@ function PuzzlesPageInner() {
       setFailed(false);
       setLastMove(null);
       setMoveIndex(0);
-      const res = await axios.get<PublicPuzzle | null>(`${API_URL}/puzzles/daily`);
+      const res = await axios.get<PublicPuzzle | null>(`${API_BASE}/puzzles/daily`);
       if (!res.data) {
         await loadRandomPuzzle();
         return;
@@ -100,7 +100,7 @@ function PuzzlesPageInner() {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      const res = await axios.get(`${API_URL}/puzzles/rating`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`${API_BASE}/puzzles/rating`, { headers: { Authorization: `Bearer ${token}` } });
       setMyRating(Math.round(res.data.rating));
     } catch {
       // not logged in / no rating yet — fine, just don't show one
@@ -126,7 +126,7 @@ function PuzzlesPageInner() {
 
     try {
       const res = await axios.post(
-        `${API_URL}/puzzles/${puzzle.id}/attempt`,
+        `${API_BASE}/puzzles/${puzzle.id}/attempt`,
         { moveIndex, move },
         token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
       );

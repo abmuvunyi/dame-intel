@@ -1,0 +1,60 @@
+# Phase 14: production-like full stack, for staging, a single VM, or trying the
+# production images locally. Not tied to any cloud provider — on a managed platform
+# you would typically use its managed Postgres/Redis instead of the db/redis
+# services below and deploy the two images on their own.
+#
+#   cp backend/.env.example backend/.env.production   # then fill in real values
+#   NEXT_PUBLIC_API_URL=http://localhost:3001 docker compose -f docker-compose.prod.yml up --build
+#
+# IMPORTANT: run exactly ONE backend replica for now — live game state
+# (rooms, clocks, matchmaking queue) is held in the backend process's memory.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-draughts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-draughts}
+    volumes:
+      - pgdata-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-draughts}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-draughts}
+      REDIS_URL: redis://redis:6379
+      DB_SSL: "false" # traffic stays on the private compose network
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL to the public backend URL}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata-prod:

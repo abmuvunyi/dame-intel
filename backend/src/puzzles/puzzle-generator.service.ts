@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Puzzle } from './puzzle.entity';
 import { GameHistory } from '../history/history.entity';
-import { DraughtsEngine, Move } from '../game/engine/engine.service';
+import { DraughtsEngine, Move, PieceColor } from '../game/engine/engine.service';
 import { AiService } from '../game/ai/ai/ai.service';
 import { CLASSIFICATION_THRESHOLDS } from '../game/review/move-classification';
 import { classifyGamePhase, GamePhase } from './game-phase';
@@ -78,10 +78,6 @@ export const DEFAULT_SEED_MATCHUPS: SelfPlayMatchup[] = [
   { light: 4, dark: 1, boardSize: 8 },
 ];
 
-interface Candidate {
-  move: Move;
-  evaluation: number;
-}
 
 @Injectable()
 export class PuzzleGeneratorService {
@@ -126,7 +122,7 @@ export class PuzzleGeneratorService {
       if (ply >= SKIP_OPENING_PLIES) {
         const legalMoves = engine.getLegalMoves();
         if (legalMoves.length >= 2) {
-          const evaluations = this.aiService.analyzePosition(engine, GENERATION_DEPTH);
+          const evaluations = await this.aiService.analyzePositionAsync(engine, GENERATION_DEPTH);
           const best = evaluations[0];
           const playedEval = evaluations.find((e) => sameMove(e.move, playedMove));
 
@@ -157,7 +153,12 @@ export class PuzzleGeneratorService {
   // genuine tactical/positional moments spanning the opening through real endgames,
   // not invented positions. Auto-published (see scanGame's autoPublish param) since
   // this is the app's own verified content, not a real player's game awaiting review.
-  async seedFromSelfPlay(matchups: SelfPlayMatchup[] = DEFAULT_SEED_MATCHUPS): Promise<{ gamesPlayed: number; puzzlesCreated: number }> {
+  async seedFromSelfPlay(
+    matchups: SelfPlayMatchup[] = DEFAULT_SEED_MATCHUPS,
+    // Phase 14: overridable only so the unit test can stay fast and deterministic in
+    // CI; production always uses the default.
+    options: { maxPliesPerGame?: number } = {},
+  ): Promise<{ gamesPlayed: number; puzzlesCreated: number }> {
     // A live yield check found self-played games between these difficulties typically
     // don't reach real endgame material (piece fraction <= 0.35, see game-phase.ts)
     // until somewhere around ply 46-79 depending on matchup/board size — with the old
@@ -165,7 +166,7 @@ export class PuzzleGeneratorService {
     // resulting puzzle pool had zero endgame puzzles despite "real endgames, not just
     // middlegames" being an explicit requirement. 100 plies comfortably covers the
     // endgame transition for all sampled matchups.
-    const MAX_PLIES_PER_GAME = 100;
+    const MAX_PLIES_PER_GAME = options.maxPliesPerGame ?? 100;
 
     let puzzlesCreated = 0;
     for (const matchup of matchups) {
@@ -173,8 +174,8 @@ export class PuzzleGeneratorService {
       const moves: Move[] = [];
 
       for (let ply = 0; ply < MAX_PLIES_PER_GAME && !engine.isGameOver(); ply++) {
-        const lightToMove = engine.getCurrentTurn() === 'L';
-        const move = this.aiService.getBestMove(engine, lightToMove ? matchup.light : matchup.dark);
+        const lightToMove = engine.getCurrentTurn() === PieceColor.LIGHT;
+        const move = await this.aiService.getBestMoveAsync(engine, lightToMove ? matchup.light : matchup.dark, 'background');
         if (!move) break;
         engine.makeMove(move);
         moves.push(move);
@@ -185,7 +186,7 @@ export class PuzzleGeneratorService {
       // GameHistory.winner is documented as storing the long form, not the engine's
       // own short PieceColor codes.
       const engineWinner = engine.isDraw() ? null : engine.getWinner();
-      const winner = engineWinner === 'L' ? 'LIGHT' : engineWinner === 'D' ? 'DARK' : 'DRAW';
+      const winner = engineWinner === PieceColor.LIGHT ? 'LIGHT' : engineWinner === PieceColor.DARK ? 'DARK' : 'DRAW';
 
       const game = await this.historyRepository.save(this.historyRepository.create({
         winner,
@@ -233,7 +234,7 @@ export class PuzzleGeneratorService {
     let maxDelta = 0;
 
     for (let solverPly = 0; solverPly < MAX_SOLVER_PLIES; solverPly++) {
-      const evaluations = this.aiService.analyzePosition(walker, GENERATION_DEPTH);
+      const evaluations = await this.aiService.analyzePositionAsync(walker, GENERATION_DEPTH);
       if (evaluations.length === 0) break;
       const best = evaluations[0];
       const secondBest = evaluations[1];
@@ -253,7 +254,7 @@ export class PuzzleGeneratorService {
       // opponent's reply belongs IN this same array, not tracked separately, or
       // solving would desync from moveIndex onward the first time a real player
       // reached one of these multi-ply puzzles.
-      const opponentEvals = this.aiService.analyzePosition(walker, GENERATION_DEPTH);
+      const opponentEvals = await this.aiService.analyzePositionAsync(walker, GENERATION_DEPTH);
       if (opponentEvals.length === 0) break;
       const opponentBest = opponentEvals[0];
       const opponentSecond = opponentEvals[1];

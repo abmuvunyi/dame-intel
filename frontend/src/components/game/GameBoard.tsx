@@ -11,6 +11,8 @@ import CapturedTray, { materialValue } from './CapturedTray';
 import GameOverModal from './GameOverModal';
 import ConnectionStatus from './ConnectionStatus';
 import Timer from './Timer';
+import { API_URL, API_BASE } from '@/lib/api';
+import Link from 'next/link';
 
 // Re-exported for any older imports still pointing at this module.
 export { PieceColor, PieceType } from '@/lib/draughts';
@@ -29,6 +31,7 @@ interface GameBoardProps {
   // uses, just triggered from outside instead of a click inside this component.
   autoChallengeUserId?: number | null;
   onAutoChallengeSent?: () => void;
+  onInGameChange?: (inGame: boolean) => void;
 }
 
 export default function GameBoard(props: GameBoardProps = {}) {
@@ -39,7 +42,7 @@ export default function GameBoard(props: GameBoardProps = {}) {
   );
 }
 
-function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardProps) {
+function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent, onInGameChange }: GameBoardProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
@@ -96,6 +99,12 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   const [incomingChallenge, setIncomingChallenge] = useState<{ challengeId: string, fromUser: { id: number, username: string } } | null>(null);
   const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
 
+  // The highest AI difficulty this account's plan allows (billing/plans.ts's
+  // maxAiDifficulty) — defaults to Free's ceiling until (if logged in) the real value
+  // loads, so nothing ever briefly looks unlocked that isn't. The server enforces this
+  // independently (game.gateway.ts's handlePlayVsAi) — this is only the UI lock.
+  const [maxAiDifficulty, setMaxAiDifficulty] = useState(4);
+
   // Settings
   const [boardSize, setBoardSize] = useState(8);
   const [forceMajorityCapture, setForceMajorityCapture] = useState(true);
@@ -127,7 +136,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    const newSocket = io((process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'), {
+    const newSocket = io(API_URL, {
       auth: { token },
     });
     setSocket(newSocket);
@@ -157,7 +166,7 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
       const authToken = localStorage.getItem('token');
       if (!authToken) return;
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/friends`, {
+        const res = await axios.get(`${API_BASE}/friends`, {
           headers: { Authorization: `Bearer ${authToken}` },
         });
         setFriends(res.data);
@@ -167,6 +176,20 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     };
     fetchFriends();
     const friendsPollInterval = setInterval(fetchFriends, 5000);
+
+    const fetchMaxAiDifficulty = async () => {
+      const authToken = localStorage.getItem('token');
+      if (!authToken) return; // anonymous stays at the Free default above
+      try {
+        const res = await axios.get(`${API_BASE}/subscriptions/me`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        setMaxAiDifficulty(res.data.entitlements.maxAiDifficulty);
+      } catch {
+        // Stays at the Free default — safe (never over-grants access).
+      }
+    };
+    fetchMaxAiDifficulty();
 
     newSocket.on('challengeReceived', (data: { challengeId: string, fromUser: { id: number, username: string } }) => {
       setIncomingChallenge(data);
@@ -289,6 +312,10 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     // without this, the user would be stuck on "Connecting to spectate..." forever.
     newSocket.on('error', (data: { message: string }) => {
       if (roomIdToSpectate) setStatus(`Couldn't join as spectator: ${data.message}`);
+      // Backstop for the AI-difficulty plan gate (game.gateway.ts) — the button lock
+      // above should normally prevent this, but a stale/unfetched maxAiDifficulty
+      // shouldn't leave the user staring at a silently-ignored click.
+      else if (data.message?.includes('requires a higher plan')) alert(data.message);
     });
 
     newSocket.on('spectatorJoined', (data: { count: number }) => setSpectatorCount(data.count));
@@ -308,11 +335,20 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const inGame = board !== null;
+  useEffect(() => {
+    onInGameChange?.(inGame);
+  }, [inGame, onInGameChange]);
+
   const handleFindMatch = () => {
     socket?.emit('joinMatchmaking', { tournamentId: tournamentIdToJoin, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
   };
 
   const handlePlayAI = (difficulty: number) => {
+    if (difficulty > maxAiDifficulty) {
+      router.push('/membership');
+      return;
+    }
     socket?.emit('playVsAi', { difficulty, rules: { boardSize, forceMajorityCapture, kingMustCaptureWhenTied }, timeControl });
   };
 
@@ -506,15 +542,22 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
           <div className="text-center pt-2 text-sm text-gray-500 font-medium">OR</div>
 
           <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7].map(level => (
-              <button
-                key={level}
-                onClick={() => handlePlayAI(level)}
-                className={`w-full px-2 py-2 text-white rounded transition text-sm ${level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'}`}
-              >
-                AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
-              </button>
-            ))}
+            {[1, 2, 3, 4, 5, 6, 7].map(level => {
+              const locked = level > maxAiDifficulty;
+              return (
+                <button
+                  key={level}
+                  onClick={() => handlePlayAI(level)}
+                  title={locked ? 'Upgrade your plan to unlock this difficulty' : undefined}
+                  className={`w-full px-2 py-2 text-white rounded transition text-sm flex items-center justify-center gap-1 ${
+                    level > 4 ? 'bg-red-800 hover:bg-red-900 col-span-2' : 'bg-slate-700 hover:bg-slate-800'
+                  } ${locked ? 'opacity-60' : ''}`}
+                >
+                  {locked && <span aria-hidden>🔒</span>}
+                  AI Lvl {level} {level === 7 ? '(3500+ ELO)' : ''}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -567,9 +610,9 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
         <a href="/profile" className="text-sm text-blue-600 hover:underline">
           Manage Friends & Requests →
         </a>
-        <a href="/clubs" className="text-sm text-blue-600 hover:underline">
+        <Link href="/clubs" className="text-sm text-blue-600 hover:underline">
           Browse Clubs →
-        </a>
+        </Link>
       </div>
     );
   }
@@ -579,86 +622,34 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
   const autoFlip = myColor === PieceColor.DARK;
   const flipped = autoFlip !== manualFlip;
 
+  // The side drawn at the top of the board is the one sitting farthest from the viewer.
+  const topColor = flipped ? PieceColor.LIGHT : PieceColor.DARK;
+  const bottomColor = topColor === PieceColor.LIGHT ? PieceColor.DARK : PieceColor.LIGHT;
+  const playerLabel = (color: PieceColor) => {
+    if (myColor === color) return 'You';
+    if (myColor && opponent) return opponent.type === 'ai' ? `AI Level ${opponent.difficulty}` : opponent.username;
+    return color === PieceColor.LIGHT ? 'Light' : 'Dark';
+  };
+  const playerRow = (color: PieceColor) => (
+    <div className="w-full flex items-center justify-between gap-3">
+      <span className="flex items-center gap-2 font-semibold text-gray-800">
+        <span className={`inline-block w-4 h-4 rounded-full border ${color === PieceColor.LIGHT ? 'bg-slate-100 border-slate-400' : 'bg-slate-800 border-slate-900'}`} />
+        {playerLabel(color)}
+      </span>
+      {/* Server-authoritative clocks (game.gateway.ts) — display only. */}
+      <Timer initialTime={displayClocks[color]} isActive={currentTurn === color && !gameOver} />
+    </div>
+  );
+
   return (
-    <div className="flex flex-col md:flex-row justify-center py-10 gap-8 max-w-6xl mx-auto px-4">
+    <div className="flex flex-col lg:flex-row justify-center py-4 gap-6 max-w-6xl mx-auto px-4">
       {challengeBanner}
       {challengeNoticeBanner}
-      {/* Board Column. min-w-0 matters now that Board.tsx sizes itself off its own
-          measured width (see Board.tsx's ResizeObserver): a flex item's default
-          min-width is `auto` (its content's own intrinsic width), which would stop
-          this column from ever shrinking below whatever width the board's LAST
-          measurement asked for — exactly the runaway-growth/overflow bug a live
-          screenshot caught (the board demanding more room than this column's actual
-          share of a narrower page layout, like the home dashboard's 2-column grid,
-          pushing the Moves/Chat column out from beside it instead of the board
-          shrinking to fit). */}
-      <div className="flex flex-col items-center space-y-4 min-w-0">
-        <div className="w-full flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800">Game Room</h1>
-          <ConnectionStatus connected={connected} />
-        </div>
-        <div className="flex space-x-4 text-sm text-gray-500 font-medium">
-          <span>{spectatorCount} Spectator(s)</span>
-        </div>
-        <p className="text-md text-gray-600">{status}</p>
-        <p className="text-xl font-semibold text-blue-700">
-          {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : 'Waiting for opponent...')}
-        </p>
-
-        {opponentDisconnected && (
-          <div className="bg-orange-100 border border-orange-400 text-orange-800 px-4 py-2 rounded text-sm font-medium">
-            ⚠️ Opponent disconnected — game is still live, waiting for them to reconnect.
-          </div>
-        )}
-
-        <div className="flex items-center gap-3">
-          {/* Server-authoritative: seconds-remaining snapshot comes from the backend
-              on every move; the flag-fall timer that actually ends the game on
-              timeout also lives there (game.gateway.ts). These just display it. */}
-          <Timer initialTime={displayClocks[PieceColor.DARK]} isActive={currentTurn === PieceColor.DARK && !gameOver} />
-          <span className="text-xs text-gray-400">vs</span>
-          <Timer initialTime={displayClocks[PieceColor.LIGHT]} isActive={currentTurn === PieceColor.LIGHT && !gameOver} />
-        </div>
-
-        <div className="flex gap-4">
-          <button onClick={() => setManualFlip(f => !f)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded shadow-sm hover:bg-slate-200 text-xs font-semibold transition">
-            ⇅ Flip Board
-          </button>
-          {myColor && !gameOver && (
-            <>
-              <button onClick={handleOfferDraw} className="px-4 py-2 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-sm font-semibold transition">
-                Offer Draw
-              </button>
-              <button onClick={handleResign} className="px-4 py-2 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-sm font-semibold transition">
-                Resign
-              </button>
-            </>
-          )}
-          {/* Only appears once the game actually saved server-side (gameOver's payload
-              now carries the real id — see game.gateway.ts's handleGameOver). Before
-              this fix there was no way to reach the review board straight from here at
-              all, regardless of gameOver — a real reported gap, not a design choice. */}
-          {gameOver && finishedGameId != null && (
-            <button
-              onClick={() => router.push(`/analysis/${finishedGameId}`)}
-              className="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 text-sm font-semibold transition"
-            >
-              Review Game
-            </button>
-          )}
-        </div>
-
-        {drawOfferPending && (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded relative shadow-md">
-            <p className="font-bold">Draw Offered</p>
-            <p className="text-sm">Your opponent has offered a draw.</p>
-            <div className="mt-2 flex gap-2">
-              <button onClick={handleAcceptDraw} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
-              <button onClick={handleDeclineDraw} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
-            </div>
-          </div>
-        )}
-
+      {/* Board column: only the two clock rows sit above/below the board, so the
+          board can be sized to the screen height (Board.tsx) and stay fully visible.
+          min-w-0 lets the column shrink instead of the board forcing it wider. */}
+      <div className="flex flex-col items-center gap-2 min-w-0 flex-1">
+        {playerRow(topColor)}
         <Board
           board={board}
           myColor={myColor}
@@ -667,29 +658,80 @@ function GameBoardInner({ autoChallengeUserId, onAutoChallengeSent }: GameBoardP
           lastMove={lastMove}
           flipped={flipped}
           onMove={handleMove}
+          reserveBelowPx={72}
         />
-
-        <div className="w-full flex flex-col gap-1">
-          {/* captured[DARK] is what LIGHT has taken, and vice versa (see the
-              CapturedTray call sites' own labels) — material lead is simply the
-              value of what you've taken minus the value of what you've lost. Only
-              the side actually ahead gets a "+N" badge; CapturedTray itself hides it
-              when the value isn't positive. */}
-          <CapturedTray
-            captured={captured[PieceColor.DARK]}
-            label="Light captured"
-            advantage={materialValue(captured[PieceColor.DARK]) - materialValue(captured[PieceColor.LIGHT])}
-          />
-          <CapturedTray
-            captured={captured[PieceColor.LIGHT]}
-            label="Dark captured"
-            advantage={materialValue(captured[PieceColor.LIGHT]) - materialValue(captured[PieceColor.DARK])}
-          />
-        </div>
+        {playerRow(bottomColor)}
       </div>
 
-      {/* Side Column: moves + chat */}
-      <div className="w-full md:w-80 flex flex-col gap-4">
+      {/* Side column: game status and actions, captures, moves, chat */}
+      <div className="w-full lg:w-80 flex flex-col gap-4">
+        <div className="bg-white rounded-lg shadow border border-gray-200 p-4 flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <h1 className="text-lg font-bold text-gray-800">Game Room</h1>
+            <ConnectionStatus connected={connected} />
+          </div>
+          <p className="text-sm text-gray-500">{status} · {spectatorCount} spectator(s)</p>
+          <p className="text-lg font-semibold text-blue-700">
+            {!myColor ? (currentTurn === PieceColor.LIGHT ? "Light's turn" : "Dark's turn") : (currentTurn === myColor ? "It's your turn!" : 'Waiting for opponent...')}
+          </p>
+
+          {opponentDisconnected && (
+            <div className="bg-orange-100 border border-orange-400 text-orange-800 px-3 py-2 rounded text-sm font-medium">
+              ⚠️ Opponent disconnected — game is still live, waiting for them to reconnect.
+            </div>
+          )}
+
+          {drawOfferPending && (
+            <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-3 py-2 rounded">
+              <p className="font-bold text-sm">Your opponent has offered a draw.</p>
+              <div className="mt-2 flex gap-2">
+                <button onClick={handleAcceptDraw} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded text-sm">Accept</button>
+                <button onClick={handleDeclineDraw} className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-1 px-3 border border-gray-400 rounded shadow text-sm">Decline</button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setManualFlip(f => !f)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded shadow-sm hover:bg-slate-200 text-xs font-semibold transition">
+              ⇅ Flip Board
+            </button>
+            {myColor && !gameOver && (
+              <>
+                <button onClick={handleOfferDraw} className="px-3 py-1.5 bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300 text-xs font-semibold transition">
+                  Offer Draw
+                </button>
+                <button onClick={handleResign} className="px-3 py-1.5 bg-red-100 text-red-800 rounded shadow hover:bg-red-200 text-xs font-semibold transition">
+                  Resign
+                </button>
+              </>
+            )}
+            {/* Only once the game actually saved server-side (gameOver carries its id). */}
+            {gameOver && finishedGameId != null && (
+              <button
+                onClick={() => router.push(`/analysis/${finishedGameId}`)}
+                className="px-3 py-1.5 bg-green-600 text-white rounded shadow hover:bg-green-700 text-xs font-semibold transition"
+              >
+                Review Game
+              </button>
+            )}
+          </div>
+
+          {/* captured[DARK] is what LIGHT has taken, and vice versa; the "+N" badge
+              shows only for the side actually ahead in material. */}
+          <div className="flex flex-col gap-1">
+            <CapturedTray
+              captured={captured[PieceColor.DARK]}
+              label="Light captured"
+              advantage={materialValue(captured[PieceColor.DARK]) - materialValue(captured[PieceColor.LIGHT])}
+            />
+            <CapturedTray
+              captured={captured[PieceColor.LIGHT]}
+              label="Dark captured"
+              advantage={materialValue(captured[PieceColor.LIGHT]) - materialValue(captured[PieceColor.DARK])}
+            />
+          </div>
+        </div>
+
         <MoveList moves={moveHistory} boardSize={board.length} />
 
         <div className="flex flex-col bg-white rounded-lg shadow-xl border border-gray-200 h-72">

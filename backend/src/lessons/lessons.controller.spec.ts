@@ -20,7 +20,7 @@ describe('LessonsController', () => {
 
   it('passes an optional category query param through to the service', async () => {
     listAll.mockResolvedValue([{ slug: 'x' }]);
-    await controller.listAll('endgame' as any);
+    await controller.listAll('endgame');
     expect(listAll).toHaveBeenCalledWith('endgame');
   });
 

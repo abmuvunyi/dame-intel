@@ -1,9 +1,14 @@
 node_modules
 dist
+coverage
 .env
-.env.local
+.env.*
+!.env.example
 .git
 .gitignore
 *.log
-docker-compose.yml
+*.sqlite
 Dockerfile
+docker-compose*.yml
+test
+scripts

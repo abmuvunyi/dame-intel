@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { UsersService } from './users.service';
+import { UsersService, parseAdminUsernames } from './users.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from './user.entity';
 import { Repository } from 'typeorm';
@@ -201,5 +201,80 @@ describe('UsersService: home-dashboard features', () => {
       const recommended = await service.getRecommendedMatch(me.id, []);
       expect(recommended).toBeNull();
     });
+  });
+});
+
+// Phase 15: staff roles. Real in-memory sqlite — roles have to actually persist.
+describe('UsersService: staff roles (Phase 15)', () => {
+  let service: UsersService;
+  const originalEnv = process.env.ADMIN_USERNAMES;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      imports: [
+        TypeOrmModule.forRoot({ type: 'sqlite', database: ':memory:', entities: [User], synchronize: true }),
+        TypeOrmModule.forFeature([User]),
+      ],
+      providers: [UsersService],
+    }).compile();
+    service = module.get<UsersService>(UsersService);
+  });
+
+  afterEach(() => {
+    process.env.ADMIN_USERNAMES = originalEnv;
+  });
+
+  it('a brand-new user is a player with no staff roles or permissions', async () => {
+    const user = await service.create('alice', 'hash');
+    const fresh = await service.findOneById(user.id);
+    expect(service.getRoles(fresh)).toEqual([]);
+    expect(service.getPermissions(fresh)).toEqual([]);
+    expect(service.isAdmin(fresh)).toBe(false);
+  });
+
+  it('setRoles persists several roles, normalises them, and revokes existing sessions', async () => {
+    const user = await service.create('alice', 'hash');
+    await service.setRoles(user.id, ['organizer', 'MODERATOR', 'NOT_A_ROLE']);
+    const fresh = await service.findOneById(user.id);
+    expect(service.getRoles(fresh)).toEqual(['MODERATOR', 'ORGANIZER']);
+    expect(fresh!.tokenVersion).toBe(1);
+    expect(service.hasPermission(fresh, 'tournaments.manage')).toBe(true);
+    expect(service.hasPermission(fresh, 'roles.manage')).toBe(false);
+  });
+
+  it('setRoles with no actual change does not revoke sessions', async () => {
+    const user = await service.create('alice', 'hash');
+    await service.setRoles(user.id, ['ADMIN']);
+    await service.setRoles(user.id, ['ADMIN']);
+    expect((await service.findOneById(user.id))!.tokenVersion).toBe(1);
+  });
+
+  it('countAdmins counts only whole ADMIN entries', async () => {
+    const a = await service.create('a', 'h');
+    const b = await service.create('b', 'h');
+    await service.setRoles(a.id, ['ADMIN']);
+    await service.setRoles(b.id, ['MODERATOR', 'CONTENT_EDITOR']);
+    expect(await service.countAdmins()).toBe(1);
+  });
+
+  it('boot-time ADMIN_USERNAMES promotes listed users only, keeps their other roles, tolerates unknown names', async () => {
+    const alice = await service.create('alice', 'hash');
+    await service.setRoles(alice.id, ['ORGANIZER']);
+    await service.create('bob', 'hash');
+    process.env.ADMIN_USERNAMES = ' alice , ghost ,';
+    await service.onApplicationBootstrap();
+    expect(service.getRoles(await service.findOneByUsername('alice'))).toEqual(['ADMIN', 'ORGANIZER']);
+    expect(service.isAdmin(await service.findOneByUsername('bob'))).toBe(false);
+  });
+
+  it('a ban revokes existing sessions', async () => {
+    const user = await service.create('alice', 'hash');
+    await service.applyModeration(user.id, 'TEMP_BANNED', null, new Date(Date.now() + 86_400_000));
+    expect((await service.findOneById(user.id))!.tokenVersion).toBe(1);
+  });
+
+  it('parseAdminUsernames trims and drops empties', () => {
+    expect(parseAdminUsernames(' a, b ,,c ')).toEqual(['a', 'b', 'c']);
+    expect(parseAdminUsernames(undefined)).toEqual([]);
   });
 });

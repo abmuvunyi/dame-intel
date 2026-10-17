@@ -75,6 +75,6 @@ export class GameReview {
   @CreateDateColumn()
   createdAt: Date;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: Date, nullable: true }) // `Date` (not 'datetime') maps to datetime on sqlite AND timestamp on Postgres
   completedAt: Date | null;
 }

@@ -28,6 +28,10 @@ describe('AnticheatService', () => {
               const legal = engine.getLegalMoves();
               return legal.map(move => ({ move, evaluation: 0 }));
             },
+            // Phase 14: the service calls the non-blocking variant.
+            analyzePositionAsync(engine: DraughtsEngine) {
+              return Promise.resolve((this).analyzePosition(engine));
+            },
           },
         },
         { provide: getRepositoryToken(CheatFlag), useValue: { create: (x: any) => x, save: async (x: any) => x } },

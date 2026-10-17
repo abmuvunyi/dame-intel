@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CheatFlag } from './cheat-flag.entity';
@@ -9,6 +9,8 @@ import { UsersService } from '../users/users.service';
 import { HistoryService } from '../history/history.service';
 import { detectTimingAnomaly, MIN_SAMPLE_SIZE as MIN_TIMING_SAMPLES } from './move-timing-stats';
 import { CLASSIFICATION_THRESHOLDS } from '../game/review/move-classification';
+
+const logger = new Logger('AnticheatService');
 
 // --- Engine-correlation thresholds (Phase 12: "especially in complex/critical
 // positions rather than forced/obvious ones") ---
@@ -84,7 +86,7 @@ export class AnticheatService {
 
     for (const move of moves) {
       const currentTurn = engine.getCurrentTurn();
-      const evaluations = this.aiService.analyzePosition(engine, ANALYSIS_DEPTH);
+      const evaluations = await this.aiService.analyzePositionAsync(engine, ANALYSIS_DEPTH);
 
       if (evaluations.length > 1) {
         const spread = evaluations[0].evaluation - evaluations[evaluations.length - 1].evaluation;
@@ -156,7 +158,7 @@ export class AnticheatService {
   }
 
   private async flagUser(user: User, flagType: string, score: number, reason: string, gameId: number | null, sampleSize: number | null) {
-    console.warn(`[AntiCheat] Flagging user ${user.username} for review (${flagType}). Score: ${score}`);
+    logger.warn(`[AntiCheat] Flagging user ${user.username} for review (${flagType}). Score: ${score}`);
     const flag = this.cheatFlagRepository.create({
       user,
       flagType,

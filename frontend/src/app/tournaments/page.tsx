@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import DashboardShell from '@/components/DashboardShell';
+import { API_BASE } from '@/lib/api';
 
 export default function TournamentsList() {
   const [tournaments, setTournaments] = useState<any[]>([]);
@@ -12,7 +13,7 @@ export default function TournamentsList() {
   useEffect(() => {
     const fetchTournaments = async () => {
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tournaments`);
+        const res = await axios.get(`${API_BASE}/tournaments`);
         setTournaments(res.data);
       } catch (err) {
         console.error(err);

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import NotificationBell from './NotificationBell';
+import { API_BASE } from '@/lib/api';
 
 // chess.com-style persistent left icon sidebar, shared across every authenticated
 // dark-themed page — the single biggest structural change in matching chess.com's
@@ -40,11 +41,24 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Staff links appear only for the permissions a user actually has. Purely
+  // cosmetic — the backend's PermissionsGuard is what enforces access.
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [otherOpen, setOtherOpen] = useState(false);
   const otherRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setIsAuthenticated(!!localStorage.getItem('token'));
+    const token = localStorage.getItem('token');
+    // Browser-only storage can only be read after hydration (see app/page.tsx).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsAuthenticated(!!token);
+    if (!token) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(profile => { if (!cancelled) setPermissions(Array.isArray(profile?.permissions) ? profile.permissions : []); })
+      .catch(() => { /* non-critical: link simply stays hidden */ });
+    return () => { cancelled = true; };
   }, []);
 
   // Close the "Other" flyout on an outside click — same pattern NotificationBell
@@ -133,10 +147,22 @@ export default function DashboardShell({ children }: DashboardShellProps) {
 
         {isAuthenticated && (
           <div className="px-2 lg:px-3 flex flex-col gap-1 mt-auto pt-4 border-t border-slate-800">
-            <Link href="/membership" className={linkClass(pathname === '/membership')} title="Premium">
+            <Link href="/membership" className={linkClass(pathname === '/membership')} title="Membership">
               <span className="text-lg mx-auto lg:mx-0">💎</span>
-              <span className="hidden lg:inline">Premium</span>
+              <span className="hidden lg:inline">Membership</span>
             </Link>
+            {permissions.includes('moderation.review') && (
+              <Link href="/moderation" className={linkClass(pathname === '/moderation')} title="Moderation">
+                <span className="text-lg mx-auto lg:mx-0">🛡️</span>
+                <span className="hidden lg:inline">Moderation</span>
+              </Link>
+            )}
+            {(permissions.includes('users.read') || permissions.includes('audit.read')) && (
+              <Link href="/admin" className={linkClass(pathname === '/admin')} title="Admin">
+                <span className="text-lg mx-auto lg:mx-0">⚙️</span>
+                <span className="hidden lg:inline">Admin</span>
+              </Link>
+            )}
             <Link href="/profile" className={linkClass(pathname === '/profile')} title="Profile">
               <span className="text-lg mx-auto lg:mx-0">👤</span>
               <span className="hidden lg:inline">Profile</span>

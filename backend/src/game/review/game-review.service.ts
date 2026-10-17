@@ -21,6 +21,10 @@ const ANALYSIS_DEPTH = 4;
 // in a full game and to stay genuinely "a couple of moves", not a full continuation.
 const PREVIEW_LINE_ADDITIONAL_PLIES = 2;
 
+// A position as "side to move + board", normalized through the engine so two boards
+// compare equal however their piece objects were serialized.
+export const positionKey = (engine: DraughtsEngine) => `${engine.getCurrentTurn()}|${engine.getBoardString()}`;
+
 @Injectable()
 export class GameReviewService {
   constructor(
@@ -34,6 +38,28 @@ export class GameReviewService {
     return this.reviewRepository.findOne({ where: { gameId } });
   }
 
+  // Every position reached in a saved game (see positionKey), or null if the game
+  // doesn't exist. Lets analysis under a free review confirm a submitted position
+  // really belongs to the game the review was spent on.
+  async gamePositionKeys(gameId: number): Promise<Set<string> | null> {
+    const game = await this.historyService.getGame(gameId);
+    if (!game) return null;
+    let moves: Move[];
+    try {
+      moves = typeof game.moves === 'string' ? JSON.parse(game.moves) : game.moves;
+    } catch {
+      moves = [];
+    }
+    const rules = typeof game.rules === 'string' ? JSON.parse(game.rules) : (game.rules ?? {});
+    const engine = new DraughtsEngine(rules);
+    const keys = new Set<string>([positionKey(engine)]);
+    for (const move of Array.isArray(moves) ? moves : []) {
+      if (!engine.makeMove(move)) break;
+      keys.add(positionKey(engine));
+    }
+    return keys;
+  }
+
   // Builds a short engine-vs-engine continuation: `firstMove` played from
   // `startEngine`'s CURRENT position, then up to `additionalPlies` more moves of
   // each side's own best play in turn. Works on a clone (same pattern
@@ -41,7 +67,7 @@ export class GameReviewService {
   // engine/traversal is never disturbed. Stops early if the game ends mid-line or the
   // engine reports no legal moves — a real short forced sequence is a perfectly valid,
   // shorter-than-requested line, not an error.
-  private buildPreviewLine(startEngine: DraughtsEngine, firstMove: Move, additionalPlies: number): Move[] {
+  private async buildPreviewLine(startEngine: DraughtsEngine, firstMove: Move, additionalPlies: number): Promise<Move[]> {
     const walker = new DraughtsEngine(startEngine.getRules());
     walker.loadBoard(JSON.parse(JSON.stringify(startEngine.getBoard())), startEngine.getCurrentTurn());
     walker.makeMove(firstMove);
@@ -49,7 +75,7 @@ export class GameReviewService {
 
     for (let i = 0; i < additionalPlies; i++) {
       if (walker.isGameOver()) break;
-      const evals = this.aiService.analyzePosition(walker, ANALYSIS_DEPTH);
+      const evals = await this.aiService.analyzePositionAsync(walker, ANALYSIS_DEPTH);
       if (evals.length === 0) break;
       const next = evals[0].move;
       line.push(next);
@@ -76,7 +102,7 @@ export class GameReviewService {
 
     let moves: Move[];
     try {
-      moves = typeof game.moves === 'string' ? JSON.parse(game.moves as any) : game.moves;
+      moves = typeof game.moves === 'string' ? JSON.parse(game.moves) : game.moves;
     } catch {
       moves = [];
     }
@@ -97,7 +123,7 @@ export class GameReviewService {
     await this.reviewRepository.save(review);
 
     try {
-      const rules = typeof game.rules === 'string' ? JSON.parse(game.rules as any) : (game.rules ?? {});
+      const rules = typeof game.rules === 'string' ? JSON.parse(game.rules) : (game.rules ?? {});
       const engine = new DraughtsEngine(rules);
       const moveReviews: MoveReview[] = [];
       const yieldEventLoop = () => new Promise(resolve => setImmediate(resolve));
@@ -108,7 +134,7 @@ export class GameReviewService {
 
         // Evaluate every legal move from this position BEFORE playing the recorded
         // one, exactly like AnalysisController's live "Run Engine" query.
-        const evaluations = this.aiService.analyzePosition(engine, ANALYSIS_DEPTH);
+        const evaluations = await this.aiService.analyzePositionAsync(engine, ANALYSIS_DEPTH);
         if (evaluations.length > 0) {
           const bestEval = evaluations[0].evaluation;
           // Match against the engine's OWN legal-move list (same defense-in-depth
@@ -135,7 +161,7 @@ export class GameReviewService {
             // bare move itself. Nothing to show when the played move already WAS the
             // recommendation.
             const recommendedLine = classification !== 'BEST'
-              ? this.buildPreviewLine(engine, evaluations[0].move, PREVIEW_LINE_ADDITIONAL_PLIES)
+              ? await this.buildPreviewLine(engine, evaluations[0].move, PREVIEW_LINE_ADDITIONAL_PLIES)
               : null;
 
             // "How does this get punished" preview — only for a real mistake/blunder,
@@ -150,9 +176,9 @@ export class GameReviewService {
               afterMistake.loadBoard(JSON.parse(JSON.stringify(engine.getBoard())), engine.getCurrentTurn());
               afterMistake.makeMove(recordedMove);
               if (!afterMistake.isGameOver()) {
-                const opponentEvals = this.aiService.analyzePosition(afterMistake, ANALYSIS_DEPTH);
+                const opponentEvals = await this.aiService.analyzePositionAsync(afterMistake, ANALYSIS_DEPTH);
                 if (opponentEvals.length > 0) {
-                  punishmentLine = this.buildPreviewLine(afterMistake, opponentEvals[0].move, PREVIEW_LINE_ADDITIONAL_PLIES);
+                  punishmentLine = await this.buildPreviewLine(afterMistake, opponentEvals[0].move, PREVIEW_LINE_ADDITIONAL_PLIES);
                 }
               }
             }

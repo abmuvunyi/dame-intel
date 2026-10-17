@@ -1,15 +1,16 @@
-version: '3.8'
-
+# Local development infrastructure only (Postgres + Redis). Run the apps themselves
+# with `npm run start:dev` / `npm run dev`. For a full production-like stack, see
+# docker-compose.prod.yml.
 services:
   db:
-    image: postgres:15
+    image: postgres:16
     container_name: draughts_db
     environment:
       POSTGRES_USER: draughts_user
       POSTGRES_PASSWORD: draughts_password
       POSTGRES_DB: draughts_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -18,7 +19,7 @@ services:
     image: redis:7
     container_name: draughts_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
 
 volumes:

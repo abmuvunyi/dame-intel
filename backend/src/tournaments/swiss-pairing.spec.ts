@@ -142,7 +142,7 @@ describe('Swiss tournament walkthrough: 8 players, 3 rounds', () => {
     log.push('--- Final standings ---');
     finalStandings.forEach((p, i) => log.push(`  ${i + 1}. Player ${p.id}: ${p.score} pts`));
 
-    // eslint-disable-next-line no-console
+     
     console.log('\n' + log.join('\n'));
 
     // Player 8 beat everyone it's possible for it to face under "higher id always

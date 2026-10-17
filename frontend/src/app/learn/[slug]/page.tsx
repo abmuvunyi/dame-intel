@@ -5,8 +5,8 @@ import axios from 'axios';
 import DashboardShell from '@/components/DashboardShell';
 import Board from '@/components/game/Board';
 import { BoardState } from '@/lib/draughts';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface LessonDetail {
   slug: string;
@@ -35,7 +35,7 @@ export default function LessonDetailPage() {
 
   useEffect(() => {
     if (!slug) return;
-    axios.get<LessonDetail>(`${API_URL}/lessons/${slug}`)
+    axios.get<LessonDetail>(`${API_BASE}/lessons/${slug}`)
       .then(res => setLesson(res.data))
       .catch(() => setNotFound(true));
   }, [slug]);

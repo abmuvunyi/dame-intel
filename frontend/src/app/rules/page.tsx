@@ -66,7 +66,7 @@ export default function RulesPage() {
           Rules
         </h1>
         <p className="text-slate-400 mb-8">
-          Exactly how this app's rules engine works for each variant — matching what you'll actually see at the board, not general trivia.
+          Exactly how this app&apos;s rules engine works for each variant — matching what you&apos;ll actually see at the board, not general trivia.
         </p>
 
         <div className="flex flex-col gap-8">

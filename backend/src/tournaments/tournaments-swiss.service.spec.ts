@@ -178,7 +178,7 @@ describe('TournamentsService: Swiss lifecycle', () => {
       await service.startTournament(tournament.id);
 
       // Resolve every round-1 pairing.
-      let round1 = await service.getRoundPairings(tournament.id, 1);
+      const round1 = await service.getRoundPairings(tournament.id, 1);
       for (const p of round1) {
         await service.recordSwissPairingResult(tournament.id, p.player1Id, p.player2Id!, p.player1Id);
       }

@@ -35,7 +35,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'control-the-center',
     title: 'Control the Center',
-    category: 'opening' as LessonCategory,
+    category: 'opening',
     difficulty: 1,
     summary: 'Central pieces reach more of the board than pieces stuck on the edge.',
     body: [
@@ -49,7 +49,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'keep-your-king-row-intact',
     title: 'Keep Your King Row Intact Early',
-    category: 'opening' as LessonCategory,
+    category: 'opening',
     difficulty: 1,
     summary: "Your back row is what stops the opponent's men from promoting to kings.",
     body: [
@@ -63,7 +63,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'develop-toward-the-center',
     title: 'Develop Toward the Center, Not the Edge',
-    category: 'opening' as LessonCategory,
+    category: 'opening',
     difficulty: 1,
     summary: 'Edge-column pieces have fewer legal moves than pieces one or two squares in.',
     body: [
@@ -79,7 +79,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'force-favorable-trades',
     title: 'Force Favorable Trades When Ahead',
-    category: 'middlegame' as LessonCategory,
+    category: 'middlegame',
     difficulty: 2,
     summary: "If you're already up material, trading pieces (not just any pieces) usually helps you, not your opponent.",
     body: [
@@ -93,7 +93,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'captures-are-mandatory',
     title: 'Every Capture Is Mandatory — Calculate Before You Commit',
-    category: 'middlegame' as LessonCategory,
+    category: 'middlegame',
     difficulty: 2,
     summary: 'Neither side is allowed to decline a capture, which means a piece can be genuine bait.',
     body: [
@@ -107,7 +107,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'keep-your-pieces-mobile',
     title: 'Keep Your Pieces Mobile',
-    category: 'middlegame' as LessonCategory,
+    category: 'middlegame',
     difficulty: 2,
     summary: 'A piece with no safe square to move to can become a real liability.',
     body: [
@@ -123,7 +123,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'lone-king-cannot-force-a-win',
     title: 'A Lone King Cannot Force a Win Alone',
-    category: 'endgame' as LessonCategory,
+    category: 'endgame',
     difficulty: 1,
     summary: "One king against one king, with nothing else on the board, is always a draw.",
     body: [
@@ -137,7 +137,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'two-kings-vs-one-king',
     title: 'Two Kings vs One King: Cut Off the Escape Squares',
-    category: 'endgame' as LessonCategory,
+    category: 'endgame',
     difficulty: 2,
     summary: 'Two kings can force a win against a lone king by working together to shrink its space.',
     body: [
@@ -152,7 +152,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'the-double-corner-advantage',
     title: 'The Double Corner Advantage',
-    category: 'endgame' as LessonCategory,
+    category: 'endgame',
     difficulty: 2,
     summary: 'Pieces near the double corner tend to have more safe waiting moves than pieces near the single corner.',
     body: [
@@ -168,7 +168,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'spot-forced-multi-jumps',
     title: 'Spot Forced Multi-Jumps Before You Sacrifice',
-    category: 'tactics' as LessonCategory,
+    category: 'tactics',
     difficulty: 2,
     summary: 'A single capture can force a whole chain — read the position past the first jump.',
     body: [
@@ -182,7 +182,7 @@ const LESSON_CONTENT: Array<Omit<Lesson, 'id'>> = [
   {
     slug: 'the-value-of-tempo',
     title: 'The Value of Tempo',
-    category: 'tactics' as LessonCategory,
+    category: 'tactics',
     difficulty: 3,
     summary: "Sometimes the exact move doesn't matter as much as making your opponent move first.",
     body: [

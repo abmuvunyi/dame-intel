@@ -28,6 +28,12 @@ export class Tournament {
   @Column({ default: 0 })
   currentRound: number; // Swiss only
 
+  // Phase 15: who created it. Staff organizers can manage every tournament; a Pro
+  // player (hostTournaments entitlement) can manage only the ones they created.
+  // null for tournaments created before Phase 15 or by the system.
+  @Column({ type: 'int', nullable: true })
+  createdByUserId: number | null;
+
   // --- Organizer-configurable settings (Phase 8b) ---
   // Set once at creation (createTournament) and immutable afterwards — same
   // treatment as totalRounds above. All default to values that reproduce Phase 8's

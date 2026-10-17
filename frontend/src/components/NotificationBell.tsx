@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const POLL_INTERVAL_MS = 30_000;
 
 interface Notification {
@@ -44,7 +44,7 @@ export default function NotificationBell({ variant = 'light' }: NotificationBell
 
   const fetchUnreadCount = async (t: string) => {
     try {
-      const res = await axios.get(`${API_URL}/notifications/unread-count`, authHeaders(t));
+      const res = await axios.get(`${API_BASE}/notifications/unread-count`, authHeaders(t));
       setUnreadCount(res.data.count);
     } catch {
       // Non-fatal — the bell just shows no badge until the next successful poll.
@@ -75,7 +75,7 @@ export default function NotificationBell({ variant = 'light' }: NotificationBell
     if (open) return; // toggling closed — no fetch needed
     setLoading(true);
     try {
-      const res = await axios.get(`${API_URL}/notifications`, authHeaders(token));
+      const res = await axios.get(`${API_BASE}/notifications`, authHeaders(token));
       setNotifications(res.data);
     } catch {
       // Non-fatal — dropdown just stays empty.
@@ -89,7 +89,7 @@ export default function NotificationBell({ variant = 'light' }: NotificationBell
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     setUnreadCount((prev) => Math.max(0, prev - 1));
     try {
-      await axios.post(`${API_URL}/notifications/${id}/read`, null, authHeaders(token));
+      await axios.post(`${API_BASE}/notifications/${id}/read`, null, authHeaders(token));
     } catch {
       // Best-effort — a failed mark-read just means it'll show unread again next fetch.
     }
@@ -100,7 +100,7 @@ export default function NotificationBell({ variant = 'light' }: NotificationBell
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadCount(0);
     try {
-      await axios.post(`${API_URL}/notifications/read-all`, null, authHeaders(token));
+      await axios.post(`${API_BASE}/notifications/read-all`, null, authHeaders(token));
     } catch {
       // Best-effort, same as markRead above.
     }

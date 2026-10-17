@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ClubsController } from './clubs.controller';
 import { ClubsService } from './clubs.service';
 import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 
 describe('ClubsController', () => {
   let controller: ClubsController;
@@ -25,6 +26,7 @@ describe('ClubsController', () => {
       providers: [
         { provide: ClubsService, useValue: service },
         { provide: JwtService, useValue: {} },
+        { provide: UsersService, useValue: {} },
       ],
     }).compile();
 

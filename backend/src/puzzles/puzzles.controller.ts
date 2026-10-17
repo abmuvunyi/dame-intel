@@ -1,11 +1,14 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Optional, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { PuzzlesService } from './puzzles.service';
 import { PuzzleRushService } from './puzzle-rush.service';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { jwtConstants } from '../auth/constants';
+import { authenticateToken, extractBearerToken } from '../auth/auth.guard';
+import { PermissionsGuard, RequirePermissions } from '../access/permissions.guard';
+import { PERMISSIONS } from '../access/roles';
+import { AuditService } from '../audit/audit.service';
 import { UsersService } from '../users/users.service';
 import type { Move } from '../game/engine/engine.service';
 
@@ -17,6 +20,7 @@ export class PuzzlesController {
     private readonly generatorService: PuzzleGeneratorService,
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   // Puzzle solving is open to anonymous play, same as vs-AI games — but attempts from
@@ -24,10 +28,11 @@ export class PuzzlesController {
   // mirrors game.gateway.ts's handleConnection: verify a bearer token if present,
   // proceed as anonymous if it's missing or invalid, never throw either way.
   private async optionalUserId(req: Request): Promise<number | null> {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = extractBearerToken(req);
     if (!token) return null;
     try {
-      const payload = await this.jwtService.verifyAsync(token, { secret: jwtConstants.secret });
+      // Phase 15: same checks as AuthGuard (banned / revoked sessions count as anonymous).
+      const { payload } = await authenticateToken(token, this.jwtService, this.usersService);
       return payload.sub;
     } catch {
       return null;
@@ -101,46 +106,58 @@ export class PuzzlesController {
     return this.rushService.getSession(sessionId);
   }
 
-  // --- Admin / review flow ---
-  // No admin-role system exists in this codebase yet (User has no isAdmin flag) — these
-  // endpoints just require being logged in, same bar as the rest of the app's
-  // authenticated actions. A real admin gate is future work, not invented here as a
-  // side effect of this phase.
+  // --- Content management (review flow) ---
+  // Phase 15: requires the puzzles.manage permission (CONTENT_EDITOR or ADMIN role).
+  // State-changing actions are recorded in the audit trail.
 
   @Get('admin/pending')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
   async listPending() {
     return this.puzzlesService.listPending();
   }
 
   @Post('admin/:id/approve')
-  @UseGuards(AuthGuard)
-  async approvePuzzle(@Param('id', ParseIntPipe) id: number) {
-    return this.puzzlesService.setStatus(id, 'published');
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
+  async approvePuzzle(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    const result = await this.puzzlesService.setStatus(id, 'published');
+    await this.audit?.record({ action: 'puzzle.approved', actorUserId: req.user.sub, targetType: 'puzzle', targetId: id, req });
+    return result;
   }
 
-  // Phase 13: marks a puzzle premium-only (or reverts it) — same "logged in is
-  // enough" admin bar as everything else in this section.
+  // Phase 13: marks a puzzle premium-only (or reverts it).
   @Post('admin/:id/set-premium')
-  @UseGuards(AuthGuard)
-  async setPuzzlePremium(@Param('id', ParseIntPipe) id: number, @Body() body: { isPremium: boolean }) {
-    return this.puzzlesService.setPremium(id, !!body.isPremium);
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
+  async setPuzzlePremium(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: { isPremium: boolean }) {
+    const result = await this.puzzlesService.setPremium(id, !!body.isPremium);
+    await this.audit?.record({
+      action: 'puzzle.premium_changed', actorUserId: req.user.sub, targetType: 'puzzle', targetId: id,
+      details: { isPremium: !!body.isPremium }, req,
+    });
+    return result;
   }
 
   @Post('admin/:id/reject')
-  @UseGuards(AuthGuard)
-  async rejectPuzzle(@Param('id', ParseIntPipe) id: number) {
-    return this.puzzlesService.setStatus(id, 'rejected');
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
+  async rejectPuzzle(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    const result = await this.puzzlesService.setStatus(id, 'rejected');
+    await this.audit?.record({ action: 'puzzle.rejected', actorUserId: req.user.sub, targetType: 'puzzle', targetId: id, req });
+    return result;
   }
 
   @Post('admin/generate/:gameId')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
   async generateFromGame(@Param('gameId', ParseIntPipe) gameId: number) {
     return this.generatorService.scanGame(gameId);
   }
 
   @Post('admin/generate-recent')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.PUZZLES_MANAGE)
   async generateFromRecentGames(@Query('limit') limit?: string) {
     return this.generatorService.scanRecentGames(limit ? parseInt(limit, 10) : undefined);
   }

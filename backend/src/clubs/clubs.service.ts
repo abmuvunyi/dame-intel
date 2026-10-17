@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Club } from './club.entity';
@@ -24,6 +24,15 @@ export class ClubsService {
     if (!name || !name.trim()) throw new BadRequestException('Club name is required');
     const creator = await this.usersService.findOneById(userId);
     if (!creator) throw new BadRequestException('Invalid user');
+
+    // Phase 15: how many clubs a player may create depends on their plan.
+    const limit = this.usersService.accessFor(creator).entitlements.maxClubsOwned;
+    const owned = await this.clubRepository.count({ where: { createdBy: { id: userId } } });
+    if (owned >= limit) {
+      throw new ForbiddenException(
+        `Your plan allows creating ${limit} club${limit === 1 ? '' : 's'}. Upgrade to create more.`,
+      );
+    }
 
     const club = await this.clubRepository.save(
       this.clubRepository.create({ name: name.trim(), description: description?.trim() ?? '', createdBy: creator }),

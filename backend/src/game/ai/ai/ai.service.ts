@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DraughtsEngine, PieceColor, PieceType, Move, BoardState } from '../../engine/engine.service';
+import { EnginePriority, getEngineWorkerPool } from './engine-worker-pool';
 
 const DIAGONAL_NEIGHBOR_OFFSETS = [
   { dr: -1, dc: -1 }, { dr: -1, dc: 1 },
@@ -182,6 +183,45 @@ export class AiService {
   // purpose — a caller asking for a specific depth gets a complete answer at that
   // depth, not a best-effort one (only getBestMove's own internal iteration is
   // time-boxed; see below).
+  // Phase 14: non-blocking variants. In production (compiled JS) the search runs on a
+  // worker thread (engine-worker-pool.ts) so it never freezes other players' games;
+  // in tests (ts-jest) or with AI_WORKERS=0 they run the synchronous method inline.
+  // Every server-side caller uses these; the synchronous methods remain for the
+  // worker itself and for tests.
+  public async getBestMoveAsync(
+    engine: DraughtsEngine,
+    difficulty: number,
+    priority: EnginePriority = 'interactive',
+  ): Promise<Move | null> {
+    const pool = getEngineWorkerPool();
+    if (!pool) return this.getBestMove(engine, difficulty);
+    return pool.run<Move | null>({
+      op: 'bestMove',
+      rules: engine.getRules(),
+      board: engine.getBoard(),
+      turn: engine.getCurrentTurn(),
+      difficulty,
+    }, priority);
+  }
+
+  // `priority`: 'interactive' when a person is waiting on the answer (the /analysis
+  // endpoint); 'background' for post-game review, anti-cheat and puzzle generation.
+  public async analyzePositionAsync(
+    engine: DraughtsEngine,
+    depth: number,
+    priority: EnginePriority = 'background',
+  ): Promise<{ move: Move, evaluation: number }[]> {
+    const pool = getEngineWorkerPool();
+    if (!pool) return this.analyzePosition(engine, depth);
+    return pool.run<{ move: Move, evaluation: number }[]>({
+      op: 'analyze',
+      rules: engine.getRules(),
+      board: engine.getBoard(),
+      turn: engine.getCurrentTurn(),
+      depth,
+    }, priority);
+  }
+
   public analyzePosition(engine: DraughtsEngine, depth: number): { move: Move, evaluation: number }[] {
     this.transpositionTable = new Map();
     this.killerMoves = new Map();

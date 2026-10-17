@@ -4,8 +4,8 @@ import DashboardShell from "@/components/DashboardShell";
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
+import { API_BASE } from '@/lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface Profile {
   id: number;
@@ -87,27 +87,32 @@ export default function Home() {
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [autoChallengeUserId, setAutoChallengeUserId] = useState<number | null>(null);
+  // While a game is on screen the dashboard cards are hidden so the board can use the room.
+  const [inGame, setInGame] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     const token = localStorage.getItem('token');
+    // Browser-only storage can only be read after hydration, so this one synchronous
+    // setState in an effect is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAuthenticated(!!token);
     if (!token) return;
 
-    axios.get<Profile>(`${API_URL}/auth/profile`, authHeaders(token))
+    axios.get<Profile>(`${API_BASE}/auth/profile`, authHeaders(token))
       .then((res) => setProfile(res.data))
       .catch(() => { localStorage.removeItem('token'); setIsAuthenticated(false); });
 
-    axios.get<RankInfo>(`${API_URL}/users/rank`, authHeaders(token)).then((res) => setRankInfo(res.data)).catch(() => {});
-    axios.get<RecommendedMatch | null>(`${API_URL}/users/recommended-match`, authHeaders(token)).then((res) => setRecommendedMatch(res.data)).catch(() => {});
-    axios.get<RecentGame[]>(`${API_URL}/history/my-games`, authHeaders(token)).then((res) => setRecentGames(res.data.slice(0, 5))).catch(() => {});
-    axios.get<Friend[]>(`${API_URL}/friends`, authHeaders(token)).then((res) => setFriends(res.data)).catch(() => {});
+    axios.get<RankInfo>(`${API_BASE}/users/rank`, authHeaders(token)).then((res) => setRankInfo(res.data)).catch(() => {});
+    axios.get<RecommendedMatch | null>(`${API_BASE}/users/recommended-match`, authHeaders(token)).then((res) => setRecommendedMatch(res.data)).catch(() => {});
+    axios.get<RecentGame[]>(`${API_BASE}/history/my-games`, authHeaders(token)).then((res) => setRecentGames(res.data.slice(0, 5))).catch(() => {});
+    axios.get<Friend[]>(`${API_BASE}/friends`, authHeaders(token)).then((res) => setFriends(res.data)).catch(() => {});
   }, []);
 
   // Daily puzzle is free for everyone regardless of login state — fetched
   // unconditionally, matching /puzzles/daily's own no-auth-required design.
   useEffect(() => {
-    axios.get<DailyPuzzle | null>(`${API_URL}/puzzles/daily`).then((res) => setDailyPuzzle(res.data)).catch(() => {});
+    axios.get<DailyPuzzle | null>(`${API_BASE}/puzzles/daily`).then((res) => setDailyPuzzle(res.data)).catch(() => {});
   }, []);
 
   const handleChallengeRecommended = useCallback(() => {
@@ -152,10 +157,10 @@ export default function Home() {
             reason it does inside GameBoard.tsx itself: a grid/flex item's default
             min-width is its content's own intrinsic size, which would otherwise stop
             this column from ever shrinking down to what's actually available. */}
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
+        <div className={`grid grid-cols-1 gap-6 items-start ${inGame ? '' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
           <div className="min-w-0 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-800">
             <div className="p-4 sm:p-6">
-              <GameBoard autoChallengeUserId={autoChallengeUserId} onAutoChallengeSent={() => setAutoChallengeUserId(null)} />
+              <GameBoard autoChallengeUserId={autoChallengeUserId} onAutoChallengeSent={() => setAutoChallengeUserId(null)} onInGameChange={setInGame} />
             </div>
           </div>
 
@@ -166,7 +171,7 @@ export default function Home() {
               free/unauthenticated by design, see the fetch above); every other card
               below now follows the same "always show the card, vary its content"
               rule that one already modeled. */}
-          <div className="flex flex-col gap-5">
+          <div className={`flex flex-col gap-5 ${inGame ? 'hidden' : ''}`}>
             <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 p-5">
               <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wide mb-3">Recommended Match</h2>
               {!isAuthenticated ? (
